@@ -1,4 +1,4 @@
-package eu.torqa.artiest.spike
+package be.thalos.artiest.spike
 
 import android.app.ActivityManager
 import android.content.Context

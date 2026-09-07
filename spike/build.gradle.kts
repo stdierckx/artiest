@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "eu.torqa.artiest.spike"
+    namespace = "be.thalos.artiest.spike"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "eu.torqa.artiest.spike"
+        applicationId = "be.thalos.artiest.spike"
         // API 29 is the floor for front-buffered rendering, so it is the floor
         // for the whole project.
         minSdk = 29

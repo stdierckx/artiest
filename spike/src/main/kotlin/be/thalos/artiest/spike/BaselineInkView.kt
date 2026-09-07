@@ -1,4 +1,4 @@
-package eu.torqa.artiest.spike
+package be.thalos.artiest.spike
 
 import android.content.Context
 import android.graphics.Canvas

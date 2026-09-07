@@ -216,7 +216,7 @@ artiest/
 ├── docs/analysis.html          architecture + phased plan
 ├── gradle/libs.versions.toml   pinned versions
 └── spike/                      Phase 0 harness (throwaway)
-    └── src/main/kotlin/eu/torqa/artiest/spike/
+    └── src/main/kotlin/be/thalos/artiest/spike/
         ├── PenSample.kt        MotionEvent → normalised sample
         ├── PenStats.kt         rates, ranges, pressure quantisation
         ├── PenCapture.kt       shared entry point for both ink paths
