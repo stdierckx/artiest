@@ -3,6 +3,7 @@ package be.thalos.artiest.spike
 import android.os.Build
 import android.os.Bundle
 import android.view.Display
+import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -13,8 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -26,10 +29,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -43,7 +49,7 @@ import kotlinx.coroutines.delay
  * Phase 0 harness. Three screens, one job each:
  *
  *  - Pen      what the digitizer actually reports
- *  - Latency  A/B between the baseline and front-buffered paths
+ *  - Latency  A/B across the three render paths
  *  - Device   SoC, GPU and display modes, then export it all
  *
  * See README.md for how to run the measurement.
@@ -133,7 +139,7 @@ private fun Harness(
         }
         when (tab) {
             0 -> PenScreen(capture)
-            1 -> LatencyScreen(capture)
+            1 -> LatencyScreen(capture, refreshHzNow)
             else -> DeviceScreen(report, capture, refreshHzNow, onExport)
         }
     }
@@ -167,54 +173,151 @@ private fun PenScreen(capture: PenCapture) {
             Button(onClick = { capture.stats.reset() }) { Text("Reset stats") }
         }
         AndroidView(
-            factory = { ctx -> BaselineInkView(ctx).apply { this.capture = capture } },
+            factory = { ctx ->
+                BaselineInkView(ctx).apply {
+                    this.capture = capture
+                    // The cursor is genuinely useful here — this tab is about
+                    // watching what the digitizer reports — so this screen keeps
+                    // the instruments the Latency tab now judges without.
+                    this.videoInstruments = true
+                }
+            },
             modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp),
         )
     }
 }
 
 /**
- * Film this screen at 240 fps and count frames between the pen moving and the
- * ink following. Each frame is 4.17 ms. Run all four toggle combinations.
+ * The A/B. Three arms, one chip each, and the chips that follow them change
+ * what an arm does rather than which one is mounted.
+ *
+ * The protocol matters as much as the code: clear before every judged stroke,
+ * alternate A-B-A rather than judging each arm once in the order you toggled
+ * them, draw the same short stroke each time, and check on the Device tab that
+ * the refresh rate is still 90 Hz — the peak_refresh_rate override is external
+ * state that lapses silently, and one arm judged at 60 Hz voids the comparison.
+ * Judge with Marks off and Predict off, then film at 240 fps with it on.
  */
 @Composable
-private fun LatencyScreen(capture: PenCapture) {
-    var frontBuffered by remember { mutableStateOf(true) }
-    var prediction by remember { mutableStateOf(true) }
-    var unbuffered by remember { mutableStateOf(true) }
+private fun LatencyScreen(capture: PenCapture, refreshHzNow: () -> Float) {
+    var arm by remember { mutableStateOf(Arm.GRAPHICS_CORE) }
+    // Off by default. The three arms implement prediction incompatibly — the
+    // baseline has no predictor at all — so leaving it on would make the first
+    // thing a judge sees a comparison of three prediction behaviours rather
+    // than of three render paths. Prediction is W11's question, and it already
+    // lost once on this hardware.
+    var prediction by remember { mutableStateOf(false) }
+    // Read from the capture rather than repeating its default: two independent
+    // literals drift, and a chip that displays the opposite of what dispatch is
+    // actually doing would quietly invalidate the toggle it exists to measure.
+    var unbuffered by remember { mutableStateOf(capture.unbufferedDispatch) }
+    var frameRateVote by remember { mutableStateOf(true) }
+    var fit by remember { mutableStateOf(false) }
+    var marks by remember { mutableStateOf(false) }
+    var mounted by remember { mutableStateOf<View?>(null) }
+
+    // Shown on this tab, not just the Device tab, because the 90 Hz override is
+    // external state that lapses on its own and `settings get` keeps reporting
+    // 90.0 after the display has already dropped back to 60. A judge who cannot
+    // see the live rate can compare two arms measured at different refresh rates
+    // and never know. Polled, not cached, for the same reason.
+    var liveHz by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            liveHz = refreshHzNow()
+            delay(500)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
+        // Scrollable because the row now carries nine controls and a clipped
+        // chip is one nobody remembers to check.
         Row(
-            Modifier.fillMaxWidth().padding(8.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FilterChip(frontBuffered, { frontBuffered = !frontBuffered }, { Text("Front buffer") })
+            // Leading, so it is the first thing read on the row the judging
+            // happens on. Red below 90 because a lapsed override does not
+            // announce itself and a run at 60 Hz is not comparable with one at 90.
+            Text(
+                text = "%.0f Hz".format(liveHz),
+                color = if (liveHz >= 89f) Color.Unspecified else Color.Red,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp,
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            for (a in Arm.values()) {
+                FilterChip(arm == a, { arm = a }, { Text(a.label) })
+            }
             FilterChip(prediction, { prediction = !prediction }, { Text("Predict") })
             FilterChip(unbuffered, {
                 unbuffered = !unbuffered
                 capture.unbufferedDispatch = unbuffered
             }, { Text("Unbuffered") })
+            FilterChip(frameRateVote, { frameRateVote = !frameRateVote }, { Text("1000 fps") })
+            FilterChip(fit, { fit = !fit }, { Text("Fit") })
+            FilterChip(marks, { marks = !marks }, { Text("Marks") })
+            AssistChip({ clearInk(mounted) }, { Text("Clear") })
+            AssistChip({ capture.stats.reset() }, { Text("Reset stats") })
         }
-        // AndroidView's factory runs once, so the toggle needs an explicit key
+        // AndroidView's factory runs once, so the selector needs an explicit key
         // to force a fresh surface instead of silently keeping the old one.
-        key(frontBuffered) {
+        key(arm) {
             AndroidView(
                 factory = { ctx ->
-                    if (frontBuffered) {
-                        LowLatencyInkView(ctx).apply {
+                    when (arm) {
+                        Arm.BASELINE -> BaselineInkView(ctx).apply { this.capture = capture }
+                        Arm.GRAPHICS_CORE -> LowLatencyInkView(ctx).apply {
                             this.capture = capture
                             this.predictionEnabled = prediction
                         }
-                    } else {
-                        BaselineInkView(ctx).apply { this.capture = capture }
+                        Arm.DIRECT_SURFACE -> DirectSurfaceInkView(ctx).apply {
+                            this.capture = capture
+                            this.predictionEnabled = prediction
+                            this.frameRateVote = frameRateVote
+                        }
                     }
                 },
                 update = { view ->
-                    if (view is LowLatencyInkView) view.predictionEnabled = prediction
+                    mounted = view
+                    when (view) {
+                        is BaselineInkView -> view.videoInstruments = marks
+                        is LowLatencyInkView -> {
+                            view.predictionEnabled = prediction
+                            view.videoInstruments = marks
+                        }
+                        is DirectSurfaceInkView -> {
+                            view.predictionEnabled = prediction
+                            view.videoInstruments = marks
+                            view.frameRateVote = frameRateVote
+                            view.fitToView = fit
+                        }
+                    }
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
         }
+    }
+}
+
+/** The three render paths under test, in the order they were built. */
+private enum class Arm(val label: String) {
+    BASELINE("Baseline"),
+    GRAPHICS_CORE("Graphics-core"),
+    DIRECT_SURFACE("DirectSurface"),
+}
+
+/**
+ * Every arm has had a clear() since Phase 0 and nothing ever called one. It is
+ * needed now: the baseline redraws all the ink it holds on every frame, so an
+ * arm judged on a canvas that already has a minute of scribble on it is judged
+ * on a handicap that has nothing to do with its render path.
+ */
+private fun clearInk(view: View?) {
+    when (view) {
+        is BaselineInkView -> view.clear()
+        is LowLatencyInkView -> view.clear()
+        is DirectSurfaceInkView -> view.clear()
     }
 }
 

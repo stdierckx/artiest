@@ -38,6 +38,14 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
     /** Toggle to measure what prediction is actually worth on this hardware. */
     var predictionEnabled: Boolean = true
 
+    /**
+     * The same switch the other two arms carry, so a judged run has the same
+     * things on screen everywhere. Note the counter means something different
+     * here: this arm can only draw it on commit, so it ticks once per stroke
+     * rather than once per presented frame.
+     */
+    var videoInstruments: Boolean = false
+
     private val committed = ArrayList<Segment>(4096)
     private val strokePaint = InkPaints.stroke()
     private val counterPaint = InkPaints.counter()
@@ -84,7 +92,7 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
             params.filterNotTo(committed) { it.predicted }
             for (s in committed) drawSegment(canvas, s)
             frames++
-            InkPaints.drawFrameCounter(canvas, frames, counterPaint)
+            if (videoInstruments) InkPaints.drawFrameCounter(canvas, frames, counterPaint)
         }
     }
 

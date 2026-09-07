@@ -22,6 +22,19 @@ class BaselineInkView(context: Context) : View(context) {
 
     var capture: PenCapture? = null
 
+    /**
+     * The red cursor and the frame counter are instruments for the 240 fps
+     * camera, and only two of the three arms can draw them at all — the
+     * front-buffered layer accumulates, so it can render neither a transient
+     * cursor nor a per-frame count. They are therefore a shared switch, off
+     * while the arms are being judged by eye and on only for filming.
+     */
+    var videoInstruments: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val path = Path()
     private val strokePaint = InkPaints.stroke().apply { strokeWidth = 6f }
     private val cursorPaint = InkPaints.cursor()
@@ -69,8 +82,10 @@ class BaselineInkView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawPath(path, strokePaint)
-        if (cursorX >= 0f) canvas.drawCircle(cursorX, cursorY, 18f, cursorPaint)
         frames++
-        InkPaints.drawFrameCounter(canvas, frames, counterPaint)
+        if (videoInstruments) {
+            if (cursorX >= 0f) canvas.drawCircle(cursorX, cursorY, 18f, cursorPaint)
+            InkPaints.drawFrameCounter(canvas, frames, counterPaint)
+        }
     }
 }
