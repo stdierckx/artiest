@@ -337,8 +337,16 @@ misdiagnosed as latency.
 and resamples at `spacing` (1/8 diameter), emitting `Dab(x, y, radius)` into a
 reusable list while accumulating `Bounds`. A fast stroke leaves tens of pixels
 between samples, so this stage is not optional even at 320 Hz. Budget: **under
-0.31 ms per event, zero allocation** from `onTouchEvent` to
-`renderFrontBufferedLayer`. `DabBatch` comes from a preallocated ring
+0.31 ms per event, and one immutable `PenSample` per digitizer sample and
+nothing else** from `onTouchEvent` to `renderFrontBufferedLayer`; the verdict on
+that one allocation is deferred to W9's allocation trace (~56 B a sample, so
+~18-21 KB/s at the measured rate). The earlier wording said "zero allocation",
+which the shipped input path cannot meet and should not: pooling `PenSample` is
+**off the table**, because `TraceRecorder` retains the samples it is handed and
+a recorder holding pooled instances records aliases that the next event
+overwrites. Everything else on that path is allocation-free — one scratch
+`ArrayList`, three preallocated gesture arrays, an `Int` decision mask, index
+loops on every emit path. `DabBatch` comes from a preallocated ring
 (`DabBatchPool`); `renderFrontBufferedLayer` is async with no completion signal,
 so the slot count is **validated against observed render-thread lag** in W10's
 allocation trace, not assumed.
@@ -441,6 +449,20 @@ Rejection is by tool type and by stroke exclusivity, not by hover height, becaus
 `AXIS_DISTANCE` is dead. `InputRouter` keeps **strict mutual exclusion**: while a
 pen stroke is live, finger pointers are dropped entirely; while a gesture is
 live, a pen `ACTION_DOWN` is ignored until all fingers lift.
+
+**A gesture takes two fingers, and single-finger pan therefore does not exist.**
+W4 shipped this as a rule inside `StrokeExclusivity`, not as a `GestureController`
+preference, and the difference matters. With one finger opening a gesture, a palm
+that lands *before* the pen — the ordinary order as a hand is lowered toward the
+tablet — put the machine in `GESTURE`, and a live gesture drops every pen contact
+for its whole lifetime, including contacts that begin and end inside it. The pen
+then drew nothing until the artist lifted the *hand*, a recovery nobody performs
+because nobody knows they have to. Fixing it downstream in W12 would have stopped
+the canvas moving and left the lockout exactly where it was, since it fires
+whether or not anything acts on `GestureBegin`. So: one finger is `DISOWNED` and
+emits nothing; the second finger opens the gesture and promotes the first into
+it. If a one-finger pan is ever wanted, it cannot be added downstream — this line
+has to change, and the pen goes dead under a resting hand again.
 
 The transform argument for this is now weaker — the canvas *can* move under the
 pen safely. The palm argument is not: a palm landing mid-stroke would otherwise

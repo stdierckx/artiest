@@ -1,0 +1,29 @@
+# The frozen v1 fixture. Hand-authored, and deliberately not a recording.
+#
+# A pen stroke with a palm landing halfway through, a barrel button pressed
+# mid-batch, the pen lifting with the palm still down, and a cancel clearing
+# what was left. Every column of the grammar appears at least once.
+#
+# DO NOT RE-RECORD THIS FILE. When the format goes to v2, this test is what
+# forces a migration to be written: a re-recorded stroke is a different stroke,
+# so re-recording would rebaseline every golden that compares against it while
+# looking like a successful format upgrade.
+artiest-trace 1
+t0 84213770166000
+xform 1.0 0.0 0.0 0.0
+meta device=DTH-A116 android=34 refreshHz=60.0 unbuffered=false
+# e   seq action       pointerId nSamples
+# s   dt  x y pressure tilt orientation distance tool buttons src
+e 0 DOWN 0 1
+s 0 512.3125 900.75 0.00208 0.34906584 -1.5707964 0.0 2 0 C
+e 1 MOVE 0 4
+s 4051000 513.0 901.5 0.03125 0.34906584 -1.5707964 0.0 2 0 H
+s 8102000 514.25 903.125 0.0625 0.35 -1.5707964 0.0 2 0 H
+s 12153000 515.5 905.0 0.09375 0.35 -1.5707964 0.0 2 4 H
+s 16204000 517.0 907.5 0.125 0.35 -1.5707964 0.0 2 4 C
+e 2 POINTER_DOWN 1 1
+s 18000000 220.0 1400.0 1.0 0.0 0.0 0.0 1 0 C
+e 3 POINTER_UP 0 1
+s 22000000 519.0 910.0 0.140625 0.35 -1.5707964 0.0 2 0 C
+e 4 CANCEL -1 0
+end 5 7

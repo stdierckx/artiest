@@ -76,8 +76,58 @@ dependencies {
     // arms of the comparison.
     implementation(libs.androidx.graphics.core)
 
+    // Plain JVM unit tests, matching :engine's choice of framework so a test
+    // moving across the boundary keeps its imports. This is the only place the
+    // mirrored ToolType constants can be checked against the real
+    // MotionEvent.TOOL_TYPE_* values: :engine cannot see them by construction,
+    // which is the whole point of the module, and a mirror that drifts
+    // compiles, passes every test there, and misroutes on the tablet.
+    testImplementation(kotlin("test"))
+
+    // Robolectric, for the one thing the mirror test cannot reach: a real
+    // MotionEvent. `obtain` with pointer properties, `addBatch` history,
+    // `findPointerIndex` and the API-34 nanosecond accessor all work here, so
+    // collectSamples and the router shell are testable on the JVM after all —
+    // and the router's worst failure, a palm landing mid-stroke, is not
+    // something anyone reproduces reliably by hand on a tablet.
+    //
+    // Two costs, stated rather than discovered later. It is a JUnit 4 runner,
+    // so junit:junit and the vintage engine come with it and the platform has
+    // to be told to run both engines. And it downloads a ~150 MB instrumented
+    // Android runtime into ~/.m2, outside Gradle's cache, on first use: --offline
+    // does not cover it and a clean machine or CI needs network once.
+    //
+    // What it cannot do is worth knowing too: it no-ops requestUnbufferedDispatch,
+    // it does not dispatch real ACTION_HOVER_*, and it fabricates eventTimeNanos
+    // as milliseconds x 1e6. Anything about batching, hover delivery or
+    // sub-millisecond timing has to come off the tablet.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
+
     // libs.androidx.input.motionprediction is deliberately absent until W11.
     // The spike carries it, but prediction in :app is a gated experiment and
     // adding the dependency before there is a Predictor to hold it would put an
     // unreferenced library in the APK being measured.
+}
+
+// :app is an Android module, so its unit test tasks are testDebugUnitTest and
+// testReleaseUnitTest rather than `test` — use the debug one; `:app:test` runs
+// both variants and pays for everything twice. They are still Test tasks, so
+// they need the same useJUnitPlatform() :engine needs, for the same reason:
+// which variant kotlin("test") resolves to follows the configured framework.
+//
+// testOptions.unitTests.isReturnDefaultValues is deliberately NOT set. AGP's
+// default makes an unmocked android.* method throw "not mocked"; turning it on
+// makes MotionEvent.obtain() return null instead, and because Java factories
+// are Kotlin platform types that null is assigned without an NPE — a test that
+// goes green while exercising nothing.
+tasks.withType<Test>().configureEach {
+    // Both engines: kotlin("test") tests are Jupiter, Robolectric's runner is
+    // JUnit 4 and reaches the platform through vintage. Naming them explicitly
+    // rather than relying on discovery, so a missing engine fails loudly
+    // instead of silently running half the suite.
+    useJUnitPlatform {
+        includeEngines("junit-jupiter", "junit-vintage")
+    }
 }

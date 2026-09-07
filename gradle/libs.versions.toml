@@ -12,6 +12,12 @@ composeBom = "2024.12.01"
 graphicsCore = "1.0.4"
 # Stylus motion prediction. Stable since 1.0.0 (Nov 2025).
 motionPrediction = "1.0.0"
+# Unit tests only. Robolectric is a JUnit 4 runner, so it drags junit:junit and
+# the vintage engine in behind it — see :app's test dependencies for why that is
+# worth paying.
+robolectric = "4.14.1"
+junit4 = "4.13.2"
+junitVintage = "5.10.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -23,6 +29,9 @@ androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-graphics-core = { group = "androidx.graphics", name = "graphics-core", version.ref = "graphicsCore" }
 androidx-input-motionprediction = { group = "androidx.input", name = "input-motionprediction", version.ref = "motionPrediction" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
+junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engine", version.ref = "junitVintage" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
