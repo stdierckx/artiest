@@ -90,9 +90,12 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
 
     private var renderer: CanvasFrontBufferedRenderer<Segment>? = null
 
-    init {
-        setBackgroundColor(Color.WHITE)
-    }
+    // Deliberately NO setBackgroundColor here. A SurfaceView shows its surface
+    // through a transparent hole punched in the view hierarchy, and the view's
+    // own background is painted over that hole — an opaque one hides the front
+    // buffer completely, ink and all. The white ground comes from the
+    // multi-buffered layer's drawColor instead. BaselineInkView is a plain
+    // View, so the same call is correct there.
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
