@@ -205,6 +205,23 @@ class DirectSurfaceInkView(context: Context) : SurfaceView(context), SurfaceHold
     private var lastFrameNs = 0L
     private var frameMsAvg = 0f
 
+    /**
+     * W2. When on, the loop drives itself every vsync instead of waiting for
+     * input, and sweeps a rotation through the transform so the blit is a real
+     * resampled one — an axis-aligned identity blit is a different and much
+     * cheaper operation, and measuring that would flatter the result.
+     */
+    var benchmark: Boolean = false
+        set(value) {
+            field = value
+            benchAngle = 0f
+            stats.reset()
+            if (value) requestFrame()
+        }
+
+    val stats = FrameStats()
+    private var benchAngle = 0f
+
     /** One instance, held in a field: a lambda per post would allocate 90/s and could never be removed. */
     private val frameCallback = Choreographer.FrameCallback { t -> onFrame(t) }
 
@@ -442,11 +459,16 @@ class DirectSurfaceInkView(context: Context) : SurfaceView(context), SurfaceHold
         // up to 100 ms of sleep inside the call, which is why the queue is
         // emptied in surfaceDestroyed rather than being allowed to spin.
         val canvas = holder.lockHardwareCanvas() ?: return
+        val drawStartNs = System.nanoTime()
         try {
             canvas.drawColor(Color.WHITE)
             val save = canvas.save()
             renderMatrix.setScale(docScale, docScale)
             renderMatrix.postTranslate(docTx, docTy)
+            // Benchmark rotates about the view centre, so every frame resamples
+            // the whole layer rather than hitting whatever fast path an
+            // axis-aligned blit takes.
+            if (benchmark) renderMatrix.postRotate(benchAngle, surfaceW / 2f, surfaceH / 2f)
             canvas.concat(renderMatrix)
             layer?.let { canvas.drawBitmap(it, 0f, 0f, filterPaint) }
             // Always, not only under Fit. At 1:1 the 2160-wide document does not
@@ -471,11 +493,37 @@ class DirectSurfaceInkView(context: Context) : SurfaceView(context), SurfaceHold
                 // stable multiple means frames are overrunning the budget.
                 canvas.drawText("%.2f ms".format(frameMsAvg), 24f, 220f, counterPaint)
             }
+            if (benchmark) {
+                // Gap, not draw cost, is the headline: a body that draws in 2 ms
+                // and lands every 33 is a loop that misses every vsync.
+                canvas.drawText("draw p50 %.2f  p95 %.2f  p99 %.2f ms"
+                    .format(stats.drawMs(0.5f), stats.drawMs(0.95f), stats.drawMs(0.99f)),
+                    24f, 300f, counterPaint)
+                canvas.drawText("gap  p50 %.2f  p95 %.2f  p99 %.2f ms"
+                    .format(stats.gapMs(0.5f), stats.gapMs(0.95f), stats.gapMs(0.99f)),
+                    24f, 372f, counterPaint)
+                canvas.drawText("dropped %.1f%%   n=%d   (vsync %.1f Hz)"
+                    .format(stats.droppedRate() * 100f, stats.samples,
+                        if (stats.gapMs(0.5f) > 0f) 1000f / stats.gapMs(0.5f) else 0f),
+                    24f, 444f, counterPaint)
+            }
         } finally {
             // Not optional: an exception escaping between the lock and this call
             // leaves SurfaceView's internal lock held forever, and the next
             // relayout deadlocks the UI thread with no crash and no stack trace.
             holder.unlockCanvasAndPost(canvas)
+        }
+
+        // After the post, so the cost includes the buffer swap the frame
+        // actually pays for and not just the recording.
+        stats.record(System.nanoTime() - drawStartNs, System.nanoTime())
+
+        if (benchmark) {
+            benchAngle += 0.7f
+            if (benchAngle >= 360f) benchAngle -= 360f
+            // Self-schedules through the same gate, so bench mode measures the
+            // production path rather than a second loop that only resembles it.
+            requestFrame()
         }
     }
 

@@ -72,6 +72,17 @@ moves early.
   constant and not `0x100000b00`; and bytecode. A discrimination control ruled
   out a gralloc that refuses everything — 2816, 2864, 512 and 256 all return
   true, a bogus bit returns false.
+- **A full redraw holds 90 Hz with 2.8x headroom.** W2: draw p99 4.00 ms against
+  an 11.1 ms budget, gap pinned to vsync, 0% dropped over 600 frames, with the
+  layer rotating through a live matrix. The per-frame blit is ~2.6 Mpx because
+  the surface is view-sized (1181x2200), not the full 7.1 Mpx document.
+- **The 90 Hz override lapses on its own, and `settings get` does not show it.**
+  It keeps reporting 90.0 while `dumpsys display` shows the render range capped
+  at 60. Only a fresh 60 -> 90 bounce revives it; rewriting 90.0 over 90.0 is a
+  no-op that changes nothing. Ruled out as a cause: the app's 1000 fps frame-rate
+  vote, which holds 90 Hz fine once bounced. **Bounce and verify `activeMode`
+  immediately before any judged run**, and read the Hz on the Latency tab, which
+  is red below 90.
 - **Memory: 7.70 GiB total**, 4.4 GiB free, low-memory threshold 0.21 GiB.
   `memoryClass` 256 / `largeMemoryClass` 512 do not bind, because on API 34
   bitmap pixels are native-heap allocations. **Do not set `android:largeHeap`.**
@@ -87,10 +98,6 @@ moves early.
   Assume **not** — the documented contract is that the content is undefined and
   the whole surface must be redrawn. If it turns out to preserve on this device,
   do not exploit it.
-- **Whether a full-document blit sustains 60–90 Hz on a Mali-G57 MC2.** Now the
-  cost of *every* frame, not just gesture frames. The surface is view-sized
-  (`dumpsys` reports 1181×2200), so the per-frame work is one matrixed blit of
-  ~2.6 Mpx rather than the full 7.1 Mpx document — but nothing has measured it.
 - **No absolute latency number exists.** The A/B verdict is comparative and
   visual. Deliberately deferred: the number is worth more measured against
   Phase 1's real ink than against the spike's `drawLine` segments.
@@ -442,7 +449,7 @@ half a day** before any of it is built on.
 |---|---|---|---|---|---|
 | 0 | ~~Front-buffer reality probe~~ **DONE — `54999d8`. Verdict: no front buffer. Stop condition fired.** | `:spike` | — | — | ✔ |
 | 1 | **`DirectSurfaceInkSurface` arm in the spike**, A/B'd by eye against both the baseline and the graphics-core fallback | `:spike` | **High** | — | 1.0 |
-| 2 | **Full-redraw throughput probe**: layer blit through a live matrix at Choreographer cadence, report achieved frame time over a few hundred frames | `:spike` | **High** | 1 | 0.5 |
+| 2 | ~~Full-redraw throughput probe~~ **DONE. draw p99 4.0 ms against an 11.1 ms budget, 0% dropped over 600 frames. Full redraw is viable.** | `:spike` | — | — | ✔ |
 | 3 | Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day. Freeze `:spike` after this | `:spike` | Low | 1 | 1.0 |
 | 4 | `PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer` | both | Low | 3 | 1.5 |
 | 5 | `CanvasTransform` + native JVM tests | `:engine` | Low | 3 | 0.75 |
@@ -498,13 +505,31 @@ its unconditional 1000 fps frame-rate vote, which is reproducible via
 `Surface.setFrameRate(1000f, …)`. Try that before concluding anything. If
 `DirectSurface` matches or beats it, the library leaves the design entirely.
 
-**W2 — how I'd know it went wrong.** Drive the frame loop with a live rotating
-matrix and no pen input, and report achieved frame time over a few hundred
-frames. The surface is view-sized so this is ~2.6 Mpx of matrixed blit per
-frame, not the full document, but nothing has measured it on a Mali-G57 MC2 and
-**every** frame now pays it. If it cannot hold 11.1 ms, W8's frame body changes
-before W8 is written — likely by clipping the blit to the dirty region in view
-space, which is cheap to add and pointless to add speculatively.
+**W2 — DONE. The full-redraw model is viable with room to spare.** Measured on
+the DirectSurface arm at a verified 90 Hz, rotating the layer through a live
+matrix every frame so the blit is a genuine resample rather than an
+axis-aligned fast path, 600 frames:
+
+```
+draw p50 2.97   p95 3.59   p99 4.00 ms
+gap  p50 11.18  p95 12.00  p99 12.56 ms
+dropped 0.0%    n=600      (vsync 89.4 Hz)
+```
+
+Draw cost sits at **2.8x headroom** against the 11.1 ms budget, the gap is
+pinned to vsync, and not one frame in 600 was dropped. Nothing needs clipping to
+a dirty region, and W8's frame body can be written as specified. Note the draw
+figure is measured across `lockHardwareCanvas` to `unlockCanvasAndPost`, so it
+includes the buffer swap and any back-pressure — it is the honest cost of a
+frame, not just the recording.
+
+**A measurement lesson that outlived the item.** The first run reported "100%
+over 11.1 ms" and looked like a catastrophic failure. It was not: the refresh
+override had lapsed mid-run and a 60 Hz panel was being judged against a 90 Hz
+budget, with gap p50 at 16.75 ms — exactly 1/60. The miss rate is now computed
+against the run's own median gap rather than a hardcoded budget, so a loop
+pinned to vsync reads 0% at any refresh rate and only real hitches show. A
+fixed threshold in a probe measures the environment as much as the code.
 
 **W8 — how I'd know it went wrong.** Build incrementally against the device: one
 hardcoded dab, confirm it appears; then a straight drag, confirm wet ink appears

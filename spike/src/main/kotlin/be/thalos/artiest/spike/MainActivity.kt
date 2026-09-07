@@ -214,6 +214,7 @@ private fun LatencyScreen(capture: PenCapture, refreshHzNow: () -> Float) {
     var frameRateVote by remember { mutableStateOf(true) }
     var fit by remember { mutableStateOf(false) }
     var marks by remember { mutableStateOf(false) }
+    var bench by remember { mutableStateOf(false) }
     var mounted by remember { mutableStateOf<View?>(null) }
 
     // Shown on this tab, not just the Device tab, because the 90 Hz override is
@@ -257,6 +258,15 @@ private fun LatencyScreen(capture: PenCapture, refreshHzNow: () -> Float) {
             FilterChip(frameRateVote, { frameRateVote = !frameRateVote }, { Text("1000 fps") })
             FilterChip(fit, { fit = !fit }, { Text("Fit") })
             FilterChip(marks, { marks = !marks }, { Text("Marks") })
+            // W2. Only the DirectSurface arm implements it — the other two are
+            // A/B controls and adding a self-driving loop to them would change
+            // what they measure.
+            FilterChip(
+                selected = bench,
+                onClick = { bench = !bench },
+                enabled = arm == Arm.DIRECT_SURFACE,
+                label = { Text("Bench") },
+            )
             AssistChip({ clearInk(mounted) }, { Text("Clear") })
             AssistChip({ capture.stats.reset() }, { Text("Reset stats") })
         }
@@ -291,6 +301,10 @@ private fun LatencyScreen(capture: PenCapture, refreshHzNow: () -> Float) {
                             view.videoInstruments = marks
                             view.frameRateVote = frameRateVote
                             view.fitToView = fit
+                            // Guarded: the setter resets the sample window, so
+                            // assigning the same value every recomposition would
+                            // keep n at zero and never accumulate a run.
+                            if (view.benchmark != bench) view.benchmark = bench
                         }
                     }
                 },
