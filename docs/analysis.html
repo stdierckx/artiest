@@ -1,0 +1,647 @@
+<title>Artiest Build Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --bg:#EDEFF3; --surface:#FFFFFF; --surface-2:#F5F7FA; --surface-3:#E8EBF0;
+  --ink:#11151C; --ink-2:#39424F; --muted:#6C7686;
+  --line:#D7DCE4; --line-2:#C3CAD5;
+  --accent:#4B41D1; --accent-soft:#EAE9FA; --accent-line:#BEB9F0;
+  --ok:#0C7A67; --ok-soft:#DDF1ED;
+  --warn:#9E6606; --warn-soft:#F8EEDA;
+  --crit:#AE3125; --crit-soft:#F9E5E2;
+  --measure:68ch;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1015; --surface:#151A21; --surface-2:#1B212A; --surface-3:#222A34;
+    --ink:#E6EAF1; --ink-2:#B6C0CD; --muted:#848F9F;
+    --line:#262E39; --line-2:#333D4A;
+    --accent:#9089FF; --accent-soft:#1C1B39; --accent-line:#3A3670;
+    --ok:#45C2AB; --ok-soft:#0F2A26;
+    --warn:#E0A44E; --warn-soft:#2C2415;
+    --crit:#F0776D; --crit-soft:#301A18;
+  }
+}
+
+:root[data-theme="dark"]{
+  --bg:#0D1015; --surface:#151A21; --surface-2:#1B212A; --surface-3:#222A34;
+  --ink:#E6EAF1; --ink-2:#B6C0CD; --muted:#848F9F;
+  --line:#262E39; --line-2:#333D4A;
+  --accent:#9089FF; --accent-soft:#1C1B39; --accent-line:#3A3670;
+  --ok:#45C2AB; --ok-soft:#0F2A26;
+  --warn:#E0A44E; --warn-soft:#2C2415;
+  --crit:#F0776D; --crit-soft:#301A18;
+}
+
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:16.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+  padding:0 clamp(18px,5vw,40px) 100px;
+}
+.wrap{max-width:1080px; margin:0 auto;}
+.col{max-width:var(--measure);}
+
+h1,h2,h3{font-family:"Bricolage Grotesque","Instrument Sans",sans-serif; text-wrap:balance; line-height:1.12; margin:0;}
+h1{font-size:clamp(2.5rem,6.2vw,4rem); font-weight:700; letter-spacing:-.026em;}
+h2{font-size:clamp(1.55rem,3vw,2.1rem); font-weight:700; letter-spacing:-.018em;}
+h3{font-size:1.1rem; font-weight:600; letter-spacing:-.008em; color:var(--ink);}
+p{margin:0;}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:.86em;}
+code{background:var(--surface-2); border:1px solid var(--line); border-radius:4px; padding:.09em .36em; color:var(--ink-2);}
+a{color:var(--accent);}
+
+.eyebrow{
+  font-family:"JetBrains Mono",monospace; font-size:.7rem; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--muted);
+}
+
+/* ---- masthead ---- */
+header.top{padding:clamp(52px,9vw,96px) 0 0;}
+.top .col{display:flex; flex-direction:column; gap:20px;}
+.thesis{font-size:clamp(1.05rem,2.1vw,1.24rem); color:var(--ink-2); max-width:60ch;}
+.thesis b{color:var(--ink); font-weight:600;}
+
+.facts{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line);
+  border-radius:9px; overflow:hidden; margin-top:38px;
+}
+.fact{background:var(--surface); padding:14px 16px; display:flex; flex-direction:column; gap:5px;}
+.fact dt{font-family:"JetBrains Mono",monospace; font-size:.66rem; letter-spacing:.13em; text-transform:uppercase; color:var(--muted);}
+.fact dd{margin:0; font-size:.94rem; font-weight:500; color:var(--ink);}
+
+/* ---- pressure-taper rule (thin→thick→thin, like a pen stroke) ---- */
+.rule{display:block; width:100%; height:7px; color:var(--line-2); margin:0;}
+.rule.accent{color:var(--accent-line);}
+
+/* ---- sections ---- */
+section{padding-top:clamp(46px,7vw,76px);}
+.sechead{display:flex; align-items:baseline; gap:14px; margin-bottom:8px;}
+.secnum{
+  font-family:"JetBrains Mono",monospace; font-size:.78rem; font-weight:500;
+  color:var(--accent); flex:none; padding-top:.28em;
+}
+.lede{color:var(--ink-2); margin-top:12px;}
+.stack{display:flex; flex-direction:column; gap:16px; margin-top:22px;}
+.stack.tight{gap:11px;}
+
+/* ---- callout ---- */
+.callout{
+  border:1px solid var(--line); border-left:3px solid var(--accent);
+  background:var(--surface); border-radius:7px; padding:18px 20px;
+  display:flex; flex-direction:column; gap:9px;
+}
+.callout.warn{border-left-color:var(--warn);}
+.callout.crit{border-left-color:var(--crit);}
+.callout .eyebrow{color:var(--accent);}
+.callout.warn .eyebrow{color:var(--warn);}
+.callout.crit .eyebrow{color:var(--crit);}
+.callout p{font-size:.95rem; color:var(--ink-2);}
+.callout p strong{color:var(--ink);}
+
+/* ---- cards ---- */
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(252px,1fr)); gap:14px; margin-top:22px;}
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:9px;
+  padding:18px 19px; display:flex; flex-direction:column; gap:9px;
+}
+.card h3{display:flex; align-items:center; gap:9px; flex-wrap:wrap;}
+.card p{font-size:.92rem; color:var(--ink-2);}
+.card.pick{border-color:var(--accent-line); background:var(--accent-soft);}
+
+.chip{
+  display:inline-flex; align-items:center; font-family:"JetBrains Mono",monospace;
+  font-size:.63rem; font-weight:500; letter-spacing:.1em; text-transform:uppercase;
+  padding:.24em .58em; border-radius:4px; white-space:nowrap;
+  background:var(--surface-3); color:var(--muted); border:1px solid var(--line);
+}
+.chip.pick{background:var(--accent); color:#fff; border-color:transparent;}
+.chip.ok{background:var(--ok-soft); color:var(--ok); border-color:transparent;}
+.chip.warn{background:var(--warn-soft); color:var(--warn); border-color:transparent;}
+.chip.crit{background:var(--crit-soft); color:var(--crit); border-color:transparent;}
+
+/* ---- ordered technique list ---- */
+ol.steps{list-style:none; margin:22px 0 0; padding:0; display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:9px; overflow:hidden;}
+ol.steps li{background:var(--surface); padding:16px 19px; display:grid; grid-template-columns:auto 1fr; gap:4px 15px;}
+ol.steps .k{
+  font-family:"JetBrains Mono",monospace; font-size:.72rem; color:var(--accent);
+  grid-row:1/3; padding-top:.35em;
+}
+ol.steps .t{font-weight:600; font-size:.97rem; display:flex; gap:9px; align-items:center; flex-wrap:wrap;}
+ol.steps .d{font-size:.92rem; color:var(--ink-2);}
+
+/* ---- pipeline ---- */
+.pipe{
+  display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin-top:20px;
+  background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:16px;
+}
+.pipe span.n{
+  font-family:"JetBrains Mono",monospace; font-size:.75rem; padding:.42em .68em;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:5px; color:var(--ink-2);
+}
+.pipe span.n.hot{background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent);}
+.pipe span.a{color:var(--muted); font-size:.8rem;}
+
+/* ---- table ---- */
+.scroll{overflow-x:auto; margin-top:22px; border:1px solid var(--line); border-radius:9px; background:var(--surface);}
+table{border-collapse:collapse; width:100%; min-width:560px; font-size:.91rem;}
+th,td{text-align:left; padding:11px 15px; border-bottom:1px solid var(--line); vertical-align:top;}
+th{
+  font-family:"JetBrains Mono",monospace; font-size:.66rem; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--muted); font-weight:500; background:var(--surface-2);
+}
+tbody tr:last-child td{border-bottom:none;}
+td.num{font-variant-numeric:tabular-nums; white-space:nowrap;}
+td strong{font-weight:600;}
+
+/* ---- phases ---- */
+.phases{margin-top:24px; display:flex; flex-direction:column;}
+.ph{display:grid; grid-template-columns:auto 1fr; gap:0 20px;}
+.ph .spine{display:flex; flex-direction:column; align-items:center; gap:6px;}
+.ph .dot{
+  width:27px; height:27px; border-radius:50%; flex:none; margin-top:3px;
+  display:grid; place-items:center; font-family:"JetBrains Mono",monospace;
+  font-size:.7rem; font-weight:500;
+  background:var(--surface); border:1px solid var(--line-2); color:var(--ink-2);
+}
+.ph.gate .dot{background:var(--accent); border-color:transparent; color:#fff;}
+.ph .bar{width:1px; flex:1; background:var(--line-2); min-height:16px;}
+.ph:last-child .bar{display:none;}
+.ph .body{padding-bottom:24px; display:flex; flex-direction:column; gap:7px;}
+.ph h3{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.ph p{font-size:.93rem; color:var(--ink-2);}
+.ph .out{font-size:.86rem; color:var(--muted);}
+.ph .out b{color:var(--ink-2); font-weight:500;}
+
+/* ---- module tree ---- */
+pre.tree{
+  margin:22px 0 0; background:var(--surface); border:1px solid var(--line);
+  border-radius:9px; padding:18px 19px; overflow-x:auto;
+  font-family:"JetBrains Mono",monospace; font-size:.82rem; line-height:1.75; color:var(--ink-2);
+}
+pre.tree b{color:var(--accent); font-weight:500;}
+
+ul.plain{margin:0; padding-left:1.15em; display:flex; flex-direction:column; gap:7px;}
+ul.plain li{color:var(--ink-2); font-size:.95rem;}
+ul.plain li strong{color:var(--ink); font-weight:600;}
+
+/* ---- questions ---- */
+.qs{display:flex; flex-direction:column; gap:1px; margin-top:22px; background:var(--line); border:1px solid var(--line); border-radius:9px; overflow:hidden;}
+.q{background:var(--surface); padding:15px 19px; display:flex; gap:14px; align-items:baseline;}
+.q.open{background:var(--accent-soft);}
+.q .qn{font-family:"JetBrains Mono",monospace; font-size:.72rem; color:var(--accent); flex:none;}
+.q p{font-size:.94rem;}
+.q p em{color:var(--muted); font-style:normal; display:block; margin-top:3px; font-size:.87rem;}
+
+footer{margin-top:70px; padding-top:26px; border-top:1px solid var(--line); color:var(--muted); font-size:.84rem;}
+footer .col{display:flex; flex-direction:column; gap:7px;}
+
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px;}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important;}}
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <div class="col">
+    <span class="eyebrow">Technical analysis &middot; September 2026</span>
+    <h1>Artiest</h1>
+    <p class="thesis">A drawing app for the Wacom MovinkPad 11. The whole design hangs on one number — <b>the delay between pen tip and wet ink</b> — and Android has a specific, non-obvious API stack for winning it. Everything else is layers, brushes, and file plumbing built around that constraint.</p>
+  </div>
+
+  <dl class="facts">
+    <div class="fact"><dt>Target</dt><dd>Android 14 &middot; API 34</dd></div>
+    <div class="fact"><dt>Device</dt><dd>MovinkPad 11 (DTH-A116)</dd></div>
+    <div class="fact"><dt>Digitizer</dt><dd>EMR &middot; 8192 levels &middot; ±60° tilt</dd></div>
+    <div class="fact"><dt>Display</dt><dd>2200×1440 &middot; 60/90 Hz</dd></div>
+    <div class="fact"><dt>Memory</dt><dd>8 GB RAM</dd></div>
+    <div class="fact"><dt>Est. to v1</dt><dd>12–15 weeks solo</dd></div>
+    <div class="fact"><dt>Canvas cap</dt><dd>4096×4096 &middot; 64 MiB/layer</dd></div>
+    <div class="fact"><dt>Scope</dt><dd>Personal tool &middot; vector in v2</dd></div>
+  </dl>
+</header>
+
+<section>
+  <div class="sechead"><span class="secnum">01</span><h2>The device</h2></div>
+  <div class="col stack">
+    <p class="lede">Confirmed: the <strong>Wacom MovinkPad 11 (DTH-A116)</strong> — the standalone Android 14 tablet, not the Movink 11 pen display that needs a host computer. The two share a name and demand completely different architectures, so it was worth pinning down. With it settled, Artiest is an ordinary Android app on ordinary Android hardware and the external-display problem never arises.</p>
+    <p>The hardware suits this well. The EMR digitizer reports 8192 pressure levels and ±60° of tilt — far more headroom than expressive brushes need, so your response curves will be the limit, not the sensor. The panel runs 60 or 90 Hz, and pinning it to 90 removes a third of every frame-bound stage in the latency chain.</p>
+    <p>8 GB of RAM is the quietly important number. At a 3000×2000 working canvas a layer costs 24 MB, so a full stack sits in memory comfortably and <strong>the tile system that would normally dominate a design like this isn’t needed</strong>. That deletes an entire subsystem from v1.</p>
+    <p>Wacom hasn’t published the SoC, so GPU fill rate is the one hardware unknown left standing. Phase 0 measures it.</p>
+  </div>
+</section>
+
+<svg class="rule accent" viewBox="0 0 600 7" preserveAspectRatio="none" aria-hidden="true"><path d="M0,3.5 C130,1.1 210,.6 300,.6 C390,.6 470,1.1 600,3.5 C470,5.9 390,6.4 300,6.4 C210,6.4 130,5.9 0,3.5 Z" fill="currentColor"/></svg>
+
+<section>
+  <div class="sechead"><span class="secnum">02</span><h2>Latency is the whole game</h2></div>
+  <div class="col">
+    <p class="lede">"Very little delay" is the requirement that constrains every other decision — it rules out the obvious UI framework for the canvas, dictates the rendering path, and sits in direct conflict with stabilization. Android has first-party APIs for this. Use all of them.</p>
+  </div>
+
+  <ol class="steps">
+    <li>
+      <span class="k">01</span>
+      <span class="t">Front-buffered rendering <span class="chip pick">biggest win</span></span>
+      <span class="d"><code>androidx.graphics:graphics-core</code> → <code>GLFrontBufferedRenderer</code>. Draws the in-progress stroke segment straight into the front buffer, skipping the normal double-buffer and compositor path. Implement <code>onDrawFrontBufferedLayer()</code> for wet ink and <code>onDrawMultiDoubleBufferedLayer()</code> for the committed scene; call <code>commit()</code> on pen-up. Requires API 29+.</span>
+    </li>
+    <li>
+      <span class="k">02</span>
+      <span class="t">Motion prediction</span>
+      <span class="d"><code>androidx.input:input-motionprediction</code> → <code>MotionEventPredictor</code>. Feed it every event with <code>record()</code>, call <code>predict()</code> on each move, and render the predicted point as <em>temporary</em> ink only. Clamp prediction distance or fast direction changes overshoot visibly.</span>
+    </li>
+    <li>
+      <span class="k">03</span>
+      <span class="t">Unbuffered dispatch</span>
+      <span class="d"><code>view.requestUnbufferedDispatch(event)</code> on <code>ACTION_DOWN</code>. Stops Android batching motion events to the frame boundary so samples arrive as the digitizer produces them.</span>
+    </li>
+    <li>
+      <span class="k">04</span>
+      <span class="t">Historical samples</span>
+      <span class="d">The EMR digitizer samples far faster than the panel refreshes. Iterate <code>getHistoricalX/Y/Pressure(i)</code> before the current point on every event — skipping history throws away most of your resolution and gives visibly faceted curves.</span>
+    </li>
+    <li>
+      <span class="k">05</span>
+      <span class="t">Keep Compose off the canvas</span>
+      <span class="d">Compose recomposition plus its draw pipeline adds latency you cannot claw back. Canvas is a <code>SurfaceView</code>. Compose is excellent for panels, layer lists, and toolbars — just not for ink.</span>
+    </li>
+    <li>
+      <span class="k">06</span>
+      <span class="t">Request 90 Hz</span>
+      <span class="d">The panel does 60 and 90. Pin the highest mode via <code>Surface.setFrameRate()</code> / preferred display mode — it cuts a third off every frame-bound stage in the chain.</span>
+    </li>
+  </ol>
+
+  <div class="col stack" style="margin-top:24px;">
+    <div class="callout warn">
+      <span class="eyebrow">Direct conflict in your spec</span>
+      <p><strong>Stabilization is deliberately added latency.</strong> A pulled-string stabilizer works by holding the rendered point behind the true pen position — that is what makes the line smooth. So "stabilization" and "very little delay" pull against each other by definition.</p>
+      <p>Resolution: expose it as a 0–100 slider that genuinely reaches zero, default it low (~15), and set it per-brush — high on inking pens, near-zero on sketch pencils. Don't bake a fixed amount into the pipeline.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">03</span><h2>Input pipeline</h2></div>
+  <div class="col">
+    <p class="lede">One path from digitizer to GPU. Every stage is testable in isolation, and the source is abstracted so a desktop mouse, a finger, and the Pro Pen 3 all feed the same code.</p>
+  </div>
+
+  <div class="pipe">
+    <span class="n">MotionEvent</span><span class="a">+ history →</span>
+    <span class="n">InputSample</span><span class="a">→</span>
+    <span class="n hot">predict</span><span class="a">→</span>
+    <span class="n hot">stabilize</span><span class="a">→</span>
+    <span class="n">spline fit</span><span class="a">→</span>
+    <span class="n">resample by spacing</span><span class="a">→</span>
+    <span class="n">stamp</span><span class="a">→</span>
+    <span class="n">GL</span>
+  </div>
+
+  <div class="col stack" style="margin-top:22px;">
+    <p><code>InputSample</code> carries <code>x, y, pressure, tilt, orientation, distance, timestampNanos, toolType</code>. Normalize once at the boundary; nothing downstream should touch a <code>MotionEvent</code>.</p>
+    <ul class="plain">
+      <li><strong>Pressure.</strong> <code>AXIS_PRESSURE</code> arrives normalized 0–1 as a float, so the pen's 8192 levels survive the trip. Raw linear pressure feels terrible — ship a per-brush response curve (an editable cubic) mapping pressure to size and opacity independently.</li>
+      <li><strong>Tilt &amp; orientation.</strong> <code>AXIS_TILT</code> (0–π/2) and <code>AXIS_ORIENTATION</code> (±π). These are what make a pencil shade broadly when you lay it over — the single biggest driver of "this feels like a real pencil".</li>
+      <li><strong>Eraser end.</strong> Flipping the pen reports <code>TOOL_TYPE_ERASER</code>. Route it to the eraser tool automatically and remember the last eraser brush.</li>
+      <li><strong>Palm rejection.</strong> Handle <code>ACTION_CANCEL</code> and, on Android 13+, per-pointer <code>FLAG_CANCELED</code> — both mean discard the entire stroke back to its <code>ACTION_DOWN</code>. Also suppress finger input on the canvas while <code>AXIS_DISTANCE</code> shows the pen hovering.</li>
+      <li><strong>Barrel buttons.</strong> <code>getButtonState()</code> — map to user-assignable actions (colour picker, pan, undo).</li>
+    </ul>
+  </div>
+</section>
+
+<svg class="rule" viewBox="0 0 600 7" preserveAspectRatio="none" aria-hidden="true"><path d="M0,3.5 C130,1.1 210,.6 300,.6 C390,.6 470,1.1 600,3.5 C470,5.9 390,6.4 300,6.4 C210,6.4 130,5.9 0,3.5 Z" fill="currentColor"/></svg>
+
+<section>
+  <div class="sechead"><span class="secnum">04</span><h2>The one architectural fork</h2></div>
+  <div class="col">
+    <p class="lede">Google shipped <code>androidx.ink</code> — a Jetpack library with brushes, stroke geometry and a live-authoring path tuned for exactly this. With vector layers deferred to v2, the calculus shifts: Ink’s strongest card no longer applies to v1.</p>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>A. Ink API for everything <span class="chip">fastest</span></h3>
+      <p>Strokes, brushes, low-latency authoring and geometry ops all provided. Something good-feeling in weeks rather than months.</p>
+      <p><strong>Ceiling:</strong> its brush families are built for note-taking — pen, marker, highlighter. Textured graphite and felt bleed are not what it is for, and raster layers aren’t its model at all.</p>
+    </div>
+    <div class="card pick">
+      <h3>B. Custom GL engine <span class="chip pick">recommended for v1</span></h3>
+      <p>Full command of stamp textures, grain, blend modes and accumulation — the only route to a pencil that reads as graphite.</p>
+      <p><strong>Cost:</strong> you rebuild live authoring and prediction integration yourself. Vector geometry was the other half of that cost, and deferring vector removes it.</p>
+    </div>
+    <div class="card">
+      <h3>C. Hybrid <span class="chip">v2</span></h3>
+      <p>Custom GL for raster, Ink API for vector layers when they arrive. Its <code>Stroke</code> model plus the geometry module is what makes vector erase and selection tractable.</p>
+      <p><strong>Cost:</strong> compositing two render paths into one canvas — real, but deferred along with vector itself.</p>
+    </div>
+  </div>
+
+  <div class="col stack" style="margin-top:22px;">
+    <p>Deferring vector inverts the recommendation I’d have made otherwise, and it’s worth being explicit about why. Ink’s headline advantage was handing you vector strokes and geometry nearly free — the hardest item on the original list. Take that out of v1 and what remains is a raster painting app whose defining quality is <em>brush feel</em>, which is precisely where Ink’s ceiling sits. So the custom GL stamp engine becomes the v1 engine, and Ink returns in v2 for the vector layer.</p>
+    <div class="callout">
+      <span class="eyebrow">This is not the same as starting from scratch</span>
+      <p>Use the Ink API and Google’s <code>low-latency-stylus</code> sample as your <strong>Phase 0 and 1 spike</strong>. They put ink on screen in days, prove the hardware chain, and hand you a latency baseline to measure your own engine against. Treat that code as a measuring instrument rather than a foundation — the real engine starts in Phase 2.</p>
+    </div>
+    <div class="callout warn">
+      <span class="eyebrow">One check that could flip this</span>
+      <p>Ink’s API surface has moved fast, and custom textured brushes were still experimental as of my information. If texture support in <code>BrushFamily</code> has properly landed, option A stretches much further than I’m crediting it and could carry v1 alone. Read the current <code>androidx.ink</code> release notes during Phase 0 — a ten-minute check that could save a month.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">05</span><h2>Prior art worth reading</h2></div>
+  <div class="col">
+    <p class="lede">You're right that this shouldn't be built from scratch. But the valuable prior art is mostly <em>not</em> what a "Kotlin drawing app" search returns — those are overwhelmingly tutorial projects: a Canvas, a Path, a colour picker, no pressure model, no layer compositing, no latency work. Your read on the quality is correct. What's actually worth your time splits into three tiers, and the licence differences between them matter more than the code does.</p>
+  </div>
+
+  <div class="stack" style="margin-top:26px;">
+    <div class="card">
+      <h3>Tier 1 — the brush engine <span class="chip pick">highest value</span></h3>
+      <p><strong>libmypaint</strong> (C, ISC licence). The reference implementation of precisely the model in section 07: inputs — pressure, speed, direction, tilt, random — mapped through user-editable curves onto outputs like radius, opacity, hardness and dab offset. Its <code>brushsettings.json</code> is a readable specification of every parameter, which is a shortcut past weeks of design work. Used by MyPaint, GIMP, OpenToonz and Krita. <strong>ISC is permissive</strong>, so you can port the model or link the C library through the NDK with no licence constraint on Artiest.</p>
+      <p><strong>Krita</strong> (C++/Qt, GPL). The best-documented layer stack, compositing and blend-mode implementation in open source. Read it for architecture — GPL means you study the design, not lift the code.</p>
+    </div>
+
+    <div class="card">
+      <h3>Tier 2 — the Android plumbing</h3>
+      <p><strong><code>chromeos/low-latency-stylus</code></strong> — Google's official front-buffered stylus demo. This is section 02 as working code; it's where Phase 0 should start rather than from a blank project.</p>
+      <p><strong>Cahier</strong> — a 2025 official Android sample for large-screen creative apps, built on the Ink API. The closest thing to a reference implementation of the modern stack.</p>
+      <p><strong>Ink API samples</strong> — AOSP's, plus community ones such as <code>NicosNicolaou16/Ink_Api_Compose</code> (stroke rendering, erase, stroke-to-bitmap, persistence). The fastest way to judge the Ink API's brush ceiling from section 04 before committing to it.</p>
+    </div>
+
+    <div class="card">
+      <h3>Tier 3 — formats and interop</h3>
+      <p><strong>OpenRaster spec</strong> (freedesktop) — the <code>.ora</code> format from section 09, small enough to implement in a day.</p>
+      <p><strong>MyPaint <code>.myb</code> brushes</strong> — if you port the libmypaint model, thousands of existing community brushes become importable. That is enormous leverage for a one-person project, and it turns brush authoring from a task into a download.</p>
+    </div>
+  </div>
+
+  <div class="col stack" style="margin-top:22px;">
+    <div class="callout">
+      <span class="eyebrow">Licensing, simplified — because this is a personal tool</span>
+      <p>Krita, GIMP and MyPaint-the-application are <strong>GPL</strong>; libmypaint is <strong>ISC</strong>. That distinction governs <em>distribution</em>, not use — GPL obligations attach when you ship code to someone else. A tool you build and run yourself can borrow freely from any of them, which widens the useful prior art considerably.</p>
+      <p>The one line to watch: your repo is <strong>private</strong>, and that is what keeps the above true. Publishing it would count as distribution, and any GPL-derived code in it would then oblige you to license Artiest under the GPL as well. Decide once now — keep it private, or keep GPL code out — rather than discovering the constraint later.</p>
+    </div>
+    <p>Brush tip and grain textures follow the same logic: for a personal tool, source whatever works. Provenance only starts to matter if Artiest ever goes public, and a <code>NOTICE</code> file kept as you go costs far less than reconstructing one afterwards.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">06</span><h2>Layers &amp; compositing</h2></div>
+  <div class="col stack">
+    <p>Each bitmap layer is a GL texture, RGBA8 premultiplied. With <strong>4096×4096 fixed as a hard ceiling</strong>, a full-size layer costs exactly 64 MiB and the arithmetic stays comfortable at 8 GB of RAM. <strong>Tiling is off the table entirely</strong> — not deferred to v2, simply not needed. That removes the single largest subsystem a design like this normally carries, along with its cache eviction, dirty-region tracking and compressed-tile storage.</p>
+    <p>Enforce the ceiling as a <em>texture memory budget</em> rather than a layer count, so small canvases aren't punished for the limit that exists to protect large ones. Roughly 1.5 GB of layer textures gives about 24 layers at full 4096² size, ~96 at 2048², and effectively no limit at sketch sizes. Show the budget in the layer panel and refuse the add rather than letting the GPU fail an allocation mid-stroke.</p>
+    <p>Compositing the full stack on every frame is wasteful. Cache the flattened result of everything <em>below</em> the active layer and everything <em>above</em> it, leaving three textures to blend while drawing. Rebuild the caches only when the stack changes.</p>
+    <div class="callout">
+      <span class="eyebrow">The detail that makes strokes look right</span>
+      <p>Stamping directly onto the layer with alpha blending produces <strong>dark blobs wherever a stroke crosses itself</strong> — slow curves, loops, hatching. Every stamp re-blends over the last.</p>
+      <p>Instead: render the whole in-progress stroke into a scratch FBO at full opacity, then composite that buffer onto the layer <em>once</em> at the brush's opacity. Uniform density across the stroke, matching what Clip Studio and Photoshop do. Wet ink shows the scratch buffer; <code>commit()</code> does the real composite.</p>
+    </div>
+    <p>Layer operations are the easy half: add, rename, delete, reorder, visibility, opacity, and blend mode. Ship Normal and Multiply in v1 — that covers sketch-under-ink workflow, which is what a reference-driven artist actually needs. Add, Screen, and Overlay can follow.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">07</span><h2>Brush engine</h2></div>
+  <div class="col stack">
+    <p>Stamp-based, which is how every raster brush you've used works. Fit a Catmull-Rom spline through the smoothed samples, resample it at fixed spacing (a fraction of brush size), and at each point stamp a textured quad — scaled by pressure, rotated by tilt or direction, tinted by colour.</p>
+    <p>Make the brush a <strong>serializable data model</strong>, not code. One JSON-backed struct drives all three of your brushes and every one you add later:</p>
+  </div>
+
+  <pre class="tree"><b>Brush</b> {
+  tipTexture, spacing, sizeMin, sizeMax, hardness,
+  pressure→size curve, pressure→opacity curve, tilt→size curve,
+  flow, opacity, blendMode,
+  grainTexture, grainScale, grainDepth,
+  angleJitter, sizeJitter, positionJitter,
+  stabilization, antiAlias
+}</pre>
+
+  <div class="cards">
+    <div class="card">
+      <h3>Sketch pencil</h3>
+      <p>Grain texture sampled in <em>canvas</em> space, not stroke space, so the paper tooth stays fixed as you scribble across it. Pressure drives opacity more than size; tilt widens the stamp for shading. Low flow so it builds.</p>
+    </div>
+    <div class="card">
+      <h3>Pen</h3>
+      <p>Hard-edged round tip, full opacity, pressure drives size only. Anti-aliasing matters most here — use an SDF tip with analytic coverage rather than a texture, so edges stay clean at any zoom.</p>
+    </div>
+    <div class="card">
+      <h3>Felt marker</h3>
+      <p>Soft-edged stamp, multiply blend, flat opacity within a stroke but building where strokes overlap. Slight tilt-driven width for the chisel feel.</p>
+    </div>
+  </div>
+
+  <div class="col stack" style="margin-top:22px;">
+    <p>Your <strong>anti-aliasing toggle</strong> should switch stamping between smooth alpha coverage and nearest-neighbour with an alpha threshold — the latter for crisp pixel work. And the <strong>eraser</strong> is not a separate tool: it is any brush rendered with destination-out blending, which means it inherits pressure, texture, and stabilization for free.</p>
+  </div>
+</section>
+
+<svg class="rule" viewBox="0 0 600 7" preserveAspectRatio="none" aria-hidden="true"><path d="M0,3.5 C130,1.1 210,.6 300,.6 C390,.6 470,1.1 600,3.5 C470,5.9 390,6.4 300,6.4 C210,6.4 130,5.9 0,3.5 Z" fill="currentColor"/></svg>
+
+<section>
+  <div class="sechead"><span class="secnum">08</span><h2>Undo &amp; redo</h2></div>
+  <div class="col stack">
+    <p class="lede">Cheap to describe, expensive to get wrong — it constrains the memory model, so design it alongside layers rather than bolting it on.</p>
+    <p>Command pattern with a bounded stack. The trick is that different operations need completely different storage strategies:</p>
+    <ul class="plain">
+      <li><strong>Bitmap strokes</strong> — snapshot only the dirty rect's before-pixels, not the layer. A typical stroke touches a small fraction of the canvas, so entries stay small. Compress with LZ4 if memory gets tight.</li>
+      <li><strong>Vector strokes</strong> — an object add/remove diff. Essentially free, which is a real argument for the Ink API path.</li>
+      <li><strong>Layer metadata</strong> (rename, opacity, reorder, visibility) — trivial property diffs.</li>
+      <li><strong>Layer delete</strong> — keep the texture alive in a limbo pool rather than copying it out; drop it when the entry is evicted.</li>
+      <li><strong>Image import</strong> — hold a reference to the decoded bitmap.</li>
+    </ul>
+    <p>Coalesce aggressively: one entry per <em>completed stroke</em>, never per stamp. Cap the stack by both depth (~60) and total bytes (~512 MB), evicting oldest first. Clear the redo branch on any new action after an undo. Persisting undo across app restarts is a nice-to-have — skip it in v1.</p>
+    <p>Give it a real UI presence: undo and redo belong in the always-visible chrome, not a menu, and both should be assignable to the pen's barrel buttons.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">09</span><h2>Files, import &amp; export</h2></div>
+  <div class="col stack">
+    <p>Android 14 is fully scoped-storage: <code>WRITE_EXTERNAL_STORAGE</code> does nothing. The good news is the modern replacements need no runtime permissions at all.</p>
+    <ul class="plain">
+      <li><strong>Export to the tablet's gallery</strong> — write through <code>MediaStore.Images</code> into <code>Pictures/Artiest/</code>. Files land locally, appear in the gallery immediately, no permission prompt. This is your default "Save as PNG/JPG".</li>
+      <li><strong>Export anywhere else</strong> — SAF <code>ACTION_CREATE_DOCUMENT</code> for a user-chosen folder.</li>
+      <li><strong>Import an image as a layer</strong> — the Photo Picker (<code>PickVisualMedia</code>). Zero permissions, system-provided UI, and the user only exposes the one file they chose. Decode with <code>ImageDecoder</code>, downsample to canvas size, insert as a new layer. Perfect for reference images.</li>
+      <li><strong>Project format</strong> — use <strong>OpenRaster (.ora)</strong> rather than inventing one. It's a ZIP with <code>stack.xml</code>, a PNG per layer, and a merged preview; Krita and GIMP open it. The spec tolerates extra files, so tuck your vector-layer JSON and brush references inside the same archive.</li>
+      <li><strong>Autosave</strong> — periodically and on <code>onStop()</code>, with crash recovery on launch. Non-negotiable in an art app; losing an hour of drawing is unforgivable.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">10</span><h2>Customizable toolbars</h2></div>
+  <div class="col stack">
+    <p>Build a tool <em>registry</em> from the start: every action is an entry with a stable ID, icon, label, and optional parameter panel. Toolbars then become a serialized list of IDs, stored in Proto DataStore, and customization is just editing that list.</p>
+    <p>Long-press enters edit mode; drag to reorder, add, or remove. Support docking left or right — a right-handed artist wants tools out from under their hand, and this is the accessibility win people notice most on a pen tablet. Always keep "reset to default" reachable. In Compose this is a <code>LazyRow</code>/<code>LazyColumn</code> plus <code>detectDragGesturesAfterLongPress</code>.</p>
+    <p>The colour wheel is a custom Compose canvas: HSV ring with an inner triangle or square, plus hex entry, a recent-colours strip, and a saved palette. Make it dismissible and repositionable — screen space on an 11" tablet is the scarce resource.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">11</span><h2>Stack &amp; module layout</h2></div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Language</strong></td><td>Kotlin</td><td>Coroutines and Flow for the async layer; NDK only if profiling demands it</td></tr>
+        <tr><td class="num"><strong>Min / target SDK</strong></td><td class="num">29 / 34</td><td>API 29 is the floor for front-buffered rendering anyway</td></tr>
+        <tr><td><strong>Build</strong></td><td>Gradle Kotlin DSL</td><td>Version catalogs, convention plugins across modules</td></tr>
+        <tr><td><strong>UI chrome</strong></td><td>Compose + Material 3</td><td>Panels, layer list, toolbars — everything except the canvas</td></tr>
+        <tr><td><strong>Canvas</strong></td><td>SurfaceView + GLES 3.0</td><td>Vulkan is faster but triples the work and the driver variance is real</td></tr>
+        <tr><td><strong>Ink</strong></td><td><code>androidx.graphics:graphics-core</code><br><code>androidx.input:input-motionprediction</code><br><code>androidx.ink</code></td><td><code>graphics-core</code> and <code>motionprediction</code> are v1; <code>androidx.ink</code> for the Phase 0 spike and the v2 vector layer</td></tr>
+        <tr><td><strong>Persistence</strong></td><td>Proto DataStore + files</td><td>Settings and toolbar layouts; documents as .ora on disk</td></tr>
+        <tr><td><strong>DI</strong></td><td>Hilt, or manual</td><td>App is small enough that manual wiring is defensible</td></tr>
+        <tr><td><strong>Testing</strong></td><td>JUnit + golden images</td><td>Brush output regressions are invisible without pixel goldens</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre class="tree">artiest/
+├── <b>:app</b>          activity, navigation, DI wiring
+├── <b>:ui</b>           Compose panels, colour wheel, layer list, toolbars
+├── <b>:canvas</b>       SurfaceView host, input pipeline, pan/zoom/rotate
+├── <b>:engine</b>       GL renderer, layer stack, compositor
+├── <b>:brush</b>        brush model, presets, response curves
+├── <b>:document</b>     document model, vector layers, undo stack
+└── <b>:io</b>           .ora read/write, PNG/JPEG export, image import</pre>
+</section>
+
+<svg class="rule accent" viewBox="0 0 600 7" preserveAspectRatio="none" aria-hidden="true"><path d="M0,3.5 C130,1.1 210,.6 300,.6 C390,.6 470,1.1 600,3.5 C470,5.9 390,6.4 300,6.4 C210,6.4 130,5.9 0,3.5 Z" fill="currentColor"/></svg>
+
+<section>
+  <div class="sechead"><span class="secnum">12</span><h2>Build sequence</h2></div>
+  <div class="col">
+    <p class="lede">Ordered so the riskiest unknown is settled in week one and every phase after it produces something you can actually draw with.</p>
+  </div>
+
+  <div class="phases">
+    <div class="ph gate">
+      <div class="spine"><div class="dot">0</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Hardware spike <span class="chip pick">go / no-go</span> <span class="chip">~1 week</span></h3>
+        <p>Not an app — a logging harness. Dump every <code>MotionEvent</code> field the Pro Pen 3 produces: pressure range and quantization, tilt, orientation, hover distance, sample rate, tool types, button state. Then film the screen at 240 fps and count frames from tip movement to ink.</p>
+        <p class="out"><b>Answers:</b> what latency is actually achievable, and whether the Ink API path clears your bar on its own.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">1</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Minimum ink <span class="chip">2–3 weeks</span></h3>
+        <p>One bitmap layer, one round pen, front-buffered rendering with prediction, pan/zoom/rotate, PNG export via MediaStore.</p>
+        <p class="out"><b>Bar to clear:</b> it feels good to draw on. Nothing else matters until this does.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">2</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Brush engine <span class="chip">3–4 weeks</span></h3>
+        <p>Stamp pipeline, scratch-buffer compositing, the brush data model, all three presets, size/opacity/stabilization/AA controls, pressure curves, eraser.</p>
+        <p class="out"><b>Bar to clear:</b> the pencil reads as graphite, not as a grey pen.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">3</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Layers &amp; undo <span class="chip">2–3 weeks</span></h3>
+        <p>Full layer stack with add/rename/delete/reorder/opacity/visibility, cached above-below compositing, layer panel, and the undo system from section 08.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">4</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Colour &amp; files <span class="chip">2 weeks</span></h3>
+        <p>HSV wheel, palette and history, .ora save/load, JPEG export, image import as reference layer, autosave with crash recovery.</p>
+        <p class="out"><b>Milestone:</b> this is the first version genuinely usable for real work.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">5</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Customization &amp; polish <span class="chip">2 weeks</span></h3>
+        <p>Toolbar editing, pen-button mapping, settings, performance pass on the real device.</p>
+        <p class="out"><b>Ships v1:</b> 12–15 weeks from a standing start.</p>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="spine"><div class="dot">v2</div><div class="bar"></div></div>
+      <div class="body">
+        <h3>Vector layers <span class="chip warn">deferred</span></h3>
+        <p>Vector layer type on <code>androidx.ink</code>, stroke objects, re-rasterization on zoom, select/move/delete/recolour, then vector erase.</p>
+        <p class="out"><b>Design for it now, build it later:</b> see the forward-compatibility note in the risk register — one cheap decision in Phase 3 keeps this from becoming a rewrite.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">13</span><h2>Risk register</h2></div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Risk</th><th>Sev</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Latency target missed</strong></td>
+          <td><span class="chip crit">Critical</span></td>
+          <td>It is the requirement the app exists to satisfy. Phase 0 measures it before anything is built on the assumption, and all six techniques in section 02 stack — don’t skip any.</td>
+        </tr>
+        <tr>
+          <td><strong>Your GL engine underdelivers on brush feel</strong><br>the reason for building it at all</td>
+          <td><span class="chip warn">High</span></td>
+          <td>The Phase 0/1 Ink spike gives you a concrete baseline to beat. If the GL engine can’t clearly exceed it by the end of Phase 2, that is real evidence — fall back to Ink for v1 rather than sinking more weeks into it.</td>
+        </tr>
+        <tr>
+          <td><strong>Vector creeps back into v1</strong></td>
+          <td><span class="chip warn">Medium</span></td>
+          <td>Cheap insurance in Phase 3: record each stroke’s input batch and brush reference in the document model even for raster layers, and never discard it after rasterizing. Vector then arrives in v2 as a new layer type rather than a document-model rewrite.</td>
+        </tr>
+        <tr>
+          <td><strong>Unknown SoC / GPU</strong><br>Wacom doesn’t publish the MovinkPad’s chipset</td>
+          <td><span class="chip warn">Medium</span></td>
+          <td>Profile in Phase 0. Stick to GLES 3.0 core, avoid exotic extensions, and set canvas-size defaults from measured fill rate.</td>
+        </tr>
+        <tr>
+          <td><strong>Stabilization fights the latency goal</strong></td>
+          <td><span class="chip ok">Low</span></td>
+          <td>Understood and designed around — per-brush slider that genuinely reaches zero, defaulting low. Listed only so it isn’t mistaken for a bug later.</td>
+        </tr>
+        <tr>
+          <td><strong>Memory pressure</strong></td>
+          <td><span class="chip ok">Low</span></td>
+          <td>Resolved by the hard 4096×4096 ceiling: 64 MiB per layer against 8 GB of RAM. Enforce a texture budget in the layer panel and the failure mode becomes a refused “add layer”, not a crash mid-stroke.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="secnum">14</span><h2>Settled, and what’s left</h2></div>
+  <div class="col">
+    <p class="lede">All four open questions are answered, and every one of them removed work rather than adding it. Nothing is blocking a start.</p>
+  </div>
+  <div class="qs">
+    <div class="q"><span class="qn">✓</span><p><strong>MovinkPad 11 (DTH-A116)</strong>, the standalone tablet.<em>No external display, no USB HID routing — an ordinary Android app.</em></p></div>
+    <div class="q"><span class="qn">✓</span><p><strong>Vector layers deferred to v2.</strong><em>Removes 3–4 weeks and inverts the engine decision in section 04 toward custom GL.</em></p></div>
+    <div class="q"><span class="qn">✓</span><p><strong>Personal tool, not a release.</strong><em>GPL prior art becomes usable while the repo stays private; the polish bar and texture-licensing pressure both drop.</em></p></div>
+    <div class="q"><span class="qn">✓</span><p><strong>4096×4096 hard canvas limit.</strong><em>Deletes the tile system outright and fixes the layer budget at 64 MiB per full-size layer.</em></p></div>
+  </div>
+</section>
+
+<footer>
+  <div class="col">
+    <p>Hardware specs from Wacom and the Seven Pens drawing-tablet database; Android stylus APIs from developer.android.com, verified September 2026.</p>
+    <p>Estimates assume solo work at a steady pace and no prior Android GL experience — halve the engine phases if you've shipped a renderer before.</p>
+  </div>
+</footer>
+
+</div>
