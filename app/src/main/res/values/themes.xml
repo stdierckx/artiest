@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A framework parent, not AppCompat or Material Components: it keeps the
+         XML theme free of a support-library dependency, and the only thing the
+         theme has to do is get out of the canvas's way. -->
+    <style name="Theme.Artiest" parent="android:Theme.Material.NoActionBar" />
+</resources>

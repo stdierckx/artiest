@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Distinct from the spike's "Artiest Phase 0". Both APKs are installed at
+         once and neither ships a launcher icon, so the label is the only thing
+         telling them apart on the tablet. -->
+    <string name="app_name">Artiest</string>
+</resources>
