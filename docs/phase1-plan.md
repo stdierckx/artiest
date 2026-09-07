@@ -1,35 +1,73 @@
 # Phase 1 — Minimum ink
 
 > Reconciled 2026-09-07 against what was measured on DTHA116, against 13
-> serious refutations from adversarial review of the first draft, and then
-> again after **W0 ran and fired its stop condition**. See **What changed** at
-> the end for the delta.
+> serious refutations from adversarial review of the first draft, then after
+> **W0** fired its stop condition, and finally after **W1 and W2 ran and the
+> arms were judged on hardware**. See **What changed** at the end for the delta.
 
 ## The decision
 
-**There is no front buffer on this hardware.** W0 measured it: the MT8781V/NA
-gralloc refuses `USAGE_FRONT_BUFFER`, including the bare bit on its own, so no
-superset can ever be granted. `CanvasFrontBufferedRenderer` was always running
-in its fallback path here. The plan's stop condition therefore fires, and
-Phase 1's wet-ink path is **`DirectSurfaceInkSurface`** — a plain
-`SurfaceHolder` on a dedicated render thread using `lockHardwareCanvas`.
+Phase 1's wet-ink path is **`CanvasFrontBufferedRenderer`** — chosen on the only
+criterion the phase has, which is how it feels under the pen.
+
+The route here was not straight. W0 measured that this device has **no front
+buffer at all**: the MT8781V/NA gralloc refuses `USAGE_FRONT_BUFFER`, including
+the bare bit, so `CanvasFrontBufferedRenderer` has always run in its fallback
+path. That fired the stop condition, and W1 built the replacement —
+`DirectSurfaceInkView`, a plain `SurfaceHolder` on a dedicated render thread
+using `lockHardwareCanvas` — so the two could be compared directly, with the
+plain `View` baseline as calibration.
+
+**Judged on hardware at a verified 90 Hz, graphics-core still won.** Its ink sits
+closest to the pen tip. Baseline and DirectSurface both read as *smoother* —
+evenly spaced frames — but visibly further behind. That is a signature of
+vsync-locked scheduling: both of those paths wait for the next vsync before
+drawing, while `renderFrontBufferedLayer` is called per sample straight from
+`onTouchEvent` and starts drawing at once.
+
+**We are shipping the winner without knowing why it wins.** The coalescing
+explanation above is a hypothesis that fits the evidence; it was not tested,
+because for Phase 1 it does not need to be — the bar is felt quality and one arm
+plainly clears it. It becomes a real question again in **Phase 2**, when a
+custom GL engine has to reproduce the win without the library, and it is better
+answered then with the real engine to measure against than now against
+`drawLine` segments.
 
 Everything else stands. Build Phase 1 as **two Gradle modules**: `:engine`, a
 pure-Kotlin JVM module holding every stroke decision testable without a device,
 and `:app`, the single Android module holding everything that touches a
 `Canvas`, a `Surface` or a `MotionEvent`. The document is **one ARGB_8888
 `Bitmap` at 2160×3300**, and the layer is written **exactly once per stroke, on
-the render thread** — never incrementally, never from the UI thread. That single
-write makes `ACTION_CANCEL` free (the layer never contained the stroke), gives
-one writer and one lock, and deletes an entire tile-backup subsystem.
+the render thread, inside `onDrawMultiBufferedLayer`** — never incrementally,
+never from the UI thread. That single write makes `ACTION_CANCEL` free (the
+layer never contained the stroke), gives one writer and one lock, and deletes an
+entire tile-backup subsystem.
 
-The render-path swap costs one file because the `InkSurface` seam was specified
-before W0 ran. It also **removes** the phase's hardest constraint: a
-`lockHardwareCanvas` surface is redrawn in full every frame, so there are no
-already-baked pixels stuck at an old transform, and the freeze-the-transform
-rule disappears with them. What it buys instead is a new obligation — every
-frame now pays for a full document blit — which is why the throughput probe
-moves early.
+### What this choice costs, stated plainly
+
+`CanvasFrontBufferedRenderer` accumulates. Even with no front buffer it preserves
+its buffer between renders and draws only the params added since the last flush,
+so pixels already drawn are never re-transformed. Choosing it therefore buys back
+every constraint the `DirectSurface` design had removed:
+
+- **The transform freezes for the lifetime of a wet stroke.** No live zoom or
+  rotate while the pen is down.
+- **Strict pen/gesture mutual exclusion** in `InputRouter` to enforce that.
+- **Predicted ink is unretractable** — a speculative dab is baked until pen-up,
+  which is the harsher of the two failure modes for prediction.
+- **Clearing takes three calls in a specific order**, because `clear()` never
+  invokes the draw callback.
+- **A dependency on `androidx.graphics`** whose headline feature this device does
+  not have.
+
+That is a real trade: canvas interaction and design complexity, paid for feel
+that can be seen with the naked eye. Given the phase's stated bar, it is the
+right way round — but it is a decision made knowingly, not a drift.
+
+**Keep the `InkSurface` seam regardless.** It made the W0 pivot cost a day rather
+than a week, `DirectSurfaceInkView` stays in the frozen spike as a control, and
+Phase 1 codes against the interface with graphics-core behind it. It costs
+nothing and it has already paid for itself once.
 
 ## What Phase 0 settled, and what it did not
 
@@ -89,15 +127,15 @@ moves early.
 
 **Not settled:**
 
-- **Whether `DirectSurfaceInkSurface` matches the graphics-core fallback.** The
-  measured win came from *something*, and the leading candidates are a dedicated
-  `SurfaceControl` on its own render thread plus graphics-core's unconditional
-  1000 fps frame-rate vote — both of which a plain `SurfaceHolder` path can
-  reproduce. This is now the phase's central open risk and W1 measures it.
-- **Whether `lockHardwareCanvas` preserves buffer contents between frames.**
-  Assume **not** — the documented contract is that the content is undefined and
-  the whole surface must be redrawn. If it turns out to preserve on this device,
-  do not exploit it.
+- **Why graphics-core wins.** It does — W1 settled that on hardware — but the
+  mechanism is unverified. The leading hypothesis is vsync coalescing:
+  `renderFrontBufferedLayer` is called per sample straight from `onTouchEvent`
+  and starts drawing immediately, while both losing arms wait for the next vsync,
+  which fits "smoother but further behind" exactly. Alternatives not ruled out:
+  the unconditional 1000 fps frame-rate vote changing SurfaceFlinger's
+  presentation deadline, or buffer-queue depth. **Not a Phase 1 blocker** — we
+  ship the winner. It becomes load-bearing in Phase 2, when a GL engine has to
+  reproduce the win without the library.
 - **No absolute latency number exists.** The A/B verdict is comparative and
   visual. Deliberately deferred: the number is worth more measured against
   Phase 1's real ink than against the spike's `drawLine` segments.
@@ -114,12 +152,17 @@ was being compared against was `BaselineInkView`, a plain `View` going through
 the ordinary view hierarchy and HWUI.
 
 The win is real — it was seen — but the mechanism is not the one the name
-implies. What the winning arm actually had over the baseline was a dedicated
-`SurfaceControl` rendered on its own thread, plus graphics-core's unconditional
-1000 fps frame-rate vote (`configureFrontBufferLayerFrameRate`, verified
-unconditional in bytecode). Both are reproducible without the library, which is
-why `DirectSurfaceInkSurface` is a credible replacement rather than a
-consolation prize — and why W1 must measure it rather than assume it.
+implies. W1 built the obvious replacement, reproducing what the library appeared
+to be doing: a dedicated `SurfaceControl` on its own render thread plus the same
+unconditional 1000 fps frame-rate vote
+(`configureFrontBufferLayerFrameRate`, verified unconditional in bytecode).
+
+**It was not enough.** Judged three ways at a verified 90 Hz, graphics-core was
+still clearly closest to the tip; `DirectSurface` and the plain-`View` baseline
+both read as smoother but further behind. Whatever graphics-core is doing, it is
+not only those two things — and the design that reproduces two of its three
+ingredients still loses. That is why Phase 1 ships the library rather than a
+reimplementation of it.
 
 It also gives the unbuffered-dispatch regression a plausible mechanism: with no
 front buffer, each `renderFrontBufferedLayer` is a full SurfaceControl
@@ -188,75 +231,62 @@ modules* and there is exactly one. They arrive in the same commit that creates
 the second. `:app` takes `applicationId be.thalos.artiest`, distinct from
 `be.thalos.artiest.spike`, so both APKs sit on the tablet.
 
-**Render path — `DirectSurfaceInkSurface`.** `InkSurfaceView` is a bare
-`SurfaceView` owning **one dedicated render thread** with a `HandlerThread` and
-a `SurfaceHolder.Callback`. The thread runs a single loop: take the current
-`CanvasTransform` and the pending dab batch, `holder.lockHardwareCanvas()`,
-`drawColor(paperWhite)`, `concat(docToView)`, `drawBitmap(layer, 0f, 0f,
-filterPaint)`, draw the wet stroke's dabs on top, `unlockCanvasAndPost()`.
+**Render path — `CanvasFrontBufferedRenderer`.** `InkSurfaceView` is a bare
+`SurfaceView` owning a `CanvasFrontBufferedRenderer<DabBatch>`, constructed in
+`onAttachedToWindow` and `release(true)`d in `onDetachedFromWindow` — the
+spike's lifecycle, javap-verified against the 1.0.4 aar.
 
-**The whole surface is redrawn every frame.** `lockHardwareCanvas` gives no
-content guarantee between frames, so there is nothing to preserve and nothing
-accumulates. That is the model, and three things follow from it:
-
-- **The transform is free to change at any time,** including mid-stroke. There
-  are no already-baked pixels to strand at an old scale. The freeze-transform
-  invariant that dominated the front-buffered design is gone.
-- **Cancellation is still free**, for the original reason: the layer `Bitmap`
-  only receives the stroke at pen-up, so `ACTION_CANCEL` drops the wet dab list
-  and the next frame simply does not draw it.
-- **Every frame costs a full blit.** The surface is view-sized (1181×2200 per
-  `dumpsys`), so this is one matrixed blit of ~2.6 Mpx plus the wet dabs — not
-  the 7.1 Mpx document. Unmeasured, and W2 measures it before anything is built
-  on it.
-
-Draw is driven by **input arrival, coalesced onto `Choreographer`**: a sample
-arriving marks the frame dirty, and at most one frame is in flight. At 250–320 Hz
-against a 90 Hz panel this is the difference between 3 frames of work and 300.
-
-The renderer must be torn down in `surfaceDestroyed` **synchronously** — the
-render thread cannot outlive the `Surface` it is locking, and `lockHardwareCanvas`
-on a destroyed surface throws. Quit the thread and join it inside the callback.
-
-**It must not call `setBackgroundColor`.** This is not a style preference: a
+**It must not call `setBackgroundColor`.** Not a style preference: a
 `SurfaceView` shows its surface through a transparent hole punched by
 `clearSurfaceViewPort()`, and `super.draw()` paints the view's background *over*
-that hole. An opaque background hides the front buffer completely — ink, frame
-counter and all — while the renderer continues submitting frames perfectly. This
-cost the spike a full session of blank-canvas debugging and was fixed in
-`b02a531`. Paper white comes from `onDrawMultiBufferedLayer`'s `drawColor`.
+that hole. An opaque background hides the surface completely — ink, frame
+counter and all — while the renderer keeps submitting frames perfectly. This
+cost a full session of blank-canvas debugging and was fixed in `b02a531`. Paper
+white comes from `onDrawMultiBufferedLayer`'s `drawColor`.
 
 `InkSurfaceView` implements a narrow `InkSurface` interface (`beginStroke(Matrix)`,
 `drawWet(DabBatch)`, `commitStroke(Stroke)`, `cancelStroke()`, `redrawDry()`,
-`release()`) expressed in strokes and dabs with no library type in the
-signature, so a renderer swap is one file.
+`release()`) expressed in strokes and dabs with **no library type in the
+signature**. That seam is why the W0 pivot cost a day, and it stays even though
+the pivot was ultimately reversed — Phase 2 will want it again.
 
-Two details of the frame body are load-bearing:
+- **`onDrawFrontBufferedLayer(canvas, w, h, batch)`** — the library invokes this
+  **N times on one `RecordingCanvas` with no `save()`/`restore()` between
+  invocations**, so a bare `canvas.concat(m)` compounds: the second batch in a
+  flush draws at M², the third at M³. The body must be
+  `val s = canvas.save(); canvas.concat(frozenDocToView); …drawDabs…;
+  canvas.restoreToCount(s)`. Both allocate nothing, so the zero-allocation
+  budget survives.
+- **`onDrawMultiBufferedLayer(canvas, w, h, params)`** — ignores `params`
+  entirely and reproduces the scene from app-held state. It (1) takes
+  `pendingStroke` via `AtomicReference.getAndSet(null)` and rasterizes its dabs
+  into the layer `Bitmap` under `layerLock`; (2) `drawColor(paperWhite)`;
+  (3) `concat(docToView)`; (4) `drawBitmap(layer, 0f, 0f, filterPaint)` where
+  `filterPaint` has `isFilterBitmap = true` and `isAntiAlias = false` — **a null
+  Paint means point sampling**, which would nearest-neighbour-resample the whole
+  document at every zoom and make fine ink crawl. It never posts to or blocks on
+  the main thread: the synchronous `surfaceRedrawNeeded` path awaits it on an
+  untimed `CountDownLatch`.
 
-- **`drawBitmap(layer, 0f, 0f, filterPaint)`, never a null `Paint`.** A null
-  Paint means point sampling, which would nearest-neighbour-resample the whole
-  document at every zoom and rotation and make fine ink crawl and shimmer.
-  `filterPaint` has `isFilterBitmap = true` and `isAntiAlias = false`.
-- **`save()`/`restoreToCount()` around the `concat`,** even though a fresh
-  `lockHardwareCanvas` canvas arrives with an identity matrix. It costs nothing,
-  and it is the habit that stops the compounding-matrix bug the front-buffered
-  design would have shipped, where a callback invoked N times on one recording
-  canvas turned `concat(M)` into M², M³.
+  **Register the app's own `SurfaceHolder.Callback`** and call `redrawDry()`
+  from `surfaceChanged`. The library does *not* redraw there — it only tears
+  down and rebuilds its SurfaceControls — so without this the canvas blanks on
+  rotation or resize.
 
-`CanvasFrontBufferedRenderer` is **retired from the design**, and the reason goes
-in a comment so Phase 2 does not reopen it: on this device it cannot obtain a
-front buffer, so it contributes a SurfaceControl, a render thread and a frame
-rate vote — all of which `DirectSurfaceInkSurface` has directly — in exchange
-for an accumulate-only model whose pixels cannot be re-transformed. On hardware
-that *does* grant `USAGE_FRONT_BUFFER` the trade would be worth revisiting;
-`DeviceProbe.frontBufferSupported` is what tells you, and it is exported.
+**Do not translate `renderFrontBufferedLayer` into a vsync-coalesced loop.** The
+library calls it once per sample straight from `onTouchEvent`, and W1's evidence
+is that this is where the feel comes from: the two arms that waited for the next
+vsync before drawing both read as smoother *and further behind*. Coalescing looks
+like an obvious efficiency win — W2 shows throughput was never the constraint —
+and taking it would trade away the only thing this path was chosen for.
 
-`LowLatencyCanvasView` is **also rejected**: its internal scene `Bitmap` is
-*view*-sized, so it cannot represent a 2160×3300 document you pan around, and
-its `onDraw` calls `canvas.setMatrix` (replace, not concat). GL is **deferred to
-Phase 2** and recorded as debt: Phase 1's entire render is antialiased circles
-plus one matrixed bitmap blit, both of which hardware Canvas already does on the
-GPU.
+`DirectSurfaceInkView` stays in the frozen spike as the control that established
+this, and `LowLatencyCanvasView` is **rejected** with the reason in a comment so
+Phase 2 does not reopen it: its internal scene `Bitmap` is *view*-sized, so it
+cannot represent a 2160×3300 document you pan around, and its `onDraw` calls
+`canvas.setMatrix` (replace, not concat). GL is **deferred to Phase 2** and
+recorded as debt: Phase 1's entire render is antialiased circles plus one
+matrixed bitmap blit, both of which hardware Canvas already does on the GPU.
 
 **Threading contract, stated once and enforced:** the layer `Bitmap` is written
 on the render thread only, only in the commit step at pen-up, under `layerLock`.
@@ -353,46 +383,57 @@ denominator: **7.70 GiB total, 4.4 GiB free**, so a 27.2 MiB document plus a
 transient export copy plus a view-sized swap chain is comfortable, and Open
 Question 2 can now be answered on a real number rather than an assumption.
 
-## The canvas transform, and what W0 changed about it
+## The canvas transform — the hard part, and it is back
 
-The first draft's hardest constraint came from the front buffer's accumulate-only
-model: `SingleBufferedCanvasRenderer` iterates only the params added since the
-last flush and draws them into the **same preserved `HardwareBuffer`**, so pixels
-already in the front buffer are never re-recorded and never re-transformed. A
-zoom mid-stroke would therefore leave the already-baked half at the old scale
-while new dabs land at the new one — one stroke rendered at two transforms — and
-`SurfaceControlCompat.Transaction` cannot rescue it, having `setScale` and eight
-discrete `setBufferTransform` cases but no `setMatrix`.
+`SingleBufferedCanvasRenderer$DrawParamRequest.onExecute` calls
+`mRenderNode.beginRecording()`, iterates **only `mPendingParams`** — those added
+since the last flush — invokes your callback for each, clears the list,
+`endRecording()`, and draws that RenderNode into the **same preserved
+`HardwareBuffer`**. Pixels already drawn are never re-recorded and never
+re-transformed. The only APIs that touch existing content are `clear()` and
+`commit()`, and both discard the whole thing. There is no invalidate, no partial
+clear, no re-transform.
 
-**That constraint is gone**, because the front buffer is gone. A
-`lockHardwareCanvas` surface is redrawn in full every frame from the layer
-`Bitmap` plus the live wet-dab list, so the transform can change at any time,
-including under the pen. Live zoom while drawing is *possible* here in a way it
-was not under the front-buffered design.
+This is true **whether or not the device grants a front buffer**. W0 proved this
+one does not, and the accumulate-only semantics are unchanged by that: the
+buffer is still preserved between renders. So choosing graphics-core means
+accepting the constraint in full.
 
-Two things replace it as the hard parts.
+**A transform change mid-stroke renders one stroke at two transforms
+simultaneously.** Zoom 1.0×→2.0× with the pen down and the already-drawn half
+stays at the old scale and old screen position while every subsequent dab lands
+at the new one. Rotate and the old pixels keep their old orientation.
+`SurfaceControlCompat.Transaction` cannot rescue it — it has `setScale` and
+eight discrete `setBufferTransform` cases, but no `setMatrix`, so arbitrary
+rotation is not expressible at the compositor.
 
-**1. Every frame pays for the document blit.** Under the front-buffered design
-only gesture frames redrew the dry layer; now every frame does. The surface is
-view-sized so it is ~2.6 Mpx of matrixed blit rather than the full 7.1 Mpx
-document, and drawing is coalesced onto `Choreographer` so it happens at most 90
-times a second rather than 320. But nothing has measured it on a Mali-G57 MC2,
-and the whole render path rests on it. **W2 measures it before W8 is written.**
+**The rule is absolute: the transform is frozen for the lifetime of a wet
+stroke.** `InkSurfaceView` snapshots `docToView` at `ACTION_DOWN` and both
+callbacks concat that same snapshot; the render thread never reads the live
+`CanvasTransform`. No live zoom while drawing. **W2's throughput headroom does
+not buy a way out of this** — it is a semantic constraint of the renderer, not a
+performance one.
 
-**2. Predicted ink is retractable now, which is a genuine gain.** Under the front
-buffer a speculative dab stamped at frame N was baked until pen-up. With a full
-redraw each frame, predicted dabs simply are not drawn in the next frame if the
-real sample contradicts them. That does not make prediction good — the measured
-result was that it hurt — but it changes the failure mode from a permanent spur
-to a transient one, and it is worth re-judging in W12 with that in mind.
+**Predicted ink is unretractable.** A speculative dab stamped at frame N is baked
+until pen-up. "Predicted dabs go to the front buffer only, so the commit path
+drops them for free" is true of the *layer* and false of the *screen*. That is
+the harsher failure mode — a spur that persists rather than one that vanishes
+next frame — and it is why prediction ships off by default.
 
-**A correction worth keeping** even though the path is retired: front-buffered
-rendering does *not* "skip the compositor", as the spike's comments and
-`docs/analysis.html` both claim. `CanvasFrontBufferedRenderer` builds and commits
-a full `SurfaceControl` transaction on **every** render. That is the likely
-mechanism behind the unbuffered-dispatch regression, and it is why
-`DirectSurfaceInkSurface` is not obviously slower: both go through
-SurfaceFlinger, and neither was ever scanning out directly on this device.
+During a gesture there is no wet ink by construction, so only the dry layer
+moves: one `renderMultiBufferedLayer(emptyList())` per **`Choreographer` frame
+with coalescing**, at most one in flight — not one per touch event, which at
+250–320 Hz would be a full commit transaction per event. At pen-up always
+`commit()`, never `renderMultiBufferedLayer`: only `commit()` increments the
+counter that defers concurrent front-buffer renders until the transaction lands.
+
+**A correction worth keeping.** Front-buffered rendering does *not* "skip the
+compositor", as the spike's comments and `docs/analysis.html` both claim.
+`CanvasFrontBufferedRenderer` builds and commits a full `SurfaceControl`
+transaction on **every** render — and on this device, with no front buffer, it
+is an ordinary buffer being scanned out. Whatever the win is, it is not a
+scanout shortcut, and W1 showed it is not the `SurfaceControl` plus render
+thread plus frame-rate vote either, since reproducing those lost.
 
 ### Palm rejection, which does not change
 
@@ -410,19 +451,18 @@ Note the sharp edge — the pen's back reports `TOOL_TYPE_FINGER`, so it lands i
 the rejected bucket. That is the correct outcome (it is not an eraser) but it
 must be a deliberate decision in the router rather than an accident.
 
-### The clear button
+### The clear button — three calls, in this order
 
-Blank the layer `Bitmap` under `layerLock`, drop the wet dab list, mark the frame
-dirty. One path, no library semantics to get wrong.
+Blank the app's layer `Bitmap` under `layerLock`, then `renderer.clear()`, then
+`renderer.renderMultiBufferedLayer(emptyList())`.
 
-This is simpler than it was, and the reason is worth recording: under
-graphics-core, clearing needed three calls in a specific order, because
-`renderer.clear()` blanks the multi-buffered layer **without ever invoking the
-draw callback** (it records a `BlendMode.CLEAR` into the library's own
-RenderNode), while `commit()` hands the whole `ParamQueue` back to the callback
-and resurrects the stroke into the list just emptied. The spike's `clear()` had
-exactly that bug and it is fixed in `54999d8` — the spike is still the A/B
-control, so it needed to be right.
+Each is load-bearing. `renderer.clear()` blanks the multi-buffered layer
+**without ever invoking the draw callback** — it records a `BlendMode.CLEAR`
+into the library's own RenderNode — so paper white and anything else the
+callback paints would simply vanish without the third call. And never
+`commit()`: it hands the whole `ParamQueue` back to the callback and resurrects
+the stroke into the list just emptied. The spike's `clear()` had exactly that
+bug, fixed in `54999d8`.
 
 **Prediction detail carried forward.**
 `PredictionGate` (pure, in `:engine`) gates on **curvature, not distance**: it suppresses prediction outright when the heading change between the
@@ -448,34 +488,38 @@ half a day** before any of it is built on.
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | 0 | ~~Front-buffer reality probe~~ **DONE — `54999d8`. Verdict: no front buffer. Stop condition fired.** | `:spike` | — | — | ✔ |
-| 1 | **`DirectSurfaceInkSurface` arm in the spike**, A/B'd by eye against both the baseline and the graphics-core fallback | `:spike` | **High** | — | 1.0 |
+| 1 | ~~`DirectSurface` arm, A/B'd by eye~~ **DONE — `24701ab`. Graphics-core still closest to the tip; both vsync-locked arms smoother but behind.** | `:spike` | — | — | ✔ |
 | 2 | ~~Full-redraw throughput probe~~ **DONE. draw p99 4.0 ms against an 11.1 ms budget, 0% dropped over 600 frames. Full redraw is viable.** | `:spike` | — | — | ✔ |
 | 3 | Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day. Freeze `:spike` after this | `:spike` | Low | 1 | 1.0 |
 | 4 | `PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer` | both | Low | 3 | 1.5 |
 | 5 | `CanvasTransform` + native JVM tests | `:engine` | Low | 3 | 0.75 |
 | 6 | `Document`, `Layer`, `Stroke` | `:app` | Low | 3 | 0.5 |
 | 7 | `Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens | `:engine` | Medium | 4, 5 | 1.5 |
-| 8 | `InkSurface` + `InkSurfaceView`: render thread, `SurfaceHolder.Callback`, `lockHardwareCanvas` frame loop, `DabBatchPool` | `:app` | **High** | 2, 6, 7 | 1.25 |
+| 8 | `InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool` | `:app` | **High** | 6, 7 | 1.0 |
 | 9 | Wet ink end to end, allocation trace, batch-pool slot validation | `:app` | Medium | 8 | 0.75 |
 | 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
 | 11 | `Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle | both | Medium | 10 | 0.75 |
-| 12 | `GestureController` — pan/zoom/rotate. **Transform may change mid-stroke**, so no freeze handshake | `:app` | Medium | 10 | 1.0 |
+| 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
 | 15 | `MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port | `:app` | Low | 11, 13, 14 | 1.0 |
 | 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** | device | Medium | 15 | 1.5 |
 | 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
 
-**≈14.25 days**, down from 15.25 because W0 is spent and the front-buffered
-design's freeze-transform handshake is gone with it. Still over a 10–15 day
-budget, and I would rather say so than discover it in week three. If it runs
-long, cut in this order: W3 (the Ink arm — it buys Phase 2's kill criterion, not
-Phase 1's ink), then W12's fallback ladder, then W17 slides into Phase 2's first
-commit. Do **not** cut W1, W2 or W16.
+**≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
+handshake is back in W12 with the graphics-core decision. Still at the top of a
+10–15 day budget, and I would rather say so than discover it in week three. If it
+runs long, cut in this order: W3 (the Ink arm — it buys Phase 2's kill criterion,
+not Phase 1's ink), then W12's fallback ladder, then W17 slides into Phase 2's
+first commit. Do **not** cut W16.
 
 **W0 — DONE, `54999d8`.** The probe returned `false` for the library's exact
 usage set (4294970112) *and* for the bare `USAGE_FRONT_BUFFER` bit, so the stop
-condition fired and the render path is `DirectSurfaceInkSurface`.
+condition fired and W1 built the replacement. W1 then judged that replacement to
+be worse, and the decision was to ship graphics-core anyway — running in a
+fallback path, on a device with no front buffer, because it is what feels best
+under the pen. W0's value was not the pivot it triggered but the fact that the
+choice is now made knowingly.
 
 Two lessons from it worth keeping, because both nearly went the other way:
 
@@ -496,14 +540,30 @@ degrade, as the first draft claimed. `obtainUsageFlagsV33()` is literally
 `isSupported(4294967296L) ? 4294970112L : 2864L` — it probes first and lowers
 its own request, with no log line. Same effect, different diagnosis.
 
-**W1 — how I'd know it went wrong.** Build `DirectSurfaceInkSurface` as a fourth
-arm in the spike's Latency tab, alongside baseline and the graphics-core
-fallback, and compare all three by eye. Gone wrong is **`DirectSurface` feeling
-clearly worse than the graphics-core arm**, which would mean the win came from
-something the library does that a plain `SurfaceHolder` does not — most likely
-its unconditional 1000 fps frame-rate vote, which is reproducible via
-`Surface.setFrameRate(1000f, …)`. Try that before concluding anything. If
-`DirectSurface` matches or beats it, the library leaves the design entirely.
+**W1 — DONE, `24701ab`. Graphics-core wins; the reimplementation lost.**
+`DirectSurfaceInkView` was built as a third arm reproducing what the library
+appeared to be doing — dedicated `SurfaceControl`, own render thread, the same
+unconditional 1000 fps frame-rate vote — and judged against it and the plain
+`View` baseline at a verified 90 Hz.
+
+Verdict, in the user's words: *"graphics core is the closest to the tip.
+baseline and directsurface are 'animated' a bit smoother it seems. but graphics
+core is definitely the closest following the tip of the pen."*
+
+The two losing arms are exactly the two that wait for vsync before drawing, which
+makes coalescing the leading suspect. **That was not tested** — building the
+immediate-scheduling variant was started and then abandoned once the decision was
+made to ship the library. So Phase 1 ships a path whose advantage is real,
+reproducible on demand, and unexplained. Phase 2 will have to explain it.
+
+Getting a trustworthy judgement needed four fixes to the harness first, none of
+which the arm itself would have revealed: a half-pixel translate that ran every
+dry pixel through the bilinear filter and made one arm look softer; ink silently
+discarded in a 20 px band at 1:1 where the document does not reach the view
+edges; `Predict` defaulting on while the three arms implement prediction
+incompatibly; and no way to see that the 90 Hz override had lapsed mid-run. **An
+A/B harness needs its own review pass** — three of those four would have produced
+a confident wrong answer rather than an obvious failure.
 
 **W2 — DONE. The full-redraw model is viable with room to spare.** Measured on
 the DirectSurface arm at a verified 90 Hz, rotating the layer through a live
@@ -643,10 +703,10 @@ questions, and deleting it is defensible only after W17 records a baseline.
    `github.com/stdierckx/artiest`. That already forecloses using GPL reference
    material (Krita, GIMP, MyPaint) as anything but read-and-reimplement.
    Confirm that is intended.
-4. **W0 said there is no front buffer. Ship `DirectSurfaceInkSurface` and move
-   on, or spend a week understanding why the MT8781 refuses it?** I would ship
-   and move on — the bar is felt quality, and the answer would not change what
-   gets built. Recorded here because it is the kind of thing that nags.
+4. **Answered.** W0 found no front buffer, W1 found the reimplementation lost
+   anyway, and the call was to ship graphics-core on felt quality. What remains
+   open is *why* it wins — deferred to Phase 2, where a GL engine has to
+   reproduce it. Recorded because it is the kind of thing that nags.
 
 ## What changed in reconciliation
 
@@ -734,3 +794,43 @@ survived only because both are refused here. And "isSupported says no" is
 indistinguishable from "isSupported says no to everything" without a
 discrimination control; that control was run, and it is the reason the verdict
 is trustworthy rather than merely alarming.
+
+### Round three — after W1 and W2, and the decision to ship graphics-core
+
+W0 fired the stop condition and this plan was rewritten around
+`DirectSurfaceInkSurface`. W1 then built that arm and **it lost**, so the plan is
+rewritten back.
+
+**What was actually established.** Judged on hardware at a verified 90 Hz,
+graphics-core is closest to the pen tip; the plain-`View` baseline and
+`DirectSurface` both read as smoother but further behind. Reproducing what the
+library appeared to be doing — dedicated `SurfaceControl`, own render thread,
+the same 1000 fps frame-rate vote — was **not sufficient**. Whatever it does, it
+is not only those three things.
+
+**What was not established, and is now deliberately unanswered.** Why. The
+leading hypothesis is that both losing arms wait for the next vsync before
+drawing while `renderFrontBufferedLayer` starts immediately, which fits
+"smoother but behind" precisely. The immediate-scheduling variant that would
+have tested it was started and abandoned once the decision was made. Phase 1
+does not need the answer; **Phase 2 does**, because a custom GL engine has to
+reproduce the win without the library.
+
+**What the decision costs.** Every constraint the `DirectSurface` design had
+removed comes back: frozen transform for the lifetime of a wet stroke, strict
+pen/gesture mutual exclusion, unretractable predicted ink, the three-call clear
+sequence, and a dependency on a library whose headline feature this device does
+not have. Deliberate, not drift.
+
+**W2 stands regardless.** Draw p99 4.00 ms against an 11.1 ms budget, 0% dropped
+over 600 frames. It was measured on the `DirectSurface` loop, so it no longer
+gates Phase 1's render path — but it does establish that this GPU has ample
+headroom for a full-document blit per frame, which is what Phase 3's layer
+compositing will need.
+
+**The lesson worth carrying.** Three of the four harness bugs found before W1
+could be judged would have produced a *confident wrong answer* rather than an
+obvious failure: a half-pixel translate softening one arm, ink discarded at the
+document edge, and prediction defaulting on across arms that implement it
+incompatibly. An A/B harness needs its own adversarial review before its output
+is trusted — the instrument is as likely to be wrong as the thing measured.
