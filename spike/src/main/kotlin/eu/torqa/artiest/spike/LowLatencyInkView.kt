@@ -160,6 +160,11 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
         return true
     }
 
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        capture?.onHoverEvent(event, this)
+        return super.onHoverEvent(event)
+    }
+
     fun clear() {
         committed.clear()
         renderer?.commit()

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -61,10 +62,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Harness(capture, report) {
+                    Harness(capture, report, { activityDisplay()?.refreshRate ?: 0f }) {
                         val uri = SessionExporter.writeToDownloads(
                             this@MainActivity,
-                            SessionExporter.buildReport(report, capture.stats),
+                            SessionExporter.buildReport(
+                                // Re-read the refresh rate here rather than
+                                // trusting the probe: DeviceProbe.run() happens
+                                // in onCreate, before preferredDisplayModeId
+                                // has been applied, so it records the boot
+                                // default and not the mode actually measured.
+                                report.copy(
+                                    currentRefreshHz = activityDisplay()?.refreshRate
+                                        ?: report.currentRefreshHz,
+                                ),
+                                capture.stats,
+                            ),
                         )
                         Toast.makeText(
                             this@MainActivity,
@@ -100,12 +112,21 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Harness(capture: PenCapture, report: DeviceReport, onExport: () -> Unit) {
+private fun Harness(
+    capture: PenCapture,
+    report: DeviceReport,
+    refreshHzNow: () -> Float,
+    onExport: () -> Unit,
+) {
     var tab by remember { mutableIntStateOf(0) }
     val titles = listOf("Pen", "Latency", "Device")
 
     Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = tab) {
+        // keepNavGesturesOutOfTheWay() takes the window edge-to-edge, so without
+        // this the tab row draws underneath the status bar and its labels are
+        // hidden behind the clock. Only the row is inset — the ink views below
+        // keep the full surface they are being measured on.
+        TabRow(selectedTabIndex = tab, modifier = Modifier.statusBarsPadding()) {
             titles.forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
@@ -113,7 +134,7 @@ private fun Harness(capture: PenCapture, report: DeviceReport, onExport: () -> U
         when (tab) {
             0 -> PenScreen(capture)
             1 -> LatencyScreen(capture)
-            else -> DeviceScreen(report, capture, onExport)
+            else -> DeviceScreen(report, capture, refreshHzNow, onExport)
         }
     }
 }
@@ -198,10 +219,26 @@ private fun LatencyScreen(capture: PenCapture) {
 }
 
 @Composable
-private fun DeviceScreen(report: DeviceReport, capture: PenCapture, onExport: () -> Unit) {
+private fun DeviceScreen(
+    report: DeviceReport,
+    capture: PenCapture,
+    refreshHzNow: () -> Float,
+    onExport: () -> Unit,
+) {
+    // The probe's own refresh reading is taken before the 90 Hz request lands,
+    // so it is stale by construction. Poll the live one: running the latency
+    // A/B at 60 Hz when you believe it is 90 measures the wrong device.
+    var liveRefreshHz by remember { mutableStateOf(0f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            liveRefreshHz = refreshHzNow()
+            delay(500)
+        }
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
         Text(
-            text = formatDevice(report),
+            text = formatDevice(report, liveRefreshHz),
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
         )
@@ -226,6 +263,7 @@ private fun formatStats(s: PenStats): String = buildString {
     appendLine("est. levels       ${s.estimatedPressureLevels()}")
     appendLine("tilt range (rad)  ${fmt(s.tiltMin)} .. ${fmt(s.tiltMax)}")
     appendLine("orientation (rad) ${fmt(s.orientationMin)} .. ${fmt(s.orientationMax)}")
+    appendLine("hover samples     ${s.hoverSamples}")
     appendLine("hover max         ${fmt(s.distanceMax)}")
     appendLine("tool types        ${s.toolTypesSeen.joinToString { toolTypeName(it) }}")
     appendLine("button states     ${s.buttonStatesSeen.joinToString()}")
@@ -233,12 +271,12 @@ private fun formatStats(s: PenStats): String = buildString {
     appendLine("history batches   ${s.historyBatchSizes.toSortedMap()}")
 }
 
-private fun formatDevice(d: DeviceReport): String = buildString {
+private fun formatDevice(d: DeviceReport, liveRefreshHz: Float): String = buildString {
     appendLine("${d.manufacturer} ${d.model}  (${d.device})")
     appendLine("SoC               ${d.soc}")
     appendLine("Android           ${d.androidRelease} (API ${d.sdkInt})")
     appendLine("memory class      ${d.memoryClassMb} MB / large ${d.largeMemoryClassMb} MB")
-    appendLine("refresh now       ${"%.1f".format(d.currentRefreshHz)} Hz")
+    appendLine("refresh now       ${"%.1f".format(liveRefreshHz)} Hz  (at probe ${"%.1f".format(d.currentRefreshHz)} Hz)")
     appendLine("display modes     ${d.displayModes.joinToString("\n                  ")}")
     appendLine()
     appendLine("GL vendor         ${d.glVendor}")

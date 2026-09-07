@@ -32,4 +32,25 @@ class PenCapture {
         for (s in scratch) stats.onSample(s)
         return true
     }
+
+    /**
+     * Hover, which never reaches [onMotionEvent]: the framework routes
+     * ACTION_HOVER_* to View.onHoverEvent, not onTouchEvent, so a harness that
+     * only overrides the latter reports a hover distance of zero and looks like
+     * hardware that cannot hover. Palm rejection is designed on this signal, so
+     * it has to be measured rather than assumed.
+     */
+    fun onHoverEvent(event: MotionEvent, view: View): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER,
+            MotionEvent.ACTION_HOVER_MOVE,
+            MotionEvent.ACTION_HOVER_EXIT -> Unit
+            else -> return false
+        }
+
+        scratch.clear()
+        event.collectSamples(scratch)
+        for (s in scratch) stats.onHoverSample(s)
+        return true
+    }
 }

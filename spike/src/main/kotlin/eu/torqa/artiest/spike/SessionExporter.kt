@@ -58,6 +58,7 @@ object SessionExporter {
             put("tiltMaxRad", stats.tiltMax)
             put("orientationMinRad", stats.orientationMin)
             put("orientationMaxRad", stats.orientationMax)
+            put("hoverSamples", stats.hoverSamples)
             put("hoverDistanceMax", stats.distanceMax)
             put("toolTypesSeen", JSONArray(stats.toolTypesSeen.map { toolTypeName(it) }))
             put("buttonStatesSeen", JSONArray(stats.buttonStatesSeen.toList()))

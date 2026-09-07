@@ -16,6 +16,7 @@ class PenStats {
     var events = 0L; private set
     var samples = 0L; private set
     var historicalSamples = 0L; private set
+    var hoverSamples = 0L; private set
     var canceledEvents = 0L; private set
     var flaggedCanceledPointers = 0L; private set
 
@@ -88,6 +89,24 @@ class PenStats {
         lastSampleNanos = s.eventTimeNanos
     }
 
+    /**
+     * Hover samples, kept deliberately out of [onSample].
+     *
+     * Hover arrives at the same digitizer rate as contact, so folding it in
+     * would pad the event count and drag the in-stroke [sampleRateHz] toward an
+     * average of two different things — and that rate is what the latency A/B
+     * turns on. Only what hover is the sole source of is recorded: the distance
+     * axis, and the tool type, which is how an eraser announces itself before it
+     * ever touches the glass.
+     */
+    fun onHoverSample(s: PenSample) {
+        hoverSamples++
+        toolTypesSeen += s.toolType
+        if (s.distance > distanceMax) distanceMax = s.distance
+        if (s.tilt < tiltMin) tiltMin = s.tilt
+        if (s.tilt > tiltMax) tiltMax = s.tilt
+    }
+
     /** Median is used rather than mean so one scheduling hiccup can't skew it. */
     fun sampleRateHz(): Float {
         if (intervalCount < MIN_INTERVALS) return 0f
@@ -122,7 +141,7 @@ class PenStats {
     fun samplesPerEvent(): Float = if (events == 0L) 0f else samples.toFloat() / events
 
     fun reset() {
-        events = 0; samples = 0; historicalSamples = 0
+        events = 0; samples = 0; historicalSamples = 0; hoverSamples = 0
         canceledEvents = 0; flaggedCanceledPointers = 0
         pressureMin = Float.MAX_VALUE; pressureMax = -Float.MAX_VALUE
         tiltMin = Float.MAX_VALUE; tiltMax = -Float.MAX_VALUE

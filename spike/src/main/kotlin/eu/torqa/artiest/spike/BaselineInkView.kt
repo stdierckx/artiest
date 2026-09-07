@@ -56,6 +56,11 @@ class BaselineInkView(context: Context) : View(context) {
         return true
     }
 
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        capture?.onHoverEvent(event, this)
+        return super.onHoverEvent(event)
+    }
+
     fun clear() {
         path.reset()
         invalidate()

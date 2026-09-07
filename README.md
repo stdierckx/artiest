@@ -128,14 +128,40 @@ Press **Reset stats**, then in one session:
 Read off:
 
 - **sample rate** — the true digitizer rate. Expect well above the 90 Hz panel.
-- **samples/event** — above 1 proves the history buffer carries real data. If it
-  is ~1.0, `requestUnbufferedDispatch` is not taking effect.
+- **samples/event** — read this together with the event rate, not on its own.
+  Batched input is capped at the frame rate and compensates with a full history
+  buffer, so ~90 events/sec each carrying several samples means
+  `requestUnbufferedDispatch` did *not* take effect. Unbuffered dispatch looks
+  like the opposite: ~1.0 samples/event arriving at the digitizer's own rate,
+  far above the panel. Low is what you want here, provided events/sec is high.
 - **est. levels** — the headline number. Wacom claims 8192; Android may quantise
   it. This drives how much resolution the pressure curves have to work with.
 - **tool types** — confirms `TOOL_TYPE_ERASER` on pen flip.
-- **hover max** — non-zero means hover works, which is what palm rejection uses.
+- **hover samples / hover max** — hover arrives on `onHoverEvent`, not
+  `onTouchEvent`, so check the sample count first: zero samples means you never
+  hovered over the ink view, and says nothing about the hardware. With samples
+  counted, a non-zero max is what confirms the distance axis palm rejection
+  needs.
 
 ### Latency tab — the A/B
+
+> **Unlock 90 Hz first, or you are measuring the wrong device.** The panel does
+> 90 Hz and `requestHighestRefreshRate()` asks for it correctly — you can see
+> the request land in `dumpsys display` under `AppRequestObserver`. The platform
+> refuses it anyway: Wacom's `/vendor/etc/displayconfig/display_id_0.xml` pins
+> `mDefaultPeakRefreshRate` to **61**, and `mAlwaysRespectAppRequest` is false,
+> so the framework's cap wins over the app's request. Lift it over adb:
+>
+> ```bash
+> adb shell settings put system peak_refresh_rate 90.0
+> adb shell settings put system min_refresh_rate 90.0
+> ```
+>
+> Confirm with `adb shell dumpsys SurfaceFlinger | grep activeMode` — it should
+> read `90.00 Hz` — and check the Device tab's `refresh now`. To undo:
+> `adb shell settings delete system peak_refresh_rate` (likewise
+> `min_refresh_rate`). This is a device setting, not a project one, so it does
+> not survive a factory reset or transfer to another unit.
 
 Toggles: **Front buffer**, **Predict**, **Unbuffered**. Run all four meaningful
 combinations, starting with everything off (the control) and ending with
@@ -165,21 +191,23 @@ MediaStore path v1 needs for "save PNG to the tablet".
 
 - **max texture ≥ 4096** — required. Below it, the hard canvas cap comes down.
 - **front-buffered clearly beating baseline** — proceed as planned.
-- **little or no difference** — something is not taking effect; check
-  `samples/event` and that the release variant is installed before concluding
-  the API doesn't help.
+- **little or no difference** — something is not taking effect; check the event
+  rate, that `refresh now` reads 90 Hz rather than 60, and that the release
+  variant is installed before concluding the API doesn't help.
 - **est. levels well under ~1000** — pressure curve design needs revisiting.
 
-## One caveat in the code
+## The front-buffered path
 
-`LowLatencyInkView.kt` is the only file written against an API surface that
-could not be compiled or verified here (`CanvasFrontBufferedRenderer`,
-`MotionEventPredictor`). If signatures have shifted, fix them there — the
-javadoc Android Studio shows on the symbol is authoritative.
+`LowLatencyInkView.kt` was written against `CanvasFrontBufferedRenderer` and
+`MotionEventPredictor` without being compiled, and one signature had drifted:
+`onDrawMultiDoubleBufferedLayer` is the alpha-era name for what 1.0.4 calls
+`onDrawMultiBufferedLayer`. Fixed. Every other symbol in the file was checked
+against the resolved artifacts and is current.
 
-Nothing else depends on that file. Pen telemetry, the device probe, the export
-path and the baseline ink view all build and measure without it, so a broken
-front-buffered path costs you the A/B, not the spike.
+If it drifts again, `javap` on the aar in `~/.gradle/caches/modules-2` settles
+it faster than the docs do. Nothing else depends on this file: pen telemetry,
+the device probe, the export path and the baseline ink view all measure without
+it, so a broken front-buffered path costs you the A/B, not the spike.
 
 ## Layout
 
