@@ -72,7 +72,7 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
          * double-buffered layer. In the real engine this is where the stroke
          * gets composited into the layer texture exactly once.
          */
-        override fun onDrawMultiDoubleBufferedLayer(
+        override fun onDrawMultiBufferedLayer(
             canvas: Canvas,
             bufferWidth: Int,
             bufferHeight: Int,
