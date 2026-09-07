@@ -30,6 +30,18 @@ object SessionExporter {
             put("android", "${device.androidRelease} (API ${device.sdkInt})")
             put("memoryClassMb", device.memoryClassMb)
             put("largeMemoryClassMb", device.largeMemoryClassMb)
+            put("totalMemBytes", device.totalMemBytes)
+            put("availMemBytes", device.availMemBytes)
+            put("lowMemoryThresholdBytes", device.lowMemoryThresholdBytes)
+            put("lowMemory", device.lowMemory)
+            // JSON null, not false: below API 33 graphics-core never asks for
+            // the flag, and recording that as a refusal would fire the phase's
+            // stop condition on a device that was never in scope. The elvis is
+            // also what picks put(String, Object) over put(String, boolean).
+            put("frontBufferSupported", device.frontBufferSupported ?: JSONObject.NULL)
+            put("frontBufferBitSupported", device.frontBufferBitSupported ?: JSONObject.NULL)
+            // The answer is meaningless without the question.
+            put("frontBufferUsageFlagsProbed", device.frontBufferUsageFlags)
             put("currentRefreshHz", device.currentRefreshHz)
             put("displayModes", JSONArray(device.displayModes))
         })

@@ -168,8 +168,32 @@ class LowLatencyInkView(context: Context) : SurfaceView(context) {
         return super.onHoverEvent(event)
     }
 
+    /**
+     * Three calls, and the order carries the fix.
+     *
+     * `commit()` is the wrong verb here: it hands the ParamQueue's whole
+     * contents since the last commit — flushed segments included — to
+     * `onDrawMultiBufferedLayer`, which appends them straight back into the
+     * list just emptied, so a clear with the pen still down redraws the stroke
+     * it was meant to erase. It is also counter-gated, and no-ops entirely
+     * while another commit is in flight. Only `clear()` drops the queue.
+     *
+     * `clear()` alone is not enough either: it blanks the multi-buffered layer
+     * with a BlendMode.CLEAR recorded into the library's own RenderNode and
+     * never calls the callback, leaving the layer fully transparent — this
+     * view paints the white ground and the frame counter only in that
+     * callback, so they would go with it. `renderMultiBufferedLayer` is what
+     * asks for them back; with nothing pending it is the pen-up path minus the
+     * counter, and it no-ops safely before the surface exists.
+     */
     fun clear() {
+        val r = renderer
+        if (r == null) {
+            committed.clear()
+            return
+        }
+        r.clear()
         committed.clear()
-        renderer?.commit()
+        r.renderMultiBufferedLayer(emptyList())
     }
 }

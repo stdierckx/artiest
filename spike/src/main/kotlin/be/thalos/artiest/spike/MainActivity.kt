@@ -273,9 +273,18 @@ private fun formatStats(s: PenStats): String = buildString {
 
 private fun formatDevice(d: DeviceReport, liveRefreshHz: Float): String = buildString {
     appendLine("${d.manufacturer} ${d.model}  (${d.device})")
+    // First, above everything: this is the one line the phase turns on, and a
+    // refusal is invisible everywhere else — the layer keeps its name and the
+    // ink still draws.
+    appendLine("FRONT BUFFER      ${frontBufferText(d.frontBufferSupported)}")
+    appendLine("  usage probed    ${d.frontBufferUsageFlags} (0x${d.frontBufferUsageFlags.toString(16)})")
+    appendLine("  bit alone       ${frontBufferBitText(d.frontBufferBitSupported)}")
+    appendLine()
     appendLine("SoC               ${d.soc}")
     appendLine("Android           ${d.androidRelease} (API ${d.sdkInt})")
     appendLine("memory class      ${d.memoryClassMb} MB / large ${d.largeMemoryClassMb} MB")
+    appendLine("total RAM         ${gib(d.totalMemBytes)} GiB  (free ${gib(d.availMemBytes)} GiB)")
+    appendLine("low-mem threshold ${gib(d.lowMemoryThresholdBytes)} GiB  (low now ${d.lowMemory})")
     appendLine("refresh now       ${"%.1f".format(liveRefreshHz)} Hz  (at probe ${"%.1f".format(d.currentRefreshHz)} Hz)")
     appendLine("display modes     ${d.displayModes.joinToString("\n                  ")}")
     appendLine()
@@ -285,6 +294,31 @@ private fun formatDevice(d: DeviceReport, liveRefreshHz: Float): String = buildS
     appendLine("max texture       ${d.glMaxTextureSize}")
     appendLine("4096 canvas ok    ${d.supportsFullCanvas}")
 }
+
+/**
+ * Spelled out rather than printed as a bare boolean: the whole point of the
+ * probe is that a refusal is silent, so the one place a human reads it must not
+ * require them to remember what `false` implies.
+ */
+private fun frontBufferText(supported: Boolean?): String = when (supported) {
+    true -> "granted"
+    false -> "REFUSED -> stop condition: DirectSurfaceInkSurface"
+    null -> "n/a below API 33 (graphics-core never asks)"
+}
+
+/**
+ * The same flag asked for on its own. It carries no verdict of its own —
+ * graphics-core never asks this narrower question — but it separates "this
+ * device has no front buffer at all" from "refused in combination with
+ * COMPOSER_OVERLAY", which are different problems.
+ */
+private fun frontBufferBitText(supported: Boolean?): String = when (supported) {
+    true -> "granted (so it is the combination that was refused)"
+    false -> "refused (no front buffer on this device at all)"
+    null -> "n/a below API 33"
+}
+
+private fun gib(bytes: Long): String = "%.2f".format(bytes / (1024.0 * 1024.0 * 1024.0))
 
 private fun fmt(v: Float): String =
     if (v == Float.MAX_VALUE || v == -Float.MAX_VALUE) "-" else "%.5f".format(v)
