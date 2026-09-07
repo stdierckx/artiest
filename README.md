@@ -27,18 +27,86 @@ engine decision in section 04 of the analysis changes before it costs anything.
 
 ## Building
 
-There is no Android SDK, Gradle, or `adb` on this machine — only JDK 21. Easiest
-path is **Android Studio**, which supplies all three:
+Verified against this machine (Arch Linux / Omarchy, `pacman` + `yay`, JDK 21
+already present). Run each with the `!` prefix in Claude Code, or in any shell.
 
-1. Install Android Studio (`yay -S android-studio` on Arch, or JetBrains Toolbox).
-2. Open this directory. Studio will generate the Gradle wrapper and prompt for
-   the SDK packages it needs (compileSdk 35, build-tools).
-3. Enable developer mode on the MovinkPad: **Settings → About tablet →** tap
-   *Build number* seven times, then **Developer options → USB debugging**.
-4. Plug in over USB-C and **Run**.
+### 1. Update the system
 
-To do it headlessly instead, install `android-sdk-cmdline-tools-latest` and
-`gradle`, set `ANDROID_HOME`, then `gradle wrapper && ./gradlew :spike:installRelease`.
+Omarchy wraps pacman, AUR packages, the keyring and orphan cleanup in one
+command. Use it rather than raw `pacman -Syu`:
+
+```bash
+omarchy-update
+```
+
+### 2. Android Studio
+
+```bash
+yay -S android-studio
+```
+
+A ~1.5 GB binary tarball into `/opt`, no compilation. The AUR page may show an
+"out-of-date" flag — that means a newer upstream release exists, not that the
+package is broken.
+
+Studio bundles its own JetBrains Runtime, so it ignores both JDK 21 installs
+already on this machine.
+
+### 3. USB device access
+
+This is the step that decides whether the MovinkPad shows up at all:
+
+```bash
+sudo pacman -S android-udev
+sudo usermod -aG adbusers $USER
+```
+
+Then **log out and back in** for the group to take effect (`newgrp adbusers`
+works for the current shell only).
+
+`android-tools` from the official repos also provides `adb`, but Studio installs
+its own under `~/Android/Sdk/platform-tools`. Running two versions makes the adb
+server complain about a version mismatch, so pick one — the simplest is to skip
+`android-tools` and add Studio's to your PATH:
+
+```bash
+echo 'export PATH="$HOME/Android/Sdk/platform-tools:$PATH"' >> ~/.bashrc
+```
+
+### 4. Do not install system Gradle
+
+Arch ships Gradle 9.6.1; AGP 8.7.3 does not accept it. The wrapper pins 8.11.1
+and Studio generates the missing `gradle-wrapper.jar` on first open. Only if you
+want headless builds:
+
+```bash
+sudo pacman -S gradle
+gradle wrapper --gradle-version 8.11.1   # the flag matters
+```
+
+### 5. First open
+
+Open this directory in Studio. It will:
+
+- generate the Gradle wrapper jar
+- prompt for the SDK packages it needs (**Android 15 / API 35** platform,
+  build-tools, platform-tools)
+- likely offer to upgrade AGP and Kotlin, since the pins here are conservative
+
+Accepting the upgrade is fine — do it as its own commit so a build break stays
+attributable.
+
+### 6. Put it on the tablet
+
+Enable developer mode on the MovinkPad: **Settings → About tablet →** tap
+*Build number* seven times, then **Developer options → USB debugging**. Plug in
+over USB-C, confirm the RSA prompt on the tablet, and:
+
+```bash
+adb devices          # should list the MovinkPad
+```
+
+Then **Run** in Studio, selecting the **release** variant.
 
 > Measure the **release** variant. A debuggable build carries enough overhead to
 > muddy a latency reading. It is signed with the debug key so it installs
