@@ -259,4 +259,37 @@ class StrokeBuilderTest {
         pen.antiAlias = false
         assertTrue(s.antiAlias, "the finished stroke followed the pen")
     }
+    @Test
+    fun `the by-parts overload and the PenSample one are the same stroke, bit for bit`() {
+        // The app calls the by-parts overload because its coordinates come out
+        // of CanvasTransform.viewToDoc rather than out of a PenSample, and a
+        // second PenSample per digitizer sample is not in the budget. The two
+        // must therefore be one code path and not two that agree today: this
+        // compares raw bits, so a divergence of one ulp fails here rather than
+        // showing up as a golden that only moves on the tablet.
+        val pen = RoundPen()
+        val viaSample = StrokeBuilder(pen)
+        val viaParts = StrokeBuilder(pen)
+        viaSample.begin(0x11223344)
+        viaParts.begin(0x11223344)
+
+        for (i in 0 until 40) {
+            val x = 100f + i * 7.3f
+            val y = 200f + i * i * 0.11f
+            val p = 0.2f + i * 0.02f
+            viaSample.add(sample(x, y, p, i))
+            viaParts.add(x, y, p, i * dtNanos)
+        }
+        val a = viaSample.end()
+        val b = viaParts.end()
+
+        assertEquals(a.dabCount, b.dabCount)
+        assertTrue(a.dabCount > 0, "the stroke produced no dabs, so nothing was compared")
+        for (i in 0 until a.dabCount) {
+            assertEquals(a.x(i).toRawBits(), b.x(i).toRawBits(), "dab $i x")
+            assertEquals(a.y(i).toRawBits(), b.y(i).toRawBits(), "dab $i y")
+            assertEquals(a.radius(i).toRawBits(), b.radius(i).toRawBits(), "dab $i radius")
+        }
+    }
+
 }

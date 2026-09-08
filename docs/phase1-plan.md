@@ -207,7 +207,7 @@ artiest/
 ├── app/                       com.android.application, be.thalos.artiest
 │   └── be.thalos.artiest
 │       ├── input/  MotionEvents (collectSamples ext), InputRouter, Predictor
-│       ├── canvas/ InkSurface, InkSurfaceView, DabBatchPool, GestureController, Matrices
+│       ├── canvas/ InkSurface, InkSurfaceView, DabBatch, DabBatchPool, GestureController, Matrices
 │       ├── doc/    Document, Layer
 │       ├── ink/    DabRasterizer
 │       ├── io/     PngExporter
@@ -244,11 +244,21 @@ counter and all — while the renderer keeps submitting frames perfectly. This
 cost a full session of blank-canvas debugging and was fixed in `b02a531`. Paper
 white comes from `onDrawMultiBufferedLayer`'s `drawColor`.
 
-`InkSurfaceView` implements a narrow `InkSurface` interface (`beginStroke(Matrix)`,
-`drawWet(DabBatch)`, `commitStroke(Stroke)`, `cancelStroke()`, `redrawDry()`,
-`release()`) expressed in strokes and dabs with **no library type in the
-signature**. That seam is why the W0 pivot cost a day, and it stays even though
-the pivot was ultimately reversed — Phase 2 will want it again.
+`InkSurfaceView` implements a narrow `InkSurface` interface — `beginStroke(Matrix,
+colorArgb, antiAlias)`, `acquireBatch()`, `drawWet(DabBatch)`,
+`commitStroke(Stroke)`, `cancelStroke()`, `redrawDry()`, `release()` — expressed
+in strokes and dabs with **no library type in the signature**. That seam is why
+the W0 pivot cost a day, and it stays even though the pivot was ultimately
+reversed — Phase 2 will want it again.
+
+W8 widened it twice against the first draft's four methods, and both are
+threading, not convenience. `beginStroke` takes the colour and the antialias
+flag alongside the matrix because all three are frozen at the same instant and
+for the same reason — the wet pass and the dry commit must paint the same
+stroke the same way. And `acquireBatch()` is on the interface rather than on a
+pool the caller keeps, because whether a batch slot is safe to reuse depends on
+the *implementation's* completion signal; a GL implementation's is a fence, not
+a callback return.
 
 - **`onDrawFrontBufferedLayer(canvas, w, h, batch)`** — the library invokes this
   **N times on one `RecordingCanvas` with no `save()`/`restore()` between
@@ -371,9 +381,20 @@ a recorder holding pooled instances records aliases that the next event
 overwrites. Everything else on that path is allocation-free — one scratch
 `ArrayList`, three preallocated gesture arrays, an `Int` decision mask, index
 loops on every emit path. `DabBatch` comes from a preallocated ring
-(`DabBatchPool`); `renderFrontBufferedLayer` is async with no completion signal,
-so the slot count is **validated against observed render-thread lag** in W10's
-allocation trace, not assumed.
+(`DabBatchPool`). **Corrected at W8: the completion signal the first draft said
+did not exist is `onDrawFrontBufferedLayer` itself.** `renderFrontBufferedLayer`
+is async and returns nothing, which is true, but by the time the draw callback
+returns the batch has been read and its slot is free — and "read" is the only
+question a pool has to answer, as opposed to "presented", which nothing answers.
+So reuse is provably safe rather than sized by hope: the render thread reports
+the sequence it drew, `acquire` compares it against what has been issued, and an
+exhausted ring **allocates and counts a spill** instead of aliasing a batch the
+library is still holding. That trades a correctness bug for an allocation, which
+is the right trade here, and it makes undersizing a number W9 reads rather than
+a glitch someone eventually notices. The 24 slots are still a starting point:
+`peakInFlight` on a real stroke is what sets them, and the first measurement —
+`adb`-injected strokes at roughly 120 Hz — reported a peak of 1 and no spills,
+which is a floor on the answer and not the answer.
 
 `TraceRecorder`/`TracePlayer` serialize the `PenSample` stream and replay it
 deterministically. It is the only reproducible regression test that exists for
@@ -550,7 +571,7 @@ half a day** before any of it is built on.
 | 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
 | 6 | `Document`, `Layer`, `Stroke`, `Bounds` | both | Low | — | 0.5 |
 | 7 | ~~`Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens~~ **DONE — `77feb1e`. Stabilizer integrates over dt; onset ramp moved to wall-clock; centripetal measured against a uniform control.** | `:engine` | — | — | ✔ |
-| 8 | `InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool` | `:app` | **High** | 6, 7 | 1.0 |
+| 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
 | 9 | Wet ink end to end, allocation trace, batch-pool slot validation | `:app` | Medium | 8 | 0.75 |
 | 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
 | 11 | `Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle | both | Medium | 10 | 0.75 |
@@ -646,16 +667,63 @@ against the run's own median gap rather than a hardcoded budget, so a loop
 pinned to vsync reads 0% at any refresh rate and only real hitches show. A
 fixed threshold in a probe measures the environment as much as the code.
 
-**W8 — how I'd know it went wrong.** Build incrementally against the device: one
-hardcoded dab, confirm it appears; then a straight drag, confirm wet ink appears
-and survives commit. Gone wrong: **a blank canvas** (check for an accidental
-`setBackgroundColor` on the `SurfaceView` first — it is the known trap, it cost a
-session once already, and the renderer will look perfectly healthy in logcat
-while painting invisible frames); a crash on rotation or backgrounding (means the
-render thread outlived the `Surface` — `lockHardwareCanvas` on a destroyed
-surface throws, and `surfaceDestroyed` must quit and join synchronously); or a
-stroke that flickers between frames (means the wet dab list is being consumed
-rather than read, so a frame that arrives between samples draws nothing).
+**W8 — DONE. Ink on the tablet, and four things the plan had wrong.**
+
+The build was checked against the device throughout, driven by `adb shell input
+stylus swipe` and read back off screenshots, which is a poor substitute for a
+pen in a hand but is repeatable and can be measured to the pixel. What it found:
+
+- **The `toDoc` step was missing, and it does not fail loudly.** The pipeline
+  order above names it; the wiring skipped it and fed `PenSample`'s *view*
+  coordinates straight to `StrokeBuilder`. The result is not a crash and not
+  obviously wrong ink — it is a stroke scaled by the zoom and offset by the pan,
+  which at 1:1 with no pan is invisible. Here it drew at 0.44x, 160 px from the
+  pen. `StrokeBuilder` gained a by-parts `add(xDoc, yDoc, pressure, timeNanos)`
+  so the conversion can happen in place: a second `PenSample` per digitizer
+  sample to carry document coordinates is not in the budget, and the two
+  overloads are pinned bit-for-bit against each other.
+- **The app's own `SurfaceHolder.Callback` is load-bearing, and now measured
+  rather than argued.** Removed it, backgrounded the app, resumed: **zero** ink
+  pixels. Put it back: 23,633. The library's own `surfaceChanged` was confirmed
+  by javap to call nothing but `update()`, and this is what that costs. Its
+  registration order matters too — it must be added *after* the renderer is
+  constructed, since `SurfaceHolder` runs callbacks in registration order and
+  the redraw has to land on rebuilt buffers.
+- **The front buffer needed clipping to the document.** Dry ink is clipped for
+  free by the layer bitmap; the front buffer is the whole view, and fitted to
+  this tablet's landscape window the page leaves a **measured 560 px margin on
+  each side**. Wet ink in a margin therefore appeared under the pen and vanished
+  at pen-up — which reads as a dropped stroke, not as drawing off the page. One
+  `clipRect` inside the existing save/concat, verified by comparing a
+  mid-stroke screenshot against the committed one: both now start at x = 560.
+- **Fit-to-view belongs to the surface, not to `displayMetrics`.** The two
+  differ by the system bars always and by the whole aspect ratio after a
+  rotation, and fitting once at construction left a 2160x3300 page drawn at the
+  landscape scale in the corner of a portrait window. It now refits in
+  `surfaceChanged` while `fitOnResize` is true, which W12 turns off the first
+  time the user moves the canvas themselves.
+
+Confirmed working: a drag produces wet ink that survives commit; rotation both
+ways preserves the drawing and returns it to exactly the same pixels; a
+background/resume cycle preserves it; no crash on any of them.
+
+**And one finding for W12: fit-to-view does not fit on this panel.** The
+measured fit scale in landscape is exactly 0.5 — the `MIN_SCALE` floor — because
+the honest fit is 0.40 and the floor exists for a real reason (bilinear
+filtering is good to about 2x minification). At 0.5 the page is 1650 px tall in
+a window about 1330 px tall, so roughly 320 px of it is off screen and
+"fit-to-view" crops. Three ways out and none is free: lower `MIN_SCALE` and
+accept shimmer while panning, make the default document smaller, or make
+fit-to-view mean fit-*width* and scroll. **Decide it in W12, do not let it be
+decided by whichever number someone edits first.**
+
+What to check first if it breaks later: **a blank canvas** (look for an
+accidental `setBackgroundColor` on the `SurfaceView` — it is the known trap, it
+cost a session once already, and the renderer will look perfectly healthy in
+logcat while painting invisible frames); a crash on rotation or backgrounding
+(the render thread outlived the `Surface` — `lockHardwareCanvas` on a destroyed
+one throws); or a stroke that flickers between frames (the wet dab list is being
+consumed rather than read, so a frame arriving between samples draws nothing).
 
 **W12 — how I'd know it went wrong.** A two-finger pinch that stutters or lags
 the fingers. Contingency ladder: (a) Choreographer coalescing is already the

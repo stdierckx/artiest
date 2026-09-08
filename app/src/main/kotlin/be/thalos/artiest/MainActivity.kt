@@ -1,9 +1,6 @@
 package be.thalos.artiest
 
-import android.content.Context
 import android.os.Bundle
-import android.view.MotionEvent
-import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -14,222 +11,131 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import be.thalos.artiest.engine.input.ExclusivityState
-import be.thalos.artiest.engine.input.PenSample
-import be.thalos.artiest.engine.input.toolTypeName
-import be.thalos.artiest.input.InkInputSink
-import be.thalos.artiest.input.InputRouter
+import be.thalos.artiest.canvas.InkSurfaceView
+import be.thalos.artiest.doc.Document
 
 /**
- * Placeholder chrome, and a smoke test for the input path.
+ * Placeholder chrome around the real canvas.
  *
- * W15 replaces the body of this file with the real toolbars and the
- * `DeviceProbe` port; nothing here is meant to survive that. What it does until
- * then is run real pen input through the whole W4 path — `MotionEvent` into
- * [InputRouter], `PenSample` out — and print what came back. There is no ink:
- * the stroke pipeline and the render path start at W6, and an ink surface built
- * here would be thrown away twice.
+ * W15 replaces the Compose half of this file with the actual toolbars, the
+ * refresh-rate toggle and the `DeviceProbe` port. What it is for until then is
+ * the on-device check W8 is judged by: draw, and ink appears under the pen;
+ * lift, and it survives the commit; rotate, and the canvas is still there.
  *
- * It is not decoration. The numbers below are the only on-device check that
- * exists for the two things no JVM test can reach — whether the framework
- * routes ACTION_HOVER_* to `onHoverEvent` on this tablet, and whether the
- * router's pointer bookkeeping survives a real palm — and reading them takes a
- * pen, a hand and thirty seconds.
+ * The `Document` is owned here rather than by the view. It outlives every
+ * attach/detach cycle, so a rotation rebuilds the `SurfaceView` against the
+ * same layer bitmap instead of reallocating 27 MiB and losing the drawing.
  */
 class MainActivity : ComponentActivity() {
 
-    private val probe = InputProbe()
-    private val router = InputRouter(probe)
+    private val document = Document()
+
+    private var view: InkSurfaceView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    InputProbeScreen(probe, router)
+                    CanvasScreen(document) { view = it }
                 }
             }
         }
     }
 
     /**
-     * A stroke does not survive the activity leaving the foreground, and the
-     * framework does not always send an ACTION_CANCEL to say so — a dialog
-     * taking focus can leave ACTION_MOVE as the last event ever delivered.
-     * Without this the router holds a pointer id that will never lift.
+     * The framework does not reliably send an ACTION_CANCEL when the activity
+     * leaves the foreground — a dialog taking focus can leave ACTION_MOVE as
+     * the last event ever delivered — so the open stroke is abandoned here.
+     * `InkSurfaceView.clear` is not what is wanted: the drawing stays.
      */
     override fun onPause() {
-        router.abandon()
+        view?.abandonStroke()
         super.onPause()
     }
-}
 
-/**
- * The input target: a `View` that draws nothing and exists to have events
- * dispatched to it.
- *
- * Hover comes through `onHoverEvent` and touch through `onTouchEvent`, which is
- * the framework's split and not a choice made here — a view that overrides only
- * the second sees no hover at all and looks like hardware that cannot hover.
- */
-private class InputProbeView(
-    context: Context,
-    private val router: InputRouter,
-    private val probe: InputProbe,
-) : View(context) {
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val handled = router.onTouchEvent(event, this)
-        probe.onRouted(router)
-        return handled
-    }
-
-    override fun onHoverEvent(event: MotionEvent): Boolean {
-        router.onHoverEvent(event)
-        probe.onRouted(router)
-        // The framework's own hover handling still runs. The router took a
-        // presence reading; it did not consume the event.
-        return super.onHoverEvent(event)
-    }
-
-    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
-        super.onWindowFocusChanged(hasWindowFocus)
-        if (!hasWindowFocus) router.abandon()
-    }
-
-    override fun onDetachedFromWindow() {
-        router.abandon()
-        super.onDetachedFromWindow()
-    }
-}
-
-/**
- * Counts what the router emitted, and holds the last sample.
- *
- * Compose state is written once per event rather than once per sample: the
- * digitizer runs to 321.75 Hz and one event carries several samples, so
- * recomposing per sample would make the readout the most expensive thing in the
- * app. Even per event this is a debug surface and nothing else — the real
- * consumer of these callbacks is W6's stroke builder.
- */
-private class InputProbe : InkInputSink {
-
-    var last by mutableStateOf<PenSample?>(null)
-        private set
-    var state by mutableStateOf(ExclusivityState.IDLE)
-        private set
-    var penInRange by mutableStateOf(false)
-        private set
-    var strokePointerId by mutableStateOf(-1)
-        private set
-
-    var samples by mutableStateOf(0L)
-        private set
-    var events by mutableStateOf(0L)
-        private set
-    var strokes by mutableStateOf(0)
-        private set
-    var cancelled by mutableStateOf(0)
-        private set
-    var gestures by mutableStateOf(0)
-        private set
-
-    fun onRouted(router: InputRouter) {
-        events++
-        state = router.state
-        penInRange = router.penInRange
-        strokePointerId = router.penStrokeId
-    }
-
-    override fun onStrokeBegin(pointerId: Int) {
-        strokes++
-    }
-
-    override fun onStrokeSamples(samples: ArrayList<PenSample>) {
-        // Read by size and index. `for (s in samples)` over an ArrayList
-        // allocates an iterator per event, which is the allocation the spike's
-        // own "the hot path allocates nothing" comment sits directly above.
-        this.samples += samples.size
-        last = samples[samples.size - 1]
-    }
-
-    override fun onStrokeEnd() = Unit
-
-    override fun onStrokeCancel() {
-        cancelled++
-    }
-
-    override fun onGestureBegin() {
-        gestures++
-    }
-
-    override fun onGesturePointers(ids: IntArray, xs: FloatArray, ys: FloatArray, count: Int) = Unit
-
-    override fun onGestureEnd() = Unit
-
-    override fun onGestureCancel() = Unit
-
-    override fun onPenPresence(inRange: Boolean) {
-        penInRange = inRange
+    /**
+     * Released last, and only here. The layer's pixels must outlive the render
+     * thread that writes them, and the view's detach is what joins that thread.
+     */
+    override fun onDestroy() {
+        view = null
+        document.close()
+        super.onDestroy()
     }
 }
 
 @Composable
-private fun InputProbeScreen(probe: InputProbe, router: InputRouter) {
+private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
+    var generation by remember { mutableStateOf(0) }
+    var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
+
+    // Polled twice a second rather than pushed. The counters this reads live on
+    // the input and render paths, and making them Compose state would put a
+    // recomposition on a path that runs at 321 Hz.
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(500)
+            generation++
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            factory = { context -> InputProbeView(context, router, probe) },
+            factory = { context ->
+                // No transform is set here. The view fits the document to its
+                // own surface in surfaceChanged, which is the only place the
+                // real size is known — displayMetrics is the display, not the
+                // window, and the two differ by the system bars at minimum.
+                InkSurfaceView(context, document).also {
+                    surface = it
+                    onView(it)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         )
-        Column(modifier = Modifier.statusBarsPadding().padding(24.dp)) {
-            Text("artiest — W4 input path", style = MaterialTheme.typography.titleMedium)
+        Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
+            Text("artiest — W8 ink surface", style = MaterialTheme.typography.titleSmall)
             Text(
-                text = "Draw with the pen. Rest a hand on the glass mid-stroke: the " +
-                    "state stays PEN, the sample count keeps climbing, and no gesture " +
-                    "is counted. Flip the pen and it reports FINGER, which is why it " +
-                    "pans instead of erasing.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Text(
-                text = readout(probe),
+                text = readout(surface, document, generation),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 16.dp),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp),
             )
+            TextButton(onClick = {
+                surface?.clear()
+                generation++
+            }) { Text("Clear") }
         }
     }
 }
 
-private fun readout(probe: InputProbe): String {
-    val s = probe.last
-    return buildString {
-        append("state     ${probe.state}")
-        append("   pen in range ${probe.penInRange}")
-        append("   stroke id ${probe.strokePointerId}\n")
-        append("events    ${probe.events}   samples ${probe.samples}\n")
-        append("strokes   ${probe.strokes} begun, ${probe.cancelled} cancelled")
-        append("   gestures ${probe.gestures}\n")
-        if (s == null) {
-            append("last      -")
-        } else {
-            append("last      ${toolTypeName(s.toolType)}  ${s.source}\n")
-            append("          x ${s.x}  y ${s.y}\n")
-            append("          pressure ${s.pressure}  tilt ${s.tilt}\n")
-            append("          orientation ${s.orientation}  buttons ${s.buttonState}\n")
-            // Printed because it is measured dead — 400 hover samples, all
-            // zero — and a reading that is anything but 0.0 on a future device
-            // is worth seeing rather than assuming.
-            append("          distance ${s.distance}  t ${s.eventTimeNanos}")
-        }
-    }
+/**
+ * The three numbers W9 needs and the only ones worth showing yet.
+ *
+ * `spills` is the one to watch: a non-zero count means the batch ring was
+ * exhausted while the render thread was behind, so `DabBatchPool.DEFAULT_SLOTS`
+ * is too small. `peak` says how close it came. [generation] is a poll tick and
+ * is read only so Compose recomputes the string — see the caller for why the
+ * counters are not Compose state.
+ */
+private fun readout(surface: InkSurfaceView?, document: Document, generation: Int): String {
+    if (surface == null) return "surface  -"
+    val p = surface.batches
+    return "doc      ${document.widthPx}x${document.heightPx}   " +
+        "strokes ${document.strokeCount}   t $generation\n" +
+        "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}\n" +
+        "last     ${surface.lastStrokeSamples} samples -> ${surface.lastStrokeDabs} dabs"
 }

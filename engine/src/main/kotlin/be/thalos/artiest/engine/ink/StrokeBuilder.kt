@@ -116,15 +116,33 @@ class StrokeBuilder(val pen: RoundPen = RoundPen()) : DabEmitter {
      * it came from. Failing at the sample that carried it names the source.
      */
     fun add(sample: PenSample) {
+        add(sample.x, sample.y, sample.pressure, sample.eventTimeNanos)
+    }
+
+    /**
+     * Feed one document-space sample by parts.
+     *
+     * This overload is the one the app actually calls, and the reason is the
+     * word *document* three lines up. A `PenSample` carries the coordinates
+     * `MotionEvent` reported, which are **view** coordinates; the pipeline's
+     * `toDoc` step sits between the router and here, and it has to produce two
+     * floats without allocating a second `PenSample` per digitizer sample.
+     * Taking them by parts is what lets the caller convert in place.
+     *
+     * The [add] above stays because a trace replayed at identity is the one
+     * case where view and document space coincide, and every `:engine` test is
+     * written against it.
+     */
+    fun add(xDoc: Float, yDoc: Float, pressure: Float, eventTimeNanos: Long) {
         check(open) { "add() before begin()" }
-        require(sample.x.isFinite() && sample.y.isFinite()) {
-            "sample ${sampleCount} was (${sample.x}, ${sample.y})"
+        require(xDoc.isFinite() && yDoc.isFinite()) {
+            "sample $sampleCount was ($xDoc, $yDoc)"
         }
-        require(sample.pressure.isFinite()) { "sample $sampleCount pressure was ${sample.pressure}" }
-        if (sampleCount == 0) downTimeNanos = sample.eventTimeNanos
+        require(pressure.isFinite()) { "sample $sampleCount pressure was $pressure" }
+        if (sampleCount == 0) downTimeNanos = eventTimeNanos
         sampleCount++
-        stabilizer.push(sample)
-        val elapsedMillis = (sample.eventTimeNanos - downTimeNanos) / 1_000_000f
+        stabilizer.push(xDoc, yDoc, pressure, eventTimeNanos)
+        val elapsedMillis = (eventTimeNanos - downTimeNanos) / 1_000_000f
         resampler.add(stabilizer.x, stabilizer.y, stabilizer.pressure, elapsedMillis)
     }
 
