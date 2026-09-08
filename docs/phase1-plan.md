@@ -624,7 +624,7 @@ half a day** before any of it is built on.
 | 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE — `87a8d3c`. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
 | 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE — `01e9477`. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
-| 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
+| 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE — `15ce55d`. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
 | 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
