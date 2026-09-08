@@ -478,6 +478,15 @@ must be a deliberate decision in the router rather than an accident.
 Blank the app's layer `Bitmap` under `layerLock`, then `renderer.clear()`, then
 `renderer.renderMultiBufferedLayer(emptyList())`.
 
+**The first call is the render thread's, not the UI thread's.** An earlier draft
+had the UI thread blanking the layer under `layerLock`, which contradicts the
+threading contract stated above: the UI thread never touches those pixels. The
+button raises a `pendingClear` flag that `onDrawMultiBufferedLayer` consumes
+exactly as it consumes `pendingStroke`, and `Layer.blank()` throws on the main
+thread rather than letting that be a matter of discipline. The UI thread's half
+of the clear is `Document.forgetStrokes()`. The ordering below is unchanged;
+only the thread the first call runs on is.
+
 Each is load-bearing. `renderer.clear()` blanks the multi-buffered layer
 **without ever invoking the draw callback** — it records a `BlendMode.CLEAR`
 into the library's own RenderNode — so paper white and anything else the
@@ -515,8 +524,8 @@ half a day** before any of it is built on.
 | 3 | Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day. Freeze `:spike` after this | `:spike` | Low | 1 | 1.0 |
 | 4 | ~~`PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer`~~ **DONE — `f7ffa18`. A palm landing before the pen locked it out; a gesture now takes two fingers.** | both | Low | — | ✔ |
 | 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
-| 6 | `Document`, `Layer`, `Stroke` | `:app` | Low | 3 | 0.5 |
-| 7 | `Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens | `:engine` | Medium | 4, 5 | 1.5 |
+| 6 | `Document`, `Layer`, `Stroke`, `Bounds` | both | Low | — | 0.5 |
+| 7 | `Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens | `:engine` | Medium | 4, 5, 6 | 1.5 |
 | 8 | `InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool` | `:app` | **High** | 6, 7 | 1.0 |
 | 9 | Wet ink end to end, allocation trace, batch-pool slot validation | `:app` | Medium | 8 | 0.75 |
 | 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
