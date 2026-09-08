@@ -3,6 +3,7 @@ package be.thalos.artiest.doc
 import android.graphics.Color
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.MutableBounds
+import be.thalos.artiest.engine.ink.Stroke
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -135,4 +136,81 @@ class DocumentTest {
 
     private fun boundsOf(x: Float, y: Float, radius: Float): Bounds =
         MutableBounds().apply { add(x, y, radius) }.snapshot()
+    private fun oneDabStroke(x: Float): Stroke = Stroke.copyOf(
+        dabs = floatArrayOf(x, 10f, 2f),
+        dabCount = 1,
+        colorArgb = Color.BLACK,
+        antiAlias = true,
+        bounds = Bounds.of(x - 2f, 8f, x + 2f, 12f),
+    )
+
+    private class Applied : CommitQueue.Sink {
+        val log = StringBuilder()
+        override fun onStroke(stroke: Stroke) {
+            log.append('S')
+        }
+
+        override fun onClear() {
+            log.append('C')
+        }
+    }
+
+    @Test
+    fun `a commit records the bounds and queues the pixels together`() {
+        // The pair is the invariant: a stroke counted in the history but never
+        // queued is ink the document claims and the layer does not have, and
+        // through W8 that was reachable — the view dropped the pending stroke
+        // when the surface was gone, after recordStroke had already run.
+        val doc = Document(enforceOffMainThread = false)
+        assertTrue(doc.commitStroke(oneDabStroke(100f)))
+        assertEquals(1, doc.strokeCount)
+        assertEquals(1, doc.pendingCommits)
+
+        val applied = Applied()
+        assertEquals(1, doc.drainCommits(applied))
+        assertEquals("S", applied.log.toString())
+        assertEquals(1, doc.strokeCount, "draining the pixels dropped the history")
+        assertEquals(0, doc.pendingCommits)
+    }
+
+    @Test
+    fun `a stroke that painted nothing is neither recorded nor queued`() {
+        val doc = Document(enforceOffMainThread = false)
+        val empty = Stroke.copyOf(
+            dabs = FloatArray(0),
+            dabCount = 0,
+            colorArgb = Color.BLACK,
+            antiAlias = true,
+            bounds = Bounds.EMPTY,
+        )
+        assertFalse(doc.commitStroke(empty))
+        assertEquals(0, doc.strokeCount)
+        assertEquals(0, doc.pendingCommits, "an empty stroke queued a blank pass over the layer")
+    }
+
+    @Test
+    fun `a clear queues behind the stroke it follows and forgets the history at once`() {
+        val doc = Document(enforceOffMainThread = false)
+        doc.commitStroke(oneDabStroke(100f))
+        doc.requestClear()
+        // The history is the UI thread's and goes immediately; the pixels are
+        // queued behind the stroke, so the blank cannot overtake it.
+        assertEquals(0, doc.strokeCount)
+        assertEquals(2, doc.pendingCommits)
+
+        val applied = Applied()
+        doc.drainCommits(applied)
+        assertEquals("SC", applied.log.toString())
+    }
+
+    @Test
+    fun `closing a document drops what it was never going to draw`() {
+        val doc = Document(enforceOffMainThread = false)
+        doc.commitStroke(oneDabStroke(100f))
+        doc.close()
+        assertEquals(0, doc.pendingCommits)
+        val applied = Applied()
+        assertEquals(0, doc.drainCommits(applied))
+    }
+
 }

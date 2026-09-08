@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
+import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.ink.RoundPen
 import be.thalos.artiest.engine.ink.Stroke
@@ -19,7 +20,6 @@ import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The canvas: a bare `SurfaceView` driving a `CanvasFrontBufferedRenderer`.
@@ -169,14 +169,21 @@ class InkSurfaceView(
     private var frozenDocToView: Matrix? = null
 
     /**
-     * The finished stroke, waiting for the render thread to stamp it into the
-     * layer.
+     * Applies the document's queued commits. Render thread only.
      *
-     * `getAndSet(null)` consumes it exactly once, so a dropped or duplicated
-     * frame cannot double-stamp — and the volatile write/read pair is also the
-     * memory edge that publishes every dab in it.
+     * The only place in the app that writes the layer's pixels, which is the
+     * threading contract stated in one line. `Layer.write` refuses the main
+     * thread, so the contract is checked rather than trusted.
      */
-    private val pendingStroke = AtomicReference<Stroke?>(null)
+    private val commitSink = object : CommitQueue.Sink {
+        override fun onStroke(stroke: Stroke) {
+            document.layer.write { rasterizer.drawDry(it, stroke) }
+        }
+
+        override fun onClear() {
+            document.layer.blank()
+        }
+    }
 
     /**
      * [DabBatchPool.issuedCount] as of the last commit, handed to the render
@@ -189,10 +196,6 @@ class InkSurfaceView(
      */
     @Volatile
     private var commitWatermark: Long = 0L
-
-    /** Set by [clear]; consumed on the render thread. */
-    @Volatile
-    private var clearRequested: Boolean = false
 
     /** Nanoseconds spent submitting during the event being handled. */
     private var submitNanos: Long = 0L
@@ -274,15 +277,7 @@ class InkSurfaceView(
             bufferHeight: Int,
             params: Collection<DabBatch>,
         ) {
-            if (clearRequested) {
-                clearRequested = false
-                document.layer.blank()
-            }
-
-            val stroke = pendingStroke.getAndSet(null)
-            if (stroke != null) {
-                document.layer.write { rasterizer.drawDry(it, stroke) }
-            }
+            document.drainCommits(commitSink)
             batches.markDrawn(commitWatermark)
 
             canvas.drawColor(document.paperColor)
@@ -410,14 +405,31 @@ class InkSurfaceView(
      * the transaction lands, and it is the only call that releases the front
      * buffer's accumulated pixels.
      */
+    /**
+     * Two steps, and the order is the contract.
+     *
+     * The stroke is queued *before* `commit()` so the render thread cannot
+     * reach [onDrawMultiBufferedLayer] with an empty queue and blit a layer
+     * that is missing the stroke just finished — one frame of the ink
+     * disappearing between the front buffer being released and the layer
+     * catching up.
+     *
+     * With no surface the stroke stays queued rather than being dropped. It was
+     * dropped through W8, which lost it while `Document` had already counted
+     * it; now the queue belongs to the document, so a stroke finished as the
+     * app goes to the background is stamped by the first render after it comes
+     * back.
+     *
+     * `commit()` rather than `renderMultiBufferedLayer`: only `commit()`
+     * increments the counter that defers concurrent front-buffer renders until
+     * the transaction lands, and it is the only call that releases the front
+     * buffer's accumulated pixels.
+     */
     override fun commitStroke(stroke: Stroke) {
         commitWatermark = batches.issuedCount
-        pendingStroke.set(stroke)
+        document.commitStroke(stroke)
         val r = renderer
-        if (r == null || !surfaceAlive) {
-            pendingStroke.set(null)
-            return
-        }
+        if (r == null || !surfaceAlive) return
         r.commit()
     }
 
@@ -432,24 +444,39 @@ class InkSurfaceView(
         r.renderMultiBufferedLayer(emptyList())
     }
 
+    /**
+     * Drop the render thread and its buffers.
+     *
+     * Queued commits are **not** dropped: they belong to the document, which
+     * outlives this view. `Document.close` is where they go for good, along
+     * with the pixels they were going to be drawn into.
+     *
+     * The case that actually matters is a rung below this one. Rotation does
+     * not reach here at all — the manifest handles `orientation|screenSize`, so
+     * the view stays attached and only the *surface* is rebuilt — and what
+     * happens then is that [commitStroke] finds `surfaceAlive` false and leaves
+     * the stroke queued for the first render against the new surface. Measured:
+     * a pen-up followed immediately by HOME, then resume, comes back with the
+     * ink. Through W8 that stroke was dropped, after `Document` had counted it.
+     */
     override fun release() {
         renderer?.release(true)
         renderer = null
         frozenDocToView = null
-        pendingStroke.set(null)
     }
 
     /**
      * Blank the document and redraw.
      *
-     * Two halves on two threads, which is why `Document.forgetStrokes` and
-     * `Layer.blank` are not one call: the history is the UI thread's and the
-     * pixels are the render thread's. The flag carries the second half across.
+     * The blank goes through the same queue the strokes do, so it lands after
+     * everything already committed and cannot race a stroke finished a
+     * millisecond earlier. A separate flag beside a separate stroke slot — what
+     * W8 shipped — cannot express that ordering at all: whichever branch the
+     * render thread reads first wins.
      */
     fun clear() {
         router.abandon()
-        document.forgetStrokes()
-        clearRequested = true
+        document.requestClear()
         redrawDry()
     }
 
@@ -659,7 +686,6 @@ class InkSurfaceView(
             totalDabs += builder.dabCount - dabsBefore
             lastStrokeSamples = seen
             lastStrokeDabs = stroke.dabCount
-            if (stroke.dabCount > 0) document.recordStroke(stroke.bounds)
             commitStroke(stroke)
             val commitEnd = heapUsed()
             strokeOpen = false

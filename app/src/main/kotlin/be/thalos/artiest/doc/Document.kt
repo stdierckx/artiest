@@ -2,6 +2,7 @@ package be.thalos.artiest.doc
 
 import android.graphics.Color
 import be.thalos.artiest.engine.ink.Bounds
+import be.thalos.artiest.engine.ink.Stroke
 
 /**
  * What is being drawn: a size, one [Layer], and the rectangle each committed
@@ -77,6 +78,21 @@ class Document(
      */
     val layer: Layer = Layer(widthPx, heightPx, enforceOffMainThread)
 
+    /**
+     * Layer changes the render thread has not applied yet.
+     *
+     * Owned here rather than by the view, and that placement is the point: the
+     * document outlives every attach and detach, so a rotation that rebuilds
+     * the `SurfaceView` finds its queue intact and the first render against the
+     * new surface stamps whatever was still waiting. A queue owned by the view
+     * would lose exactly the strokes that were in flight when the surface went
+     * away — the ones the user had just finished.
+     */
+    private val commits = CommitQueue()
+
+    /** Commits waiting for the render thread. Diagnostic only. */
+    val pendingCommits: Int get() = commits.pending
+
     // Append-only, and the only history Phase 1 keeps. An ArrayList rather than
     // a primitive float buffer because a Bounds is immutable and shareable, so
     // there is nothing to copy out and no aliasing to prevent; four floats
@@ -106,14 +122,66 @@ class Document(
     }
 
     /**
+     * Pen-up: take a finished stroke into the document. UI thread.
+     *
+     * Records the bounds and queues the pixels **in one call**, which is the
+     * only way the two can be kept in step. They were deliberately separate
+     * through W8, on the grounds that the history is the UI thread's and the
+     * pixels are the render thread's and no single entry point should run on
+     * two threads. [CommitQueue] is what makes that reasoning obsolete: the
+     * crossing is now an ordered queue, so this method does its UI-thread half
+     * and hands the other half over, and there is no arrangement of threads in
+     * which one happens and the other does not.
+     *
+     * Returns false for a stroke that painted nothing — a tap that produced no
+     * dabs — which is neither recorded nor queued. `recordStroke` would refuse
+     * its empty bounds, and rightly: Phase 3 cannot restore a region that does
+     * not exist.
+     *
+     * The history leads the pixels by up to one frame, and that is the whole of
+     * the skew. Nothing reads both: `PngExporter` reads the layer, undo reads
+     * the bounds, and the readout is a readout.
+     */
+    fun commitStroke(stroke: Stroke): Boolean {
+        if (stroke.dabCount == 0) return false
+        recordStroke(stroke.bounds)
+        commits.commit(stroke)
+        return true
+    }
+
+    /**
+     * Clear: drop the history and queue the blank behind everything already
+     * committed. UI thread.
+     *
+     * Queued rather than applied so that Clear means what the user meant by it
+     * — after everything drawn so far — including a stroke finished a
+     * millisecond earlier that the render thread has not stamped yet.
+     */
+    fun requestClear() {
+        forgetStrokes()
+        commits.clear()
+    }
+
+    /**
+     * Apply every queued commit. **Render thread only**, and the sink is what
+     * actually touches [layer].
+     */
+    fun drainCommits(sink: CommitQueue.Sink): Int = commits.drain(sink)
+
+    /** Drop queued commits without applying them. Teardown only. */
+    fun abandonCommits() {
+        commits.abandon()
+    }
+
+    /**
      * Drop the stroke history. The clear button's half of the clear, and it has
      * to happen or the history describes ink that is no longer in the layer.
      *
-     * Deliberately *not* paired with [Layer.blank] in one call. Blanking the
-     * pixels is the render thread's, this list is the UI thread's, and a method
-     * that did both would be a single entry point that has to run on two
-     * threads. W8 sequences them; the invariant it owes is that this list
-     * describes exactly what is in the layer.
+     * Left as a primitive. [requestClear] is what callers want — it queues the
+     * blank behind everything already committed, so the two halves cannot
+     * disagree — and this is the UI-thread half of it, kept separate because
+     * `DocumentTest` drives the history on its own. The invariant either way is
+     * that this list describes what is in the layer, within one frame.
      */
     fun forgetStrokes() {
         strokeBounds.clear()
@@ -124,6 +192,11 @@ class Document(
      * after the last view detach has joined its render thread — see [Layer.close].
      */
     fun close() {
+        // Commits first, and it is not merely tidy: a queued stroke whose sink
+        // reached a closed layer would be a write against recycled pixels.
+        // Layer.write refuses after close, so this is belt to that braces —
+        // but the belt is what says the strokes are gone on purpose.
+        commits.abandon()
         layer.close()
     }
 

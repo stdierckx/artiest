@@ -300,9 +300,23 @@ matrixed bitmap blit, both of which hardware Canvas already does on the GPU.
 
 **Threading contract, stated once and enforced:** the layer `Bitmap` is written
 on the render thread only, only in the commit step at pen-up, under `layerLock`.
-`PngExporter` takes the same lock to read. The UI thread never touches it. The
-wet dab list is handed across by an `AtomicReference.getAndSet(null)`, so the
-render thread consumes it exactly once and a dropped frame cannot double-stamp.
+`PngExporter` takes the same lock to read. The UI thread never touches it.
+
+**The handoff is a queue, not a slot — corrected at W10.** The first draft said
+`AtomicReference.getAndSet(null)`, on the grounds that it consumes a stroke
+exactly once so a dropped frame cannot double-stamp. That is true and it is only
+half the requirement: `getAndSet` gives *at most* once, never *at least* once.
+Two pen-ups inside one render-thread stall — a quick pair of tick marks, a
+signature, a hatch — and the second `set` overwrites the first, whose ink is then
+missing from the layer while `Document.recordStroke` has already counted it.
+Nothing fails; a stroke is simply not there. A second hole came with it: Clear
+was a separate flag beside the slot, and two independent fields cannot express
+"after everything I have drawn", so a stroke committed just before Clear survived
+it depending on which branch the render thread read first. `CommitQueue` is one
+FIFO carrying both kinds of commit, owned by the `Document` rather than by the
+view, lock-free at both ends, and one allocation per pen-up. `CommitQueueTest`
+carries the slot-and-flag version longhand and shows it losing a stroke and
+inverting a clear.
 
 **Input pipeline** (mandated order, prediction before stabilization):
 
@@ -579,7 +593,7 @@ half a day** before any of it is built on.
 | 7 | ~~`Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens~~ **DONE — `77feb1e`. Stabilizer integrates over dt; onset ramp moved to wall-clock; centripetal measured against a uniform control.** | `:engine` | — | — | ✔ |
 | 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE — `87a8d3c`. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
-| 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
+| 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
 | 11 | `Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle | both | Medium | 10 | 0.75 |
 | 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
@@ -800,6 +814,34 @@ a figure. Also worth knowing: the first stroke after a process start allocates
 from 256 dabs to whatever the stroke needed. That is one array per session
 instead of one per stroke, which is what it was designed to be, but it means a
 single-stroke allocation measurement measures the growth and not the path.
+
+**W10 — DONE. The commit path, and the handoff it rested on was wrong.**
+
+W8 wrote the multi-buffered callback body as specified, because a callback
+missing half its body is not a seam. What W10 owed was the bookkeeping, and
+looking at it properly turned up two defects in the design above rather than in
+the code implementing it — both invisible except under timing.
+
+- **A one-slot handoff loses strokes.** See the threading contract above. The
+  fix is a FIFO; the test builds the old version and watches it lose one.
+- **The history and the pixels could disagree permanently.** `recordStroke` ran
+  on the UI thread at pen-up while the pixels went through the slot, and
+  `commitStroke` *dropped* the stroke when there was no surface — so a stroke
+  finished as the app went to the background was counted by the `Document` and
+  never drawn. `Document.commitStroke` now does both halves in one call and
+  there is no arrangement of threads in which one happens and the other does
+  not. Measured on the tablet: a pen-up followed immediately by HOME, then
+  resume, comes back with the ink.
+
+The queue lives on the `Document` and not on the view, which is the same
+reasoning that put the layer there: the document outlives every surface, so a
+stroke in flight when the surface goes away is stamped by the first render
+against the next one. Rotation never exercises this — the manifest handles
+`orientation|screenSize`, so the view stays attached and only the surface is
+rebuilt — and backgrounding does.
+
+The history leads the pixels by at most one frame and nothing reads both:
+`PngExporter` reads the layer, undo reads the bounds, the readout is a readout.
 
 **W12 — how I'd know it went wrong.** A two-finger pinch that stutters or lags
 the fingers. Contingency ladder: (a) Choreographer coalescing is already the

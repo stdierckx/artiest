@@ -181,7 +181,8 @@ private fun readout(surface: InkSurfaceView?, document: Document, generation: In
     }
     return "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
-        "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}\n" +
+        "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}   " +
+        "commits pending ${document.pendingCommits}\n" +
         "last     ${surface.lastStrokeSamples} samples -> ${surface.lastStrokeDabs} dabs   " +
         "${r(s.samplesPerEvent(), 2)} samples/event   ${r(s.dabsPerEvent(), 1)} dabs/event\n" +
         "event    p50 ${r(s.eventMs(0.5f), 3)}  " +
