@@ -653,7 +653,7 @@ half a day** before any of it is built on.
 | 12 | ~~`GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake**~~ **DONE — `71208ed`. 362 pointer updates coalesced to 90 renders with none skipped; the freeze rule's real reason turned out to be narrower and sharper than stated.** | `:app` | — | — | ✔ |
 | 13 | ~~Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw)~~ **DONE — `7b6698f`. Eight contact sequences run on the tablet, 8/8. The rules were already right; a cancel released no batches, and the counters now say which of six ways a stroke died.** | `:app` | — | — | ✔ |
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
-| 15 | `MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port | `:app` | Low | 11, 13, 14 | 1.0 |
+| 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
 | 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** | device | Medium | 15 | 1.5 |
 | 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
 
