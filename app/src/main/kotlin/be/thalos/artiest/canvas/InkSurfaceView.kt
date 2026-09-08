@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
+import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.ink.DabEmitter
@@ -122,6 +123,84 @@ class InkSurfaceView(
      */
     @Volatile
     var transform: CanvasTransform = CanvasTransform.IDENTITY
+        private set
+
+    /**
+     * The transform a request arrived with while a stroke was open, applied at
+     * pen-up. Null when there is nothing waiting.
+     */
+    private var pendingTransform: CanvasTransform? = null
+
+    /**
+     * True while the pen is down. The transform is frozen for exactly this
+     * long — see [requestTransform].
+     */
+    private var strokeOpen: Boolean = false
+
+    /** Transform requests held because a stroke was open. See [requestTransform]. */
+    var transformDeferrals: Long = 0L
+        private set
+
+    /**
+     * Ask for a new document-to-view transform. Returns false if it was
+     * deferred.
+     *
+     * **The transform is frozen for the lifetime of a wet stroke, and this is
+     * where that rule is enforced rather than assumed.**
+     *
+     * The reason is more specific than the plan's wording, and worth stating
+     * exactly. A transform change does *not* corrupt the stroke itself: the
+     * render matrix is snapshotted at pen-down and so is the mapping incoming
+     * samples go through, so every dab of a stroke lands consistently whatever
+     * happens to this field. What breaks is the relationship between the two
+     * layers. The front buffer is drawing wet ink through the frozen matrix
+     * while the multi-buffered layer blits the committed ink through this one,
+     * and `CanvasFrontBufferedRenderer` never re-records pixels it has already
+     * drawn — there is no invalidate, no partial clear, and
+     * `SurfaceControlCompat.Transaction` has no `setMatrix` to rescue it at the
+     * compositor. So the drawing and the stroke being drawn on it would be at
+     * two different scales and positions at once, until pen-up put them back
+     * together.
+     *
+     * `StrokeExclusivity` already keeps a gesture from starting mid-stroke, so
+     * the gesture path cannot reach here while the pen is down. The path that
+     * can is `surfaceChanged` **without** a destroy — a window resize with the
+     * pen still on the glass. Rotation is not that path on this device: it
+     * destroys the surface first, and `surfaceDestroyed` abandons the stroke,
+     * which was measured rather than assumed. Refusing outright would leave the
+     * canvas at a fit that no longer matches the surface, so the request is
+     * held and applied at pen-up, which is the first moment it is safe.
+     * [transformDeferrals] counts how often that actually happens, because a
+     * branch nobody can make fire is a branch nobody knows the state of.
+     */
+    fun requestTransform(t: CanvasTransform): Boolean {
+        if (strokeOpen) {
+            pendingTransform = t
+            transformDeferrals++
+            return false
+        }
+        transform = t
+        return true
+    }
+
+    /**
+     * Fit the document to the surface, discarding any pan and zoom.
+     *
+     * The recovery path, and the reason it exists is that a canvas can be
+     * gestured somewhere unrecoverable — rotated 40 degrees and zoomed to 8x
+     * with the page off screen is four seconds of fumbling away. It also turns
+     * [fitOnResize] back on, so the canvas resumes following the window until
+     * the next gesture.
+     */
+    fun fitToView(): Boolean {
+        val w = width
+        val h = height
+        if (w <= 0 || h <= 0) return false
+        fitOnResize = true
+        return requestTransform(
+            CanvasTransform.fitTo(w, h, document.widthPx, document.heightPx),
+        )
+    }
 
     /**
      * Whether a surface resize refits the document to the new size.
@@ -295,6 +374,24 @@ class InkSurfaceView(
          * untimed latch, so anything here that waited on the UI thread would
          * deadlock the moment the UI thread was itself waiting on the surface.
          */
+        /**
+         * The library's own completion signal for a multi-buffered render, and
+         * the thing that makes "at most one in flight" a fact rather than a
+         * hope.
+         *
+         * Without it, coalescing to one render per `Choreographer` frame still
+         * lets a slow render be followed immediately by another: the frame
+         * clock does not know what the render thread is doing. With it,
+         * `GestureController` skips a frame rather than queueing behind one.
+         */
+        override fun onMultiBufferedLayerRenderComplete(
+            frontBufferedLayerSurfaceControl: SurfaceControlCompat,
+            multiBufferedLayerSurfaceControl: SurfaceControlCompat,
+            transaction: SurfaceControlCompat.Transaction,
+        ) {
+            dryRenderInFlight = false
+        }
+
         override fun onDrawMultiBufferedLayer(
             canvas: Canvas,
             bufferWidth: Int,
@@ -338,7 +435,9 @@ class InkSurfaceView(
         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             surfaceAlive = true
             if (fitOnResize) {
-                transform = CanvasTransform.fitTo(width, height, document.widthPx, document.heightPx)
+                requestTransform(
+                    CanvasTransform.fitTo(width, height, document.widthPx, document.heightPx),
+                )
             }
             redrawDry()
         }
@@ -356,9 +455,16 @@ class InkSurfaceView(
          */
         override fun surfaceDestroyed(holder: SurfaceHolder) {
             surfaceAlive = false
+            // Nothing will complete a render against a surface that is gone,
+            // and a flag stuck true would make GestureController skip every
+            // frame it is ever asked for.
+            dryRenderInFlight = false
             router.abandon()
         }
     }
+
+    /** Pan, zoom and rotate. See [GestureController]. */
+    val gestures = GestureController(this)
 
     private val driver = StrokeDriver()
 
@@ -468,9 +574,20 @@ class InkSurfaceView(
         renderer?.cancel()
     }
 
+    /**
+     * True from a [redrawDry] until the library reports that render complete.
+     *
+     * Written on both threads and read by [GestureController], which is why it
+     * is volatile and why nothing branches on it inside the render callback.
+     */
+    @Volatile
+    var dryRenderInFlight: Boolean = false
+        private set
+
     override fun redrawDry() {
         val r = renderer ?: return
         if (!surfaceAlive) return
+        dryRenderInFlight = true
         r.renderMultiBufferedLayer(emptyList())
     }
 
@@ -675,6 +792,7 @@ class InkSurfaceView(
             gcAtBegin = gcCount()
             dragBytes = 0L
             strokeOpen = true
+            this@InkSurfaceView.strokeOpen = true
         }
 
         /**
@@ -820,6 +938,7 @@ class InkSurfaceView(
             commitStroke(stroke)
             val commitEnd = heapUsed()
             strokeOpen = false
+            releaseTransform()
             stats.recordStroke(
                 dragBytes = dragBytes,
                 dragSamples = seen,
@@ -834,25 +953,47 @@ class InkSurfaceView(
             emitted = 0
             strokeOpen = false
             cancelStroke()
+            releaseTransform()
         }
 
-        // W12 owns the gesture path. Until then a gesture is routed, counted by
-        // the exclusivity machine — which is what keeps a palm from drawing —
-        // and moves nothing.
-        override fun onGestureBegin() = Unit
+        override fun onGestureBegin() {
+            gestures.begin()
+        }
 
         override fun onGesturePointers(
             ids: IntArray,
             xs: FloatArray,
             ys: FloatArray,
             count: Int,
-        ) = Unit
+        ) {
+            gestures.pointers(ids, xs, ys, count)
+        }
 
-        override fun onGestureEnd() = Unit
+        override fun onGestureEnd() {
+            gestures.end()
+        }
 
-        override fun onGestureCancel() = Unit
+        override fun onGestureCancel() {
+            gestures.cancel()
+        }
 
         override fun onPenPresence(inRange: Boolean) = Unit
+    }
+
+    /**
+     * Pen-up: unfreeze the transform and apply whatever was held.
+     *
+     * A held transform redraws immediately rather than waiting for the next
+     * thing to ask for a frame, because the reason it was held is usually that
+     * the surface changed size underneath the stroke — and a canvas fitted to
+     * the previous window is the visible symptom.
+     */
+    private fun releaseTransform() {
+        strokeOpen = false
+        val held = pendingTransform ?: return
+        pendingTransform = null
+        transform = held
+        redrawDry()
     }
 
     private fun recordLead(dx: Float, dy: Float) {

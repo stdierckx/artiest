@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import be.thalos.artiest.canvas.GestureStress
 import be.thalos.artiest.canvas.InkSurfaceView
 import be.thalos.artiest.canvas.InputStats
 import be.thalos.artiest.canvas.StrokeStress
@@ -92,6 +93,7 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     var generation by remember { mutableStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
     var stress by remember { mutableStateOf<StrokeStress?>(null) }
+    var pinch by remember { mutableStateOf<GestureStress?>(null) }
     var polling by remember { mutableStateOf(true) }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -119,7 +121,7 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
         Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-            Text("artiest — W9 ink path", style = MaterialTheme.typography.titleSmall)
+            Text("artiest — W12 canvas", style = MaterialTheme.typography.titleSmall)
             Text(
                 text = readout(surface, document, generation),
                 fontFamily = FontFamily.Monospace,
@@ -131,6 +133,19 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                     surface?.clear()
                     generation++
                 }) { Text("Clear") }
+                TextButton(onClick = {
+                    surface?.fitToView()
+                    generation++
+                }) { Text("Fit") }
+                TextButton(
+                    enabled = surface != null && pinch?.running != true,
+                    onClick = {
+                        val v = surface ?: return@TextButton
+                        val g = pinch ?: GestureStress(v).also { pinch = it }
+                        polling = false
+                        g.start { polling = true; generation++ }
+                    },
+                ) { Text("Pinch") }
                 TextButton(onClick = {
                     val v = surface ?: return@TextButton
                     v.predictionEnabled = !v.predictionEnabled
@@ -215,7 +230,15 @@ private fun readout(surface: InkSurfaceView?, document: Document, generation: In
         "${surface.predictor?.availability ?: "-"}   " +
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
-        "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed"
+        "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "xform    scale ${r(surface.transform.scale, 3)}   " +
+        "rot ${r(surface.transform.rotationRad, 3)} rad   " +
+        "t ${r(surface.transform.txDoc, 1)},${r(surface.transform.tyDoc, 1)}   " +
+        "fitOnResize ${surface.fitOnResize}   " +
+        "deferred ${surface.transformDeferrals}\n" +
+        "gesture  ${surface.gestures.updates} updates   " +
+        "${surface.gestures.framesDrawn} frames drawn   " +
+        "${surface.gestures.framesSkipped} skipped"
 }
 
 /**

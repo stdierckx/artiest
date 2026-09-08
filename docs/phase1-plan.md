@@ -209,7 +209,7 @@ artiest/
 │   └── be.thalos.artiest.engine
 │       ├── input/  PenSample, ToolType, Stabilizer, PredictionGate
 │       ├── ink/    RoundPen, CatmullRomResampler, StrokeBuilder, Stroke, Bounds
-│       ├── xform/  CanvasTransform
+│       ├── xform/  CanvasTransform, GestureSolver
 │       └── trace/  TraceRecorder, TracePlayer
 ├── engine/src/test/           JUnit, runs natively — no Robolectric, no mockable android.jar
 ├── app/                       com.android.application, be.thalos.artiest
@@ -448,6 +448,20 @@ zoomed-out document shimmer during pan. At 0.5 no mip chain is needed, and
 generating one on a full layer would cost ~11 ms — a guaranteed dropped frame —
 for nothing Phase 1 gains.
 
+**W8 found that this means fit-to-view does not fit, and W12 decided to keep it
+that way.** The honest landscape fit for a 2160×3300 page in a 2200×1330 window
+is 0.403, so `fitTo` clamps to 0.5 and about 320 px of the page is off screen.
+Three ways out were on the table: lower the floor and accept shimmer while
+panning, shrink the default document, or make fit-to-view mean fit-*width* and
+scroll. **None of them is taken.** Lowering the floor trades a permanent
+image-quality cost against a case the user can resolve in two ways already —
+rotate to portrait, where the same page fits at 0.633 with room to spare, or pan,
+which W12 is the item that ships. Shrinking the document would size the paper
+around one window's aspect ratio, which is backwards. And fit-width is a
+different feature wearing fit-to-view's name. So landscape shows a page that is
+taller than the window, which is what paper looks like on a screen that shape,
+and `fitToView` is always one action away from a known state.
+
 **Export path.** `PngExporter` is a suspend function on `Dispatchers.IO`. The
 layer stays **alpha-carrying** — paper white is drawn by the renderer, never
 baked in — so it remains a real layer for Phase 3's stack and Phase 4's `.ora`.
@@ -625,7 +639,7 @@ half a day** before any of it is built on.
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
 | 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE — `01e9477`. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
 | 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE — `15ce55d`. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
-| 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
+| 12 | ~~`GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake**~~ **DONE. 362 pointer updates coalesced to 90 renders with none skipped; the freeze rule's real reason turned out to be narrower and sharper than stated.** | `:app` | — | — | ✔ |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
 | 15 | `MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port | `:app` | Low | 11, 13, 14 | 1.0 |
@@ -927,17 +941,76 @@ Three things worth keeping from building it:
   committed `Stroke` is built from real samples alone. The layer is clean; the
   screen is not, and that asymmetry is the whole risk.
 
-**W12 — how I'd know it went wrong.** A two-finger pinch that stutters or lags
-the fingers. Contingency ladder: (a) Choreographer coalescing is already the
-default; if it still stutters, (b) during the drag only, blit a **downscaled**
-copy of the layer, accepting a soft image while the fingers are down and
-snapping to a sharp re-render on gesture end.
+**W12 — DONE. The canvas moves, and the contingency ladder was not needed.**
 
-Note what contingency (b) is *not*: applying the delta via `SurfaceView` view
-properties (`setScaleX`/`setRotation`/`setTranslation`). A `SurfaceView`'s
-View-level transform moves the punched hole in the window, not the surface
-content. Ship double-tap-to-reset and fit-to-view regardless, so a lost canvas
-is always recoverable.
+`GestureSolver` lives in `:engine/xform` and holds all the arithmetic, so the
+part that can be wrong is driven by tests rather than by a hand;
+`GestureController` in `:app` holds the `Choreographer` and the redraw policy,
+which is the part tests cannot reach. Measured on the tablet with a synthesized
+two-finger pinch — `adb shell input` is single-touch, so a gesture is the one
+thing in Phase 1 that cannot be driven from a shell, and `GestureStress` builds
+the real DOWN / POINTER_DOWN / MOVE / POINTER_UP / UP sequence and dispatches it
+through `onTouchEvent`:
+
+```
+362 pointer updates -> 90 renders, 0 skipped
+scale 0.5 -> 1.0 (the span exactly doubled)
+rotation 0 -> 0.576 rad (a 0.698 rad twist, less the 0.122 rad dead zone)
+```
+
+**The coalescing is the measurement.** Four pointer updates a frame — which is
+what `requestUnbufferedDispatch` would deliver, and the case the plan named —
+produce one render a frame and no extra transactions, and the transform lands on
+exactly the same value it would have from one update a frame. That last part is
+the anchored solver rather than the coalescing: because each update is computed
+from the anchor rather than accumulated onto the last result, intermediate
+updates are not information and dropping them costs nothing. No stutter, so
+contingency (b) — blitting a downscaled layer during the drag — is not needed
+and stays unbuilt.
+
+**Two things the item changed about its own specification.**
+
+The freeze rule's reason is narrower and sharper than the plan stated. A
+transform change mid-stroke does *not* corrupt the stroke: the render matrix is
+snapshotted at pen-down and so is the mapping incoming samples go through, so
+every dab lands consistently whatever the live transform does. What breaks is
+the relationship between the two **layers** — the front buffer drawing wet ink
+through the frozen matrix while the multi-buffered layer blits the committed ink
+through the live one, which puts the drawing and the stroke being drawn on it at
+two different scales at once. `requestTransform` is where the rule is enforced,
+and it holds the request until pen-up rather than refusing it.
+
+And the path that reaches it is not rotation. Rotation destroys the surface
+first, `surfaceDestroyed` abandons the open stroke, and the refit then arrives
+with no stroke to defer around — measured, by rotating the tablet mid-stroke
+and finding the stroke cancelled and the transform refitted cleanly. What the
+guard is actually for is a `surfaceChanged` **without** a destroy: a window
+resize with the pen still on the glass. `transformDeferrals` counts it, so the
+branch is instrumented rather than merely present.
+
+**A dead zone on rotation, and it is a trade rather than a free win.** A pinch
+is never a pure pinch — hands are hinged, and a relaxed two-finger spread twists
+three to five degrees — so without one, every zoom tilts the canvas a little and
+getting back to level is fiddly. 7 degrees swallows that. The cost is exact:
+inside the dead zone the canvas does not follow the fingers exactly, because two
+points define a similarity and one of its degrees of freedom is being held at
+zero. Past it the tracking is exact again, offset by the threshold, so rotation
+starts continuously instead of jumping 7 degrees.
+
+Note what contingency (b) is *not*, in case it is ever wanted: applying the delta
+via `SurfaceView` view properties (`setScaleX`/`setRotation`/`setTranslation`).
+A `SurfaceView`'s View-level transform moves the punched hole in the window, not
+the surface content.
+
+**Double-tap-to-reset is not shipped; `fitToView` is.** The plan asked for both,
+so the reason matters: a single-finger tap never reaches the app, because
+`StrokeExclusivity` takes two fingers to open a gesture and drops lone fingers
+entirely — that rule is W4's, it is what keeps a palm landing before the pen from
+locking the pen out, and it is not worth reopening for a shortcut. A two-finger
+double tap would work within the rules and is W15's to add beside the rest of the
+chrome. The safety property the plan actually wanted — a lost canvas is always
+recoverable — is met by `fitToView`, which restores the fit and re-arms
+`fitOnResize` in one call.
 
 ## Carried over from the spike
 
