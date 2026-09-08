@@ -2,6 +2,7 @@ package be.thalos.artiest.input
 
 import android.view.MotionEvent
 import android.view.View
+import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.engine.input.ExclusivityState
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PointerAction
@@ -324,8 +325,102 @@ class InputRouterTest {
 
     // ---- driving -----------------------------------------------------------
 
+    /**
+     * W13's counters, wired through the real router rather than driven by hand.
+     *
+     * `StrokeExclusivity` decides all of this and `:engine` proves it; what is
+     * new here is that the `MotionEvent` half agrees — that `FLAG_CANCELED` is
+     * read off the event, that the tool type on an ACTION_POINTER_DOWN is read
+     * from the action's own index and not from index 0, and that the router
+     * feeds the machine's decision rather than its own idea of one.
+     */
+    @Test
+    fun `the framework's own cancel flag discards the stroke and is counted as such`() {
+        penDown(x = 500f)
+        sink.clear()
+
+        touchFlagged(MotionEvent.ACTION_UP, MotionEvent.FLAG_CANCELED, pen(520f))
+
+        assertEquals(listOf("cancel", "presence:false"), sink.calls)
+        // No final sample: an unintentional lift's coordinates belong to
+        // whatever caused it.
+        assertEquals(emptyList(), sink.samples)
+        val r = router.rejections
+        assertEquals(1L, r.strokesCanceled)
+        assertEquals(1L, r.cancelsBy(CancelCause.FLAG))
+        assertEquals(0L, r.strokesEnded)
+        assertEquals(1L, r.canceledFlagEvents)
+    }
+
+    @Test
+    fun `an unflagged lift of the same stroke commits it instead`() {
+        // The control for the test above: the only difference is the flag, and
+        // it is the difference between ink and no ink.
+        penDown(x = 500f)
+        touch(MotionEvent.ACTION_UP, pen(520f))
+
+        val r = router.rejections
+        assertEquals(1L, r.strokesEnded)
+        assertEquals(0L, r.strokesCanceled)
+        assertEquals(0L, r.canceledFlagEvents)
+    }
+
+    @Test
+    fun `a palm under a stroke and a pen under a gesture are both counted as dropped`() {
+        penDown(x = 500f)
+        touch(pointerAction(MotionEvent.ACTION_POINTER_DOWN, 1), pen(500f), palm())
+        touch(MotionEvent.ACTION_UP, pen(500f))
+
+        // Two fingers make a gesture, and the pen is then locked out for the
+        // life of its contact.
+        touch(MotionEvent.ACTION_DOWN, palm())
+        touch(pointerAction(MotionEvent.ACTION_POINTER_DOWN, 1), palm(), finger2())
+        touch(pointerAction(MotionEvent.ACTION_POINTER_DOWN, 2), palm(), finger2(), pen(700f))
+
+        val r = router.rejections
+        assertEquals(5L, r.contacts)
+        assertEquals(2L, r.penContacts)
+        // The palm under the stroke, the lone first finger, and the pen.
+        assertEquals(3L, r.contactsDropped)
+        assertEquals(1L, r.penContactsDropped)
+        assertEquals(1L, r.strokesBegun)
+        assertEquals(0L, r.fingerStrokeBegins)
+    }
+
+    @Test
+    fun `a lifecycle abandon is counted apart from every cancel that had an event`() {
+        penDown(x = 500f)
+        router.abandon()
+
+        val r = router.rejections
+        assertEquals(1L, r.cancelsBy(CancelCause.ABANDONED))
+        assertEquals(1L, r.strokesCanceled)
+        assertEquals(0L, r.canceledFlagEvents, "abandon has no event, so it has no flag")
+    }
+
+    @Test
+    fun `a stroke whose pointer vanishes is counted as lost, not as flagged`() {
+        // The router synthesizes POINTER_LOST with the cancel flag set, because
+        // a contact that disappeared did not lift on purpose. Counting that as
+        // the platform's flag would answer "does this digitizer ever set
+        // FLAG_CANCELED" with a signal the app generated itself.
+        penDown(x = 500f)
+        touch(MotionEvent.ACTION_MOVE, palm())
+
+        val r = router.rejections
+        assertEquals(1L, r.cancelsBy(CancelCause.LOST_POINTER))
+        assertEquals(0L, r.cancelsBy(CancelCause.FLAG))
+        // The synthesized action is not an event, so it does not move the
+        // event-level flag count either.
+        assertEquals(0L, r.canceledFlagEvents)
+    }
+
     private fun penDown(x: Float) {
         touch(MotionEvent.ACTION_DOWN, pen(x))
+    }
+
+    private fun touchFlagged(action: Int, flags: Int, vararg pointers: TestPointer) {
+        router.onTouchEvent(motionEvent(action, pointers.toList(), flags = flags), view)
     }
 
     private fun touch(action: Int, vararg pointers: TestPointer) {

@@ -564,7 +564,10 @@ that survives.
 
 Note the sharp edge — the pen's back reports `TOOL_TYPE_FINGER`, so it lands in
 the rejected bucket. That is the correct outcome (it is not an eraser) but it
-must be a deliberate decision in the router rather than an accident.
+must be a deliberate decision in the router rather than an accident. W13 made it
+one twice over: `toolClassOf` says so in a comment, and
+`RejectionCounters.fingerStrokeBegins` says so as a number on the device readout
+whose only correct value is zero.
 
 ### The clear button — three calls, in this order
 
@@ -640,7 +643,7 @@ half a day** before any of it is built on.
 | 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE — `01e9477`. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
 | 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE — `15ce55d`. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
 | 12 | ~~`GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake**~~ **DONE — `71208ed`. 362 pointer updates coalesced to 90 renders with none skipped; the freeze rule's real reason turned out to be narrower and sharper than stated.** | `:app` | — | — | ✔ |
-| 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
+| 13 | ~~Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw)~~ **DONE — `SHA13`. Eight contact sequences run on the tablet, 8/8. The rules were already right; a cancel released no batches, and the counters now say which of six ways a stroke died.** | `:app` | — | — | ✔ |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
 | 15 | `MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port | `:app` | Low | 11, 13, 14 | 1.0 |
 | 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** | device | Medium | 15 | 1.5 |
@@ -1011,6 +1014,86 @@ double tap would work within the rules and is W15's to add beside the rest of th
 chrome. The safety property the plan actually wanted — a lost canvas is always
 recoverable — is met by `fitToView`, which restores the fit and re-arms
 `fitOnResize` in one call.
+
+**W13 — DONE. The rules were already right; the bookkeeping around a cancel was
+not, and three claims the plan could not check now have counters.**
+
+Almost nothing in this item was a new rule. W4 put every one of them in
+`StrokeExclusivity` and proved them on the JVM, and W13's job was the half that
+module cannot reach: whether the `MotionEvent` side agrees, and whether a
+rejected contact stays rejected all the way to the pixels. `RejectionStress`
+answers that by replaying eight contact sequences through the real view and then
+asking the *document* what happened:
+
+```
+8/8 pass    peak in flight 1   spills 0
+contacts 12 (6 pen)   dropped 6 (1 pen)   finger-begins 0   flagged 1
+strokes  5 begun   3 ended   2 cancelled -> flag 1  cancel_action 1
+```
+
+The first case draws, and that is structural rather than incidental: seven of
+the eight assert that something did *not* happen, and a harness whose synthetic
+pen cannot draw at all passes every one of them. Same geometry, same event
+shapes, one committed stroke — then the seven.
+
+Two of the eight are worth naming. **The palm mid-stroke case is checked
+geometrically**, not by counting strokes: the palm arrives after the pen and
+lifts before it, so the pen slides from pointer index 0 to 1 and back, and the
+assertion is that the committed stroke's bounds come nowhere near where the palm
+was resting. A consumer holding the index it was handed at DOWN passes a stroke
+count and fails this. **The pen-during-gesture case asserts the fingers panned**,
+because "the pen drew nothing" is also true of a run where the gesture was
+dropped as well, and that would be a different bug wearing this one's result.
+
+Confirmed on the real input dispatcher afterwards, not only through synthesized
+events: an injected finger swipe across the canvas moves nothing and draws
+nothing (`contacts` and `dropped` both +1, transform unchanged), and an injected
+stylus swipe over the same path commits a stroke.
+
+**The defect it found is in the pool, and it is smaller than it first looks.**
+`CanvasFrontBufferedRenderer.cancel()` invokes **neither** draw callback —
+bytecode: `ParamQueue.clear`, `cancelPending`, a runnable that hides the
+front-buffer SurfaceControl, a buffer clear, and no dispatch — while
+`commitWatermark` is only ever applied inside `onDrawMultiBufferedLayer`. So a
+cancel set a watermark that nothing read. `markDrawn` is a watermark, though, so
+the next batch that *is* drawn releases the abandoned ones with it: the leak is
+one cancel deep and self-heals. What it costs first is that the stroke after a
+cancel starts with a ring short by that many slots and can spill through no
+fault of its own, and that `peakInFlight` reads high from the cancel onwards —
+which is the number W9 sized `DEFAULT_SLOTS` with. The fix is one
+`renderMultiBufferedLayer` after the cancel, which is the same handoff the
+commit path uses, on the same thread, in order; with no surface there is no
+render thread to hand to, so `DabBatchPool.releaseAll` does it directly.
+
+**And it could not be reproduced on the device, which is the honest result.**
+The unfixed build was reinstalled and driven through the harness, and through a
+stroke interrupted by HOME — the sequence the fix's comment describes — and both
+reported `in flight 0`. The render thread never ran more than one batch behind
+at any rate this device produces (peak in flight 1 on both attempts; W9's
+punishing case peaked at 3, against 8 slots). So the leak is real in the
+bookkeeping and latent in practice, the unit test is what demonstrates its
+consequence, and the fix is kept for making `inFlight` exact rather than for
+fixing an observed fault. Claiming otherwise would be claiming a measurement
+that was tried and did not come.
+
+**Three questions the plan reasoned about and could not answer now have
+counters, always on.** Whether this digitizer's driver ever sets `FLAG_CANCELED`
+— Phase 0 counted the flag but exported no session with a palm on the glass.
+Whether the framework ever sends this app an `ACTION_CANCEL`. Whether a pointer
+is ever lost mid-stroke. `RejectionCounters` costs nine longs and a
+`LongArray` incremented once per event, and `CancelCause` partitions every path
+in `StrokeExclusivity` that can discard a stroke into six — flag, cancel action,
+lost pointer, stale DOWN, mismatched lift, lifecycle abandon — because "a stroke
+was cancelled" is not a diagnosis and those six have completely different fixes.
+The synthesized flag arrives as `flagged 1` and `flag 1`; **a real one has still
+never been seen**, and the honest reading of the zero is "not yet", not "never".
+`POINTER_LOST` is deliberately excluded from the flag count: `:app` synthesizes
+it with the flag set, and counting it would answer the open question with a
+signal this app wrote itself.
+
+The readout prints the router's cancel count and the view's side by side. They
+are the same number unless a cancel stopped somewhere between the decision and
+the ink, which is exactly the failure that would otherwise be silent.
 
 ## Carried over from the spike
 

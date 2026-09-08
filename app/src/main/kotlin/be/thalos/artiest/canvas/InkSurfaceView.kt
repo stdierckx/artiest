@@ -20,6 +20,7 @@ import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PredictionGate
+import be.thalos.artiest.engine.input.RejectionCounters
 import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
@@ -569,10 +570,65 @@ class InkSurfaceView(
         r.commit()
     }
 
+    /**
+     * Throw the wet stroke away, and — the half that was missing — give the
+     * batches it was drawn from somewhere to go.
+     *
+     * `cancel()` hides the front buffer and clears the library's param queue.
+     * It invokes **neither** draw callback (bytecode: `ParamQueue.clear`,
+     * `cancelPending`, a runnable that sets the front-buffer SurfaceControl
+     * invisible, a buffer clear, and no dispatch to either `onDraw*Layer`), and
+     * [commitWatermark] is only ever applied inside [onDrawMultiBufferedLayer].
+     * So through W12 a cancel set a watermark that nothing read.
+     *
+     * The consequence is smaller than it first looks and worth stating
+     * exactly. `markDrawn` is a watermark, so the *next* batch that is drawn
+     * releases the abandoned ones with it — the leak is one cancel deep and it
+     * self-heals. What it costs before it does: the stroke after a cancel
+     * begins with a ring short by that many slots and can spill on its own
+     * first events, and `peakInFlight` reads high from the cancel onwards,
+     * which is the number W9 sized `DabBatchPool.DEFAULT_SLOTS` with. A cancel
+     * that is the last thing to happen leaves batches in flight for good.
+     *
+     * The redraw is the fix and it is not a repaint: the dry layer already
+     * holds the right pixels, because a cancelled stroke was never committed to
+     * it. It is there to make the render thread visit
+     * [onDrawMultiBufferedLayer] once, which is where the watermark is applied
+     * — the same handoff, on the same thread, in the same order as a commit.
+     * One render per cancel, and a cancel happens at most once per stroke.
+     *
+     * With no surface there is no render thread to hand off to, so the pool is
+     * released directly. See [DabBatchPool.releaseAll] for why that is safe
+     * there and not in general.
+     */
     override fun cancelStroke() {
+        strokesCanceled++
+        val r = renderer
+        if (r == null || !surfaceAlive) {
+            batches.releaseAll()
+            return
+        }
         commitWatermark = batches.issuedCount
-        renderer?.cancel()
+        r.cancel()
+        redrawDry()
     }
+
+    /**
+     * Strokes discarded rather than committed, since the view was created.
+     *
+     * The count is here and the *causes* are in
+     * `InputRouter.rejections`: this side knows a stroke's ink was thrown
+     * away, and only the router knows whether that was ACTION_CANCEL, the
+     * framework's own cancel flag, a lost pointer or a lifecycle abandon. The
+     * two are checked against each other by [rejections] in the readout, which
+     * is how a cancel that reaches the router but not the ink — or the reverse
+     * — becomes visible instead of silent.
+     */
+    var strokesCanceled: Long = 0L
+        private set
+
+    /** The router's rejection tally. See [RejectionCounters]. */
+    val rejections: RejectionCounters get() = router.rejections
 
     /**
      * True from a [redrawDry] until the library reports that render complete.

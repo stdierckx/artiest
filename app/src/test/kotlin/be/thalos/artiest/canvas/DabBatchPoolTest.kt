@@ -222,4 +222,74 @@ class DabBatchPoolTest {
         assertEquals(3, held.toSet().size)
     }
 
+    /**
+     * W13's defect, longhand: a cancel releases nothing on its own, and the
+     * stroke that follows it pays.
+     *
+     * `CanvasFrontBufferedRenderer.cancel()` drops the library's queued params
+     * without invoking either draw callback, so those batches are never
+     * reported drawn. The watermark means the leak is one cancel deep and heals
+     * as soon as anything else is drawn — which is why the damage is not "the
+     * pool dies" but this: the next stroke starts with a ring three slots
+     * short and spills on its second acquire, having done nothing wrong. The
+     * test after this one is the fix.
+     */
+    @Test
+    fun `a cancel leaves the next stroke a shortened ring`() {
+        val pool = DabBatchPool(slots = 4, capacity = 8)
+        repeat(3) { pool.acquire() }
+        // The cancel: the library drops these, so nothing reports them.
+        assertEquals(3, pool.inFlight)
+
+        // The next stroke, before the render thread has drawn any of its
+        // batches — which is exactly the moment a stroke submits its first few.
+        pool.acquire()
+        assertEquals(0L, pool.spills, "the ring was already exhausted too early")
+        pool.acquire()
+        assertEquals(1L, pool.spills, "the shortened ring did not spill, so nothing was tested")
+    }
+
+    @Test
+    fun `releaseAll gives a cancelled stroke's slots back`() {
+        val pool = DabBatchPool(slots = 4, capacity = 8)
+        repeat(3) { pool.acquire() }
+        pool.releaseAll()
+        assertEquals(0, pool.inFlight)
+
+        // The same five acquires the control above spilled on, with nothing
+        // drawn in between: four fit, and only the fifth — a genuinely full
+        // ring — spills.
+        repeat(4) { pool.acquire() }
+        assertEquals(0L, pool.spills)
+        assertEquals(4, pool.inFlight)
+        pool.acquire()
+        assertEquals(1L, pool.spills)
+    }
+
+    @Test
+    fun `releaseAll never walks the watermark backwards`() {
+        val pool = DabBatchPool(slots = 4, capacity = 8)
+        val a = pool.acquire()
+        val b = pool.acquire()
+        // The render thread got ahead: it reported the newer batch first, which
+        // markDrawn allows because the commit path reports a whole stroke at
+        // once while the front-buffer path reports one at a time.
+        pool.markDrawn(b.sequence)
+        pool.releaseAll()
+        pool.markDrawn(a.sequence)
+        assertEquals(0, pool.inFlight, "an older sequence re-exposed a released slot")
+    }
+
+    @Test
+    fun `releaseAll on an idle pool changes nothing`() {
+        val pool = DabBatchPool(slots = 4, capacity = 8)
+        pool.releaseAll()
+        assertEquals(0, pool.inFlight)
+        assertEquals(0L, pool.issuedCount)
+        assertEquals(0L, pool.spills)
+        // And a batch acquired after it is still a fresh sequence rather than a
+        // slot the pool thinks it already released.
+        assertEquals(1L, pool.acquire().sequence)
+        assertEquals(1, pool.inFlight)
+    }
 }

@@ -122,6 +122,44 @@ class DabBatchPool(
     }
 
     /**
+     * Declare every outstanding batch finished with, because nothing is going
+     * to report them drawn.
+     *
+     * There is exactly one situation this is for, and it is W13's: a stroke
+     * cancelled with no surface to cancel it on.
+     * `CanvasFrontBufferedRenderer.cancel()` clears the library's param queue
+     * and hides the front buffer — bytecode-verified: `ParamQueue.clear`,
+     * `cancelPending`, a runnable that sets the front-buffer SurfaceControl
+     * invisible, and a buffer clear — and **invokes neither draw callback**. So
+     * every batch queued when a cancel lands is finished with and is never
+     * reported.
+     *
+     * How bad that is, stated exactly, because the obvious reading overstates
+     * it: [markDrawn] is a watermark, so the next batch that *does* get drawn
+     * releases the abandoned ones along with itself. The leak is therefore
+     * bounded by one cancel's worth of batches and it self-heals — but not
+     * before two things have happened. The stroke *after* a cancel starts with
+     * a ring that is short by exactly that many slots, and can spill on its
+     * first few events for no reason of its own; and [peakInFlight] and
+     * [inFlight] read high from the cancel onwards, which quietly invalidates
+     * the measurement W9 sized [DEFAULT_SLOTS] with. A cancel that is the last
+     * thing to happen leaves [inFlight] non-zero for good.
+     *
+     * With a live surface the caller does not need this — a
+     * `renderMultiBufferedLayer` after the cancel gives the render thread the
+     * same watermark the commit path uses, on the right thread, in order. This
+     * is the arm for when the surface is already gone, where there is no render
+     * thread left to take the handoff. Safe there for the reason it is not safe
+     * in general: the library has already run `releaseInternal(cancelPending =
+     * true)` from its own `surfaceDestroyed`, so pending renders are cancelled,
+     * and any callback still running is drawing into a buffer nothing will
+     * show.
+     */
+    fun releaseAll() {
+        markDrawn(issued)
+    }
+
+    /**
      * Drop the ring's bookkeeping. For a fresh document or a test, **not** for
      * pen-up: a batch in flight at pen-up is still in flight, and resetting
      * around it is exactly the bug the sequence numbers exist to prevent.

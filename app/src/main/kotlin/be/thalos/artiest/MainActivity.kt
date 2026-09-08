@@ -27,8 +27,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import be.thalos.artiest.canvas.GestureStress
 import be.thalos.artiest.canvas.InkSurfaceView
 import be.thalos.artiest.canvas.InputStats
+import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.engine.input.CancelCause
 
 /**
  * Placeholder chrome around the real canvas.
@@ -94,6 +96,7 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
     var stress by remember { mutableStateOf<StrokeStress?>(null) }
     var pinch by remember { mutableStateOf<GestureStress?>(null) }
+    var reject by remember { mutableStateOf<RejectionStress?>(null) }
     var polling by remember { mutableStateOf(true) }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -121,9 +124,9 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
         Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-            Text("artiest — W12 canvas", style = MaterialTheme.typography.titleSmall)
+            Text("artiest — W13 canvas", style = MaterialTheme.typography.titleSmall)
             Text(
-                text = readout(surface, document, generation),
+                text = readout(surface, document, reject, generation),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 6.dp),
@@ -146,6 +149,19 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                         g.start { polling = true; generation++ }
                     },
                 ) { Text("Pinch") }
+                TextButton(
+                    enabled = surface != null && reject?.running != true,
+                    onClick = {
+                        val v = surface ?: return@TextButton
+                        val g = reject ?: RejectionStress(v).also { reject = it }
+                        // Cleared first: three of the eight cases commit ink on
+                        // purpose, and the seven that must not are counted
+                        // against the document's stroke count.
+                        v.clear()
+                        polling = false
+                        g.start { polling = true; generation++ }
+                    },
+                ) { Text("Reject") }
                 TextButton(onClick = {
                     val v = surface ?: return@TextButton
                     v.predictionEnabled = !v.predictionEnabled
@@ -197,7 +213,12 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
  * expensive thing in the app, and on this screen it would also be the thing
  * being measured.
  */
-private fun readout(surface: InkSurfaceView?, document: Document, generation: Int): String {
+private fun readout(
+    surface: InkSurfaceView?,
+    document: Document,
+    reject: RejectionStress?,
+    generation: Int,
+): String {
     if (surface == null) return "surface  -"
     val p = surface.batches
     val s = surface.stats
@@ -210,6 +231,10 @@ private fun readout(surface: InkSurfaceView?, document: Document, generation: In
     return "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
         "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}   " +
+        // In flight *right now*, which at rest must be zero. Non-zero on an
+        // idle canvas means batches were handed out and never reported drawn,
+        // and the only path that does that is a cancel.
+        "in flight ${p.inFlight}   " +
         "commits pending ${document.pendingCommits}\n" +
         "last     ${surface.lastStrokeSamples} samples -> ${surface.lastStrokeDabs} dabs   " +
         "${r(s.samplesPerEvent(), 2)} samples/event   ${r(s.dabsPerEvent(), 1)} dabs/event\n" +
@@ -238,7 +263,46 @@ private fun readout(surface: InkSurfaceView?, document: Document, generation: In
         "deferred ${surface.transformDeferrals}\n" +
         "gesture  ${surface.gestures.updates} updates   " +
         "${surface.gestures.framesDrawn} frames drawn   " +
-        "${surface.gestures.framesSkipped} skipped"
+        "${surface.gestures.framesSkipped} skipped\n" +
+        rejectionLines(surface, reject)
+}
+
+/**
+ * W13's three lines: what was refused, why strokes ended the way they did, and
+ * whether the eight sequences still behave.
+ *
+ * `finger-begins` is the one number here that is an assertion rather than an
+ * observation — "fingers and the pen's back never draw" — and its only correct
+ * value is 0. `flagged` is the open question the plan could not close: whether
+ * this digitizer's driver ever sets `FLAG_CANCELED`. A non-zero count while
+ * drawing with a hand on the glass answers it yes; the honest reading of a zero
+ * is "not seen yet", not "never".
+ */
+private fun rejectionLines(surface: InkSurfaceView, reject: RejectionStress?): String {
+    val r = surface.rejections
+    val causes = buildString {
+        for (cause in CancelCause.entries) {
+            val n = r.cancelsBy(cause)
+            if (n > 0L) append("  ").append(cause.name.lowercase()).append(' ').append(n)
+        }
+    }
+    val verdict = when {
+        reject == null -> "not run"
+        reject.running -> "running"
+        else -> "${reject.passed}/${reject.passed + reject.failed} pass" +
+            reject.results.filter { it.startsWith("FAIL") }.joinToString("") { "\n         $it" }
+    }
+    return "contacts ${r.contacts} (${r.penContacts} pen)   " +
+        "dropped ${r.contactsDropped} (${r.penContactsDropped} pen)   " +
+        "finger-begins ${r.fingerStrokeBegins}   flagged ${r.canceledFlagEvents}\n" +
+        "strokes  ${r.strokesBegun} begun   ${r.strokesEnded} ended   " +
+        // Both counts, on purpose. The router counts the decision and the view
+        // counts the ink it threw away in response; they are the same number
+        // unless a cancel stopped somewhere between them, which is precisely
+        // the failure that would otherwise be silent.
+        "${r.strokesCanceled} cancelled (${surface.strokesCanceled} dropped)" +
+        "${if (causes.isEmpty()) "" else " ->$causes"}\n" +
+        "reject   $verdict"
 }
 
 /**

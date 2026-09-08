@@ -6,6 +6,7 @@ import be.thalos.artiest.engine.input.Decision
 import be.thalos.artiest.engine.input.ExclusivityState
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PointerAction
+import be.thalos.artiest.engine.input.RejectionCounters
 import be.thalos.artiest.engine.input.StrokeExclusivity
 import be.thalos.artiest.engine.input.StrokeExclusivity.Companion.NO_POINTER
 import be.thalos.artiest.engine.input.ToolClass
@@ -139,6 +140,19 @@ class InputRouter(private val sink: InkInputSink) {
     /** Per-MotionEvent counter for the trace. Two pointers from one event share it. */
     private var seq = 0
 
+    /**
+     * What was rejected, and why strokes ended the way they did.
+     *
+     * Always on, unlike [recorder]. It is nine `Long`s and a `LongArray`
+     * indexed by an enum, incremented once per event with no allocation and no
+     * branch on router state — the cost is nothing and the questions it answers
+     * cannot be answered any other way. Three of them have no JVM answer at
+     * all: whether this digitizer sets `FLAG_CANCELED`, whether the framework
+     * ever cancels this app's gesture, and whether a pointer is ever lost
+     * mid-stroke. See [RejectionCounters].
+     */
+    val rejections = RejectionCounters()
+
     val state: ExclusivityState get() = machine.state
 
     val penStrokeId: Int get() = machine.penStrokeId
@@ -162,6 +176,9 @@ class InputRouter(private val sink: InkInputSink) {
         record(event, action, pointerId, canceled)
 
         val decision = machine.route(action, pointerId, tool, canceled)
+        // Counted before dispatch, so the tally describes what the machine
+        // decided even if a sink throws on its way through.
+        rejections.record(action, tool, canceled, decision)
         dispatch(decision, event, view, pointerId)
         return true
     }
@@ -205,7 +222,9 @@ class InputRouter(private val sink: InkInputSink) {
      * and `onDetachedFromWindow`, and the activity from `onPause`.
      */
     fun abandon() {
-        dispatch(machine.abandon(), event = null, view = null, actionPointerId = NO_POINTER)
+        val decision = machine.abandon()
+        rejections.recordAbandon(decision)
+        dispatch(decision, event = null, view = null, actionPointerId = NO_POINTER)
     }
 
     /**
@@ -258,6 +277,7 @@ class InputRouter(private val sink: InkInputSink) {
                 // turns the loss into a cancel, and that cancel is the only
                 // decision this call can produce, so the recursion is one deep.
                 val lost = machine.route(PointerAction.POINTER_LOST, id, ToolClass.PEN, true)
+                rejections.record(PointerAction.POINTER_LOST, ToolClass.PEN, true, lost)
                 dispatch(lost, e, view, id)
             }
         }
