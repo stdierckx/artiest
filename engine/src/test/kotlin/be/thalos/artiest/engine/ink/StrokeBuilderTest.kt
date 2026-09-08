@@ -1,6 +1,7 @@
 package be.thalos.artiest.engine.ink
 
 import be.thalos.artiest.engine.input.PenSample
+import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.input.ToolType
 import kotlin.math.sqrt
 import kotlin.test.Test
@@ -290,6 +291,45 @@ class StrokeBuilderTest {
             assertEquals(a.y(i).toRawBits(), b.y(i).toRawBits(), "dab $i y")
             assertEquals(a.radius(i).toRawBits(), b.radius(i).toRawBits(), "dab $i radius")
         }
+    }
+
+    @Test
+    fun `a speculative fork cannot drag the real ink toward a guess`() {
+        // W11's tail is smoothed through a copy of the stroke's filter. If it
+        // were the filter itself, every predicted point would move the state
+        // the next real sample runs through, and the ink would lean toward
+        // wherever the predictor had been guessing — a bias with no symptom
+        // except that the line is subtly wrong.
+        val pen = RoundPen()
+        val b = StrokeBuilder(pen)
+        b.begin(0xFF000000.toInt())
+        for (i in 0 until 20) b.add(sample(100f + i * 6f, 200f, 0.6f, i))
+
+        val xBefore = b.smoothedX
+        val yBefore = b.smoothedY
+        val pressureBefore = b.smoothedPressure
+        val dabsBefore = b.dabCount
+
+        val fork = Stabilizer(b.smoothingStrength)
+        b.forkSmoothing(fork)
+        // A wild guess, far off the line and at the wrong pressure.
+        fork.push(9000f, -4000f, 0.05f, 20 * dtNanos)
+        assertTrue(fork.x > 1000f, "the fork did not actually move")
+
+        assertEquals(xBefore.toRawBits(), b.smoothedX.toRawBits(), "the fork moved the real filter")
+        assertEquals(yBefore.toRawBits(), b.smoothedY.toRawBits())
+        assertEquals(pressureBefore.toRawBits(), b.smoothedPressure.toRawBits())
+        assertEquals(dabsBefore, b.dabCount, "the fork emitted dabs into the stroke")
+
+        // And the next real sample lands exactly where it would have without
+        // the fork ever existing.
+        val control = StrokeBuilder(RoundPen())
+        control.begin(0xFF000000.toInt())
+        for (i in 0 until 20) control.add(sample(100f + i * 6f, 200f, 0.6f, i))
+        b.add(sample(220f, 200f, 0.6f, 20))
+        control.add(sample(220f, 200f, 0.6f, 20))
+        assertEquals(control.smoothedX.toRawBits(), b.smoothedX.toRawBits())
+        assertEquals(control.dabCount, b.dabCount)
     }
 
 }

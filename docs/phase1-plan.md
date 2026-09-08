@@ -139,9 +139,17 @@ nothing and it has already paid for itself once.
 - **No absolute latency number exists.** The A/B verdict is comparative and
   visual. Deliberately deferred: the number is worth more measured against
   Phase 1's real ink than against the spike's `drawLine` segments.
-- Whether `MotionPredictor.isPredictionAvailable` returns true for this pen, or
+- ~~Whether `MotionPredictor.isPredictionAvailable` returns true for this pen, or
   `SystemMotionEventPredictor` silently falls back to the bundled Kalman
-  predictor.
+  predictor.~~ **Answered at W11, and the answer is odd.**
+  `MotionEventPredictor.newInstance` resolves to `SystemMotionEventPredictor`,
+  so the platform path is selected — and `MotionPredictor.isPredictionAvailable`
+  returns **false** for this pen's device id and source. It predicts anyway:
+  `predict()` puts the pen a mean of **41.5 doc px** ahead of the last real
+  sample on the stress stroke and **91 doc px** on a faster injected one, about
+  27 ms of lookahead either way. So the availability flag does not gate what
+  comes out, and "prediction was judged and lost" is a statement about something
+  that is running rather than about a no-op.
 
 ### The A/B result
 
@@ -390,9 +398,15 @@ nothing else** from `onTouchEvent` to `renderFrontBufferedLayer`. **W9 measured
 both and both hold.** On the release build, driving a deliberately punishing
 stroke — one event per frame carrying 5.31 samples and **77.2 dabs** — the path
 costs **p50 0.119 ms, p99 0.185, max 0.295 ms**, which is 0% of events over the
-ceiling; and it allocates **54.6 B per digitizer sample** in steady state
-against the ~56 B predicted for one `PenSample`, so "and nothing else" is a
-measurement now. The earlier wording said "zero allocation",
+ceiling; and it allocates **27 to 55 B per digitizer sample** in steady state against the
+~56 B predicted for one `PenSample`, so "and nothing else" is a measurement now.
+That range is the instrument, not the variance: `totalMemory() - freeMemory()`
+moves in 32 KiB steps, so a 1201-sample stroke resolves to one or two steps and
+nothing finer. W9 reported 54.6 B/sample, which was one step read as a figure;
+repeat runs land on 32,768 B and 65,536 B, both exact. The conclusion survives
+the correction — one or two 32 KiB steps is what one ~56 B `PenSample` per
+sample and nothing else looks like — but the third significant figure was the
+instrument's and not the code's. The earlier wording said "zero allocation",
 which the shipped input path cannot meet and should not: pooling `PenSample` is
 **off the table**, because `TraceRecorder` retains the samples it is handed and
 a recorder holding pooled instances records aliases that the next event
@@ -561,13 +575,29 @@ the stroke into the list just emptied. The spike's `clear()` had exactly that
 bug, fixed in `54999d8`.
 
 **Prediction detail carried forward.**
-`PredictionGate` (pure, in `:engine`) gates on **curvature, not distance**: it suppresses prediction outright when the heading change between the
-last two stabilized samples exceeds ~25°. The first draft also clamped distance
-to half a frame of travel; that clamp is smaller than the horizon the predictor
-aims at *by construction*, so it would discard most of the prediction on every
-sample and amount to scaling the prediction down uniformly — the cost of
-prediction without the benefit. If a distance cap is wanted, it must be the
-predictor's actual horizon × velocity, not a frame fraction.
+`PredictionGate` (pure, in `:engine`) gates on **curvature, not distance**. The
+first draft also clamped distance to half a frame of travel; that clamp is
+smaller than the horizon the predictor aims at *by construction*, so it would
+discard most of the prediction on every sample and amount to scaling the
+prediction down uniformly — the cost of prediction without the benefit. If a
+distance cap is wanted, it must be the predictor's actual horizon × velocity,
+not a frame fraction.
+
+**Two corrections at W11, both from the same class of mistake the stabilizer
+avoids.** The threshold was "the heading change between the last two stabilized
+samples exceeds ~25°", and a per-sample angle is a filter whose sensitivity is
+the sample rate: a corner is a fixed amount of turning however often you sample
+it, so sampling faster splits it across more samples and the gate gets *less*
+sensitive exactly when the data gets better. The threshold is now a heading
+change per **second** — 140 rad/s, which is the same 25° restated at the
+measured 321.75 Hz and 32.5° at 246.85 Hz. And the verdict now **holds for
+30 ms** rather than for the one sample that saw the corner, because samples
+arrive batched and prediction is asked for once per `MotionEvent`: measured on
+the tablet, a twelve-legged zigzag tripped a one-sample gate on 3 reversals out
+of 11 and predicted straight through the other 8, because the heading had
+straightened out again before the end of the batch. With the hold it suppresses
+19 events of 225 on the zigzag and **0 of 225 on the spiral**, which is the
+discrimination the gate is for.
 
 The predicted tail is smoothed through a **copy** of the `Stabilizer` state
 (three floats, discarded after) so speculative points never mutate the filter
@@ -594,7 +624,7 @@ half a day** before any of it is built on.
 | 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE — `87a8d3c`. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
 | 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE — `01e9477`. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
-| 11 | `Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle | both | Medium | 10 | 0.75 |
+| 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
 | 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
@@ -842,6 +872,60 @@ rebuilt — and backgrounding does.
 
 The history leads the pixels by at most one frame and nothing reads both:
 `PngExporter` reads the layer, undo reads the bounds, the readout is a readout.
+
+**W11 — DONE. Prediction works, and the numbers say keep it off.**
+
+Same stroke, same process, same release build, back to back — 1201 samples,
+4397 dabs, 19.5 dabs an event:
+
+```
+                   prediction off      prediction on
+event p50            0.126 ms            0.369 ms
+event p99            0.194               1.181
+event max            0.283               1.820
+over the budget      0.0%                98.7%
+per sample           23.5 us             69.1 us
+allocation           32,768 B/stroke     360,448 B/stroke
+speculative dabs     0                   4,452
+```
+
+**Three times the per-event cost, eleven times the allocation, and as many
+speculative dabs as real ones.** The allocation is the unrecycled `MotionEvent`
+that `predict()` hands back, once per event; recycling it is off the table for
+the reason `:spike` gives — ownership has varied across library versions and a
+double recycle crashes where a missed one churns. The dab count is the part
+worth staring at: the front buffer carries roughly double the ink, and half of
+it is a guess that cannot be taken back.
+
+The lead is real and it is large. On the stress stroke the predictor puts the
+pen a mean of 41.5 and a maximum of 110 doc px ahead of the last real sample;
+on a faster injected stroke, a mean of 91. At the fitted scale that is 20 to
+55 view px of speculative ink hanging off the tip. When the gate is right that
+reads as the line leading the pen, which is what prediction is *for*. When it is
+wrong it is a spur, and it stays until pen-up.
+
+So the toggle exists, it works, and it defaults **off** — which the plan already
+called an acceptable outcome and which now has arithmetic behind it rather than
+one A/B by eye. W16 re-judges it under a real pen, on tip-lead and reversal
+spurs rather than on the spike's translucent grey.
+
+Three things worth keeping from building it:
+
+- **The tail is a straight line, and that follows from the gate.** A spline
+  through a predicted point needs a *second* predicted point to anchor it —
+  speculation on speculation — and would mean forking the resampler's four knots
+  and spacing debt every frame. It is unnecessary because `PredictionGate` has
+  already established the pen is not turning: a straight tail is wrong exactly
+  in proportion to the curvature that was suppressed.
+- **The fork is the stabilizer's, and only the stabilizer's.** Predicted points
+  go through a copy, so the filter the next real sample runs through is never
+  moved by a guess. `StrokeBuilderTest` pins that the real ink lands bit-for-bit
+  where it would have if the fork had never existed.
+- **Predicted dabs never reach `StrokeBuilder`.** They go into a `DabBatch`
+  through the same `DabEmitter` seam the resampler uses, so they share
+  `RoundPen`'s sizing and spacing without sharing a destination, and the
+  committed `Stroke` is built from real samples alone. The layer is clean; the
+  screen is not, and that asymmetry is the whole risk.
 
 **W12 — how I'd know it went wrong.** A two-finger pinch that stutters or lags
 the fingers. Contingency ladder: (a) Choreographer coalescing is already the

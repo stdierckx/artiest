@@ -115,6 +115,33 @@ class StrokeBuilder(val pen: RoundPen = RoundPen()) : DabEmitter {
      * that fails `Stroke.copyOf`'s agreement check at pen-up with no clue where
      * it came from. Failing at the sample that carried it names the source.
      */
+    /** The smoothed x the resampler last saw. See [forkSmoothing]. */
+    val smoothedX: Float get() = stabilizer.x
+
+    /** The smoothed y. See [smoothedX]. */
+    val smoothedY: Float get() = stabilizer.y
+
+    /** The smoothed pressure. See [smoothedX]. */
+    val smoothedPressure: Float get() = stabilizer.pressure
+
+    /**
+     * Copy this stroke's smoothing state into [into], which must have been
+     * built with the same strength.
+     *
+     * W11's fork, and the reason `Stabilizer.copyStateTo` exists. A speculative
+     * tail has to be smoothed the same way the real ink is or it joins the
+     * stroke with a visible kink, and it must not *be* the same filter or the
+     * next real sample arrives having been dragged toward a guess. Handing out
+     * the filter itself would make that distinction a convention; handing out a
+     * copy makes it a fact.
+     */
+    fun forkSmoothing(into: Stabilizer) {
+        stabilizer.copyStateTo(into)
+    }
+
+    /** The smoothing strength currently in force, for building a fork. */
+    val smoothingStrength: Float get() = stabilizer.strength
+
     fun add(sample: PenSample) {
         add(sample.x, sample.y, sample.pressure, sample.eventTimeNanos)
     }

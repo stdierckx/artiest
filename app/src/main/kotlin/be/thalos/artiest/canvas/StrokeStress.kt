@@ -37,6 +37,9 @@ import kotlin.math.sin
  */
 class StrokeStress(private val view: InkSurfaceView) {
 
+    /** See [start]'s `path` parameter. */
+    enum class Path { SPIRAL, ZIGZAG }
+
     var running: Boolean = false
         private set
 
@@ -66,6 +69,7 @@ class StrokeStress(private val view: InkSurfaceView) {
     private var nextSampleNanos = 0L
     private var onDone: (() -> Unit)? = null
     private var constantPressure: Float? = null
+    private var path: Path = Path.SPIRAL
 
     /** Scratch for the doc-to-view mapping. Reused; never escapes. */
     private val viewPoint = FloatArray(2)
@@ -94,11 +98,23 @@ class StrokeStress(private val view: InkSurfaceView) {
          * that per-event cost tracks dabs rather than samples.
          */
         pressure: Float? = null,
+        /**
+         * The path shape.
+         *
+         * [Path.SPIRAL] turns continuously and gently — its tightest sweep is
+         * about 6 rad/s, twenty times under `PredictionGate`'s threshold — so it
+         * exercises the resampler and the pool but never the gate.
+         * [Path.ZIGZAG] reverses direction outright, which is the case the gate
+         * exists for and the case a predictor is worst at. Having only the
+         * first would leave the gate measured by its unit tests alone.
+         */
+        path: Path = Path.SPIRAL,
         onDone: () -> Unit = {},
     ) {
         if (running) return
         running = true
         constantPressure = pressure
+        this.path = path
         this.onDone = onDone
         this.totalSamples = samples
         sampleIndex = 0
@@ -186,10 +202,26 @@ class StrokeStress(private val view: InkSurfaceView) {
      */
     private fun fillCoords(index: Int) {
         val t = index.toFloat() / totalSamples
-        val angle = t * TURNS * TWO_PI
-        val radius = 200f + t * 800f
-        val xDoc = view.document.widthPx * 0.5f + radius * cos(angle)
-        val yDoc = view.document.heightPx * 0.5f + radius * sin(angle)
+        val cx = view.document.widthPx * 0.5f
+        val cy = view.document.heightPx * 0.5f
+        val xDoc: Float
+        val yDoc: Float
+        if (path == Path.SPIRAL) {
+            val angle = t * TURNS * TWO_PI
+            val radius = 200f + t * 800f
+            xDoc = cx + radius * cos(angle)
+            yDoc = cy + radius * sin(angle)
+        } else {
+            // A triangle wave: constant speed along each leg and an
+            // instantaneous reversal at every vertex, which is a turn rate
+            // bounded only by the sample interval. Twelve legs over the run, so
+            // a reversal lands every few frames rather than once.
+            val leg = t * ZIGZAG_LEGS
+            val phase = leg - leg.toInt()
+            val up = leg.toInt() % 2 == 0
+            xDoc = cx - 900f + t * 1800f
+            yDoc = cy + (if (up) -700f + phase * 1400f else 700f - phase * 1400f)
+        }
         view.transform.docToView(xDoc, yDoc, viewPoint)
         val c = coords[0]
         c.clear()
@@ -206,6 +238,8 @@ class StrokeStress(private val view: InkSurfaceView) {
         const val SAMPLE_INTERVAL_NANOS = 3_107_855L
 
         const val DEFAULT_SAMPLES = 1200
+
+        private const val ZIGZAG_LEGS = 12f
 
         private const val TURNS = 3.5f
         private const val TWO_PI = (2.0 * Math.PI).toFloat()

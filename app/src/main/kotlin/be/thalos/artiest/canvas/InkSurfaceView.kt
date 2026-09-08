@@ -12,14 +12,20 @@ import android.view.SurfaceView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.engine.ink.DabEmitter
+import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.ink.RoundPen
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.input.PenSample
+import be.thalos.artiest.engine.input.PredictionGate
+import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
+import be.thalos.artiest.input.Predictor
+import kotlin.math.sqrt
 
 /**
  * The canvas: a bare `SurfaceView` driving a `CanvasFrontBufferedRenderer`.
@@ -83,6 +89,24 @@ class InkSurfaceView(
 
     /** Ink colour. W15 gives it a swatch; until then it is black. */
     var inkColorArgb: Int = Color.BLACK
+
+    /**
+     * Speculative ink, **off by default**.
+     *
+     * The default is a shipping position rather than a placeholder: W1 judged
+     * prediction by eye and it lost, and the cost of being wrong here is
+     * asymmetric because front-buffer ink cannot be taken back. See
+     * [Predictor]'s header, and W16 for the re-judgement.
+     *
+     * When false nothing on the input path touches the predictor — not the
+     * record, not the gate, not the fork — so W9's measurements keep meaning
+     * what they said.
+     */
+    var predictionEnabled: Boolean = false
+
+    /** Built at attach; null while detached. Diagnostics read [Predictor]. */
+    var predictor: Predictor? = null
+        private set
 
     /**
      * The live document-to-view mapping, for the **dry** layer.
@@ -345,10 +369,16 @@ class InkSurfaceView(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         renderer = CanvasFrontBufferedRenderer(this, callback)
+        // Built whether or not prediction is on. Construction is once per
+        // attach and answers a question the plan left open — which
+        // implementation this device resolves to — and everything that costs
+        // anything per event stays behind `predictionEnabled`.
+        predictor = Predictor(this)
         holder.addCallback(holderCallback)
     }
 
     override fun onDetachedFromWindow() {
+        predictor = null
         router.abandon()
         holder.removeCallback(holderCallback)
         release()
@@ -509,6 +539,10 @@ class InkSurfaceView(
         val heapBefore = heapUsed()
         submitNanos = 0L
         val t0 = System.nanoTime()
+        // Inside the measured window on purpose. Prediction is not free, and
+        // when it is on the readout should say what it costs rather than
+        // reporting the cost of the path without it.
+        if (predictionEnabled) predictor?.record(event)
         val handled = router.onTouchEvent(event, this)
         val elapsed = System.nanoTime() - t0
         driver.addDragBytes(heapUsed() - heapBefore)
@@ -597,9 +631,40 @@ class InkSurfaceView(
         /** Scratch for [CanvasTransform.viewToDoc]. Reused; never escapes. */
         private val docPoint = FloatArray(2)
 
+        /** The pointer this stroke belongs to, for asking the predictor. */
+        private var strokePointerId = -1
+
+        /** Stroke start, for the tail's elapsed time. See `RoundPen.sizeFor`. */
+        private var downTimeNanos = 0L
+
+        /** The last real sample in document space, for the lead measurement. */
+        private var lastRealDocX = 0f
+        private var lastRealDocY = 0f
+
+        private val gate = PredictionGate()
+
+        /**
+         * The fork the speculative tail is smoothed through.
+         *
+         * Rebuilt only when the brush's stabilization strength moves, because
+         * `Stabilizer.copyStateTo` refuses a fork of a different strength —
+         * forking into a differently tuned filter is silent, and produces a
+         * plausible tail that simply does not match the ink it extends.
+         */
+        private var tailSmoothing = Stabilizer(pen.stabilization)
+
+        private val tailEmitter = TailEmitter()
+        private val tail = PredictedTail(tailEmitter)
+
         override fun onStrokeBegin(pointerId: Int) {
             emitted = 0
             seen = 0
+            strokePointerId = pointerId
+            downTimeNanos = 0L
+            gate.reset()
+            if (tailSmoothing.strength != pen.stabilization) {
+                tailSmoothing = Stabilizer(pen.stabilization)
+            }
             frozen = transform
             builder.begin(inkColorArgb)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
@@ -634,12 +699,78 @@ class InkSurfaceView(
             var i = 0
             while (i < n) {
                 val s = samples[i]
+                if (downTimeNanos == 0L) downTimeNanos = s.eventTimeNanos
                 frozen.viewToDoc(s.x, s.y, docPoint)
+                lastRealDocX = docPoint[0]
+                lastRealDocY = docPoint[1]
                 builder.add(docPoint[0], docPoint[1], s.pressure, s.eventTimeNanos)
+                // Stabilized and in document space, which is what the gate has
+                // to see: raw samples carry the digitizer's jitter, and jitter
+                // read as curvature suppresses prediction on exactly the slow
+                // straight line it helps most.
+                gate.push(builder.smoothedX, builder.smoothedY, s.eventTimeNanos)
                 i++
             }
             flushWet()
             totalDabs += builder.dabCount - dabsBefore
+            if (predictionEnabled) drawPredictedTail()
+        }
+
+        /**
+         * Draw one frame's worth of speculative ink, front buffer only.
+         *
+         * Every guard here is a way of drawing nothing, and drawing nothing is
+         * always the safe answer: the ink this produces cannot be taken back.
+         *
+         * There is one thing it deliberately does *not* do, because it cannot:
+         * erase the previous frame's tail. Front-buffer ink is unretractable,
+         * so each frame's speculation is still on screen when the next frame's
+         * real samples arrive. The real ink overdraws most of it in the same
+         * colour and what survives is the overshoot — the part the pen never
+         * reached. That is the failure mode, it is visible rather than
+         * transient, and it is why the toggle defaults off.
+         */
+        private fun drawPredictedTail() {
+            if (!gate.allows) {
+                gateSuppressed++
+                return
+            }
+            gateAllowed++
+            if (builder.dabCount == 0) return
+            val p = predictor ?: return
+            val sample = p.predict(strokePointerId) ?: return
+            if (!sample.x.isFinite() || !sample.y.isFinite()) return
+
+            frozen.viewToDoc(sample.x, sample.y, docPoint)
+            recordLead(docPoint[0] - lastRealDocX, docPoint[1] - lastRealDocY)
+            builder.forkSmoothing(tailSmoothing)
+            tailSmoothing.push(docPoint[0], docPoint[1], sample.pressure, sample.eventTimeNanos)
+
+            val last = builder.dabCount - 1
+            val fromRadius = builder.radius(last)
+            val batch = acquireBatch()
+            tailEmitter.batch = batch
+            val elapsedMillis = (sample.eventTimeNanos - downTimeNanos) / 1_000_000f
+            val emittedDabs = tail.emit(
+                fromX = builder.x(last),
+                fromY = builder.y(last),
+                toX = tailSmoothing.x,
+                toY = tailSmoothing.y,
+                fromPressure = builder.smoothedPressure,
+                toPressure = tailSmoothing.pressure,
+                elapsedMillis = elapsedMillis,
+                firstSpacing = pen.spacingFor(fromRadius),
+                // The cap and the batch capacity are the same number on
+                // purpose: the tail cannot overflow the batch it was given, so
+                // there is no partial-batch case to get wrong.
+                maxDabs = batch.capacity,
+            )
+            tailEmitter.batch = null
+            // drawWet reports an empty batch drawn, so the pool does not leak a
+            // slot when every guard above passed and the tail was still zero
+            // dabs long — a pen barely moving does that on most frames.
+            drawWet(batch)
+            predictedDabs += emittedDabs
         }
 
         /**
@@ -698,6 +829,7 @@ class InkSurfaceView(
         }
 
         override fun onStrokeCancel() {
+            gate.reset()
             builder.cancel()
             emitted = 0
             strokeOpen = false
@@ -722,6 +854,73 @@ class InkSurfaceView(
 
         override fun onPenPresence(inRange: Boolean) = Unit
     }
+
+    private fun recordLead(dx: Float, dy: Float) {
+        val lead = sqrt(dx * dx + dy * dy)
+        if (!lead.isFinite()) return
+        leadSumDoc += lead.toDouble()
+        leadCount++
+        predictLeadMeanDoc = (leadSumDoc / leadCount).toFloat()
+        if (lead > predictLeadMaxDoc) predictLeadMaxDoc = lead
+    }
+
+    /**
+     * Where the speculative tail's dabs go: straight into a [DabBatch], never
+     * into `StrokeBuilder`.
+     *
+     * That is the whole of "predicted dabs go to the front buffer only". The
+     * committed `Stroke` is built from real samples, so the layer never sees a
+     * guess, and the `DabEmitter` seam is what makes the two paths able to
+     * share `RoundPen`'s sizing and spacing without sharing a destination.
+     */
+    private inner class TailEmitter : DabEmitter {
+        var batch: DabBatch? = null
+
+        override fun emit(x: Float, y: Float, pressure: Float, elapsedMillis: Float): Float {
+            val radius = pen.sizeFor(pressure, elapsedMillis) * 0.5f
+            batch?.let { if (!it.isFull) it.add(x, y, radius) }
+            return pen.spacingFor(radius)
+        }
+    }
+
+    /** Speculative dabs drawn since the view was created. Diagnostics. */
+    var predictedDabs: Long = 0L
+        private set
+
+    /**
+     * How far ahead of the last real sample the predictor actually put the pen,
+     * in document pixels: mean and worst.
+     *
+     * The question this answers is whether there is any prediction happening at
+     * all. `MotionEventPredictor` resolves to `SystemMotionEventPredictor` on
+     * this device, which delegates to the platform's `MotionPredictor` — and
+     * the platform reports `isPredictionAvailable` **false** for this pen. A
+     * predictor with nothing to say can still hand back an event, and if that
+     * event is the current position echoed, a speculative tail still gets
+     * drawn: it bridges the gap between the last *dab* and the last *sample*,
+     * which the Catmull-Rom fit's one-sample lag opens on every frame. That is
+     * a real and useful thing to draw, and it is not prediction.
+     *
+     * Measured against the raw document-space sample rather than the smoothed
+     * one, because the stabilizer damps the lead and would understate it.
+     */
+    var predictLeadMeanDoc: Float = 0f
+        private set
+
+    /** See [predictLeadMeanDoc]. */
+    var predictLeadMaxDoc: Float = 0f
+        private set
+
+    private var leadSumDoc = 0.0
+    private var leadCount = 0L
+
+    /** Frames where the curvature gate let prediction through, and blocked it. */
+    var gateAllowed: Long = 0L
+        private set
+
+    /** See [gateAllowed]. */
+    var gateSuppressed: Long = 0L
+        private set
 
     /**
      * Bytes live on the Java heap right now.

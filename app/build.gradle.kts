@@ -76,6 +76,9 @@ dependencies {
     // arms of the comparison.
     implementation(libs.androidx.graphics.core)
 
+    // See the note at the end of this block.
+    implementation(libs.androidx.input.motionprediction)
+
     // Plain JVM unit tests, matching :engine's choice of framework so a test
     // moving across the boundary keeps its imports. This is the only place the
     // mirrored ToolType constants can be checked against the real
@@ -105,10 +108,11 @@ dependencies {
     testImplementation(libs.junit4)
     testRuntimeOnly(libs.junit.vintage.engine)
 
-    // libs.androidx.input.motionprediction is deliberately absent until W11.
-    // The spike carries it, but prediction in :app is a gated experiment and
-    // adding the dependency before there is a Predictor to hold it would put an
-    // unreferenced library in the APK being measured.
+    // W11's Predictor. Held back until there was something to hold it, so the
+    // APK W1 and W9 measured carried no unreferenced library; now there is a
+    // Predictor and the dependency comes with it. Prediction itself still
+    // defaults off — see Predictor's header for why that is a shipping position
+    // and not a placeholder.
 }
 
 // :app is an Android module, so its unit test tasks are testDebugUnitTest and

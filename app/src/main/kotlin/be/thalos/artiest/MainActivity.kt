@@ -81,7 +81,11 @@ class MainActivity : ComponentActivity() {
 }
 
 /** The two stress shapes the readout is meant to be compared across. */
-private val STRESS_MODES = listOf("Sweep" to null, "Firm" to 1f)
+private val STRESS_MODES = listOf(
+    Triple("Sweep", null, StrokeStress.Path.SPIRAL),
+    Triple("Firm", 1f, StrokeStress.Path.SPIRAL),
+    Triple("Zigzag", 1f, StrokeStress.Path.ZIGZAG),
+)
 
 @Composable
 private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
@@ -127,11 +131,17 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                     surface?.clear()
                     generation++
                 }) { Text("Clear") }
+                TextButton(onClick = {
+                    val v = surface ?: return@TextButton
+                    v.predictionEnabled = !v.predictionEnabled
+                    v.predictor?.enabled = v.predictionEnabled
+                    generation++
+                }) { Text(if (surface?.predictionEnabled == true) "Predict ON" else "Predict off") }
                 // Two runs, not one. See StrokeStress.start's pressure
                 // parameter: the sweep is the worst case and the firm press is
                 // what most of a real stroke looks like, and the pair is what
                 // shows the cost tracking dabs rather than samples.
-                for ((label, p) in STRESS_MODES) {
+                for ((label, p, path) in STRESS_MODES) {
                     TextButton(
                         enabled = surface != null && stress?.running != true,
                         onClick = {
@@ -142,7 +152,10 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                             // recomposing it allocates, and this run is
                             // measuring allocation.
                             polling = false
-                            s.start(pressure = p) { polling = true; generation++ }
+                            s.start(pressure = p, path = path) {
+                                polling = true
+                                generation++
+                            }
                         },
                     ) { Text(label) }
                 }
@@ -196,7 +209,13 @@ private fun readout(surface: InkSurfaceView?, document: Document, generation: In
         "sample   p50 ${r(s.msPerSample(0.5f) * 1000f, 1)}  " +
         "p99 ${r(s.msPerSample(0.99f) * 1000f, 1)} us/sample   " +
         "of a 3108 us interval\n" +
-        "alloc    $alloc"
+        "alloc    $alloc\n" +
+        "predict  ${if (surface.predictionEnabled) "ON" else "off"}   " +
+        "${surface.predictor?.implementation ?: "-"}   " +
+        "${surface.predictor?.availability ?: "-"}   " +
+        "${surface.predictedDabs} dabs   " +
+        "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
+        "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed"
 }
 
 /**
