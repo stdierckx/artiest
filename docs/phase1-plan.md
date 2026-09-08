@@ -639,7 +639,7 @@ half a day** before any of it is built on.
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
 | 10 | ~~Commit: stroke becomes dry ink at pen-up, under `layerLock`~~ **DONE — `01e9477`. The single-slot handoff became a queue: it dropped strokes under back-to-back commits and could not order a Clear.** | `:app` | — | — | ✔ |
 | 11 | ~~`Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle~~ **DONE — `15ce55d`. Ships off, and now there are numbers for why: 3x the per-event cost, 11x the allocation, and as many speculative dabs as real ones.** | both | — | — | ✔ |
-| 12 | ~~`GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake**~~ **DONE. 362 pointer updates coalesced to 90 renders with none skipped; the freeze rule's real reason turned out to be narrower and sharper than stated.** | `:app` | — | — | ✔ |
+| 12 | ~~`GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake**~~ **DONE — `71208ed`. 362 pointer updates coalesced to 90 renders with none skipped; the freeze rule's real reason turned out to be narrower and sharper than stated.** | `:app` | — | — | ✔ |
 | 13 | Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw) | `:app` | Low | 12 | 0.5 |
 | 14 | `PngExporter` | `:app` | Low | 10 | 0.75 |
 | 15 | `MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port | `:app` | Low | 11, 13, 14 | 1.0 |
