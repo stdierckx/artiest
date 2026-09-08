@@ -1,31 +1,51 @@
 package be.thalos.artiest
 
+import android.graphics.Color as AndroidColor
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import be.thalos.artiest.canvas.GestureStress
 import be.thalos.artiest.canvas.InkSurfaceView
 import be.thalos.artiest.canvas.InputStats
@@ -38,29 +58,58 @@ import be.thalos.artiest.io.PngExporter
 import kotlinx.coroutines.launch
 
 /**
- * Placeholder chrome around the real canvas.
+ * The app's one screen: a canvas, a toolbar over it, and the instruments W16
+ * needs one tap away.
  *
- * W15 replaces the Compose half of this file with the actual toolbars, the
- * refresh-rate toggle and the `DeviceProbe` port. What it is for until then is
- * the on-device check W8 is judged by: draw, and ink appears under the pen;
- * lift, and it survives the commit; rotate, and the canvas is still there.
+ * Three things happen here that are not chrome, and each is the reason the item
+ * lists them:
  *
- * The `Document` is owned here rather than by the view. It outlives every
- * attach/detach cycle, so a rotation rebuilds the `SurfaceView` against the
- * same layer bitmap instead of reallocating 27 MiB and losing the drawing.
+ * - **The document is sized from a probe, not from a constant.** [DeviceProbe]
+ *   runs before the `Document` is built and `documentSizeFor` clamps it to the
+ *   measured `GL_MAX_TEXTURE_SIZE`. On this device the cap is 16383 against a
+ *   3300 requirement, so it never fires; on a device where it would, the
+ *   failure it prevents is not a slow canvas but a blank one.
+ * - **The refresh rate is a three-way choice.** See [RefreshPolicy]. `:spike`
+ *   asks for the highest mode unconditionally in `onCreate`, which is why every
+ *   Phase 0 number is "the app asked for 90 and the vendor cap decided" and why
+ *   W16 could not otherwise build a 60 Hz control.
+ * - **Edge-to-edge with transient bars**, ported verbatim, because edge swipes
+ *   for system navigation land on the canvas as stray touches and cancels.
+ *
+ * The diagnostic readout from W9 through W14 is not deleted. It is folded
+ * behind a toggle and defaults **off**, because W16 is a feel pass and eleven
+ * lines of monospace over the paper is not a drawing app — but every number is
+ * still there, live, one tap away, and W16 is the item that needs them.
  */
 class MainActivity : ComponentActivity() {
 
-    private val document = Document()
+    private var document: Document? = null
 
     private var view: InkSurfaceView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        keepNavGesturesOutOfTheWay()
+
+        // Before the Document, because it is what decides how big the Document
+        // is allowed to be.
+        val report = DeviceProbe.run(this, activityDisplay())
+        val (w, h) = report.documentSizeFor(Document.DEFAULT_WIDTH_PX, Document.DEFAULT_HEIGHT_PX)
+        val doc = Document(w, h)
+        document = doc
+
+        applyRefreshPolicy(RefreshPolicy.HIGHEST)
+
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    CanvasScreen(document) { view = it }
+                    CanvasScreen(
+                        document = doc,
+                        report = report,
+                        refreshHzNow = { activityDisplay()?.refreshRate ?: 0f },
+                        onRefreshPolicy = ::applyRefreshPolicy,
+                        onView = { view = it },
+                    )
                 }
             }
         }
@@ -83,10 +132,65 @@ class MainActivity : ComponentActivity() {
      */
     override fun onDestroy() {
         view = null
-        document.close()
+        document?.close()
+        document = null
         super.onDestroy()
     }
+
+    /**
+     * Put [policy] into the window, or take the request out again.
+     *
+     * `preferredDisplayModeId = 0` is the framework's "no preference", so
+     * [RefreshPolicy.UNSPECIFIED] is expressible rather than being "the request
+     * we happen not to have made yet". The assignment goes through
+     * `window.attributes` as a whole because `LayoutParams` is read back,
+     * mutated and re-set — mutating the live object in place does not trigger a
+     * re-layout and the request is silently ignored.
+     */
+    private fun applyRefreshPolicy(policy: RefreshPolicy) {
+        val display = activityDisplay() ?: return
+        val modes = display.supportedModes.map {
+            ModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate)
+        }
+        val chosen = RefreshPolicy.chooseModeId(modes, display.mode.modeId, policy)
+        window.attributes = window.attributes.apply { preferredDisplayModeId = chosen }
+    }
+
+    /**
+     * Edge swipes for system navigation land on the canvas as stray touches and
+     * ACTION_CANCELs. Transient bars keep them out of the way while drawing.
+     *
+     * Ported verbatim from `:spike`, and it is the one piece of window setup
+     * that is load-bearing for input rather than for looks.
+     */
+    private fun keepNavGesturesOutOfTheWay() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    }
+
+    @Suppress("DEPRECATION")
+    private fun activityDisplay(): Display? =
+        if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
 }
+
+/**
+ * The ink colours, as a palette rather than a wheel.
+ *
+ * Five, and no white: white ink on white paper is a hole in the drawing that
+ * looks exactly like an eraser, and Phase 1 has no eraser — the pen's back
+ * reports `TOOL_TYPE_FINGER`, so flip-to-erase is impossible on this hardware
+ * rather than merely deferred. Offering an invisible colour would be offering
+ * the feature by accident, without the undo model or the blend mode it needs.
+ * A colour wheel is Phase 4 and the doc agrees.
+ */
+private val PALETTE = listOf(
+    AndroidColor.BLACK,
+    AndroidColor.rgb(0x55, 0x55, 0x55),
+    AndroidColor.rgb(0xD3, 0x2F, 0x2F),
+    AndroidColor.rgb(0x19, 0x76, 0xD2),
+    AndroidColor.rgb(0x2E, 0x7D, 0x32),
+)
 
 /** The two stress shapes the readout is meant to be compared across. */
 private val STRESS_MODES = listOf(
@@ -96,8 +200,14 @@ private val STRESS_MODES = listOf(
 )
 
 @Composable
-private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
-    var generation by remember { mutableStateOf(0) }
+private fun CanvasScreen(
+    document: Document,
+    report: DeviceReport,
+    refreshHzNow: () -> Float,
+    onRefreshPolicy: (RefreshPolicy) -> Unit,
+    onView: (InkSurfaceView) -> Unit,
+) {
+    var generation by remember { mutableIntStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
     var stress by remember { mutableStateOf<StrokeStress?>(null) }
     var pinch by remember { mutableStateOf<GestureStress?>(null) }
@@ -105,8 +215,29 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     var polling by remember { mutableStateOf(true) }
     var export by remember { mutableStateOf<ExportResult?>(null) }
     var exporting by remember { mutableStateOf(false) }
+    var stats by remember { mutableStateOf(false) }
+    var policy by remember { mutableStateOf(RefreshPolicy.HIGHEST) }
+
+    // The brush settings live here as Compose state and are pushed into the
+    // pen, not read back out of it. `RoundPen`'s fields are plain vars on the
+    // render path — deliberately, they are read once per stroke — so making
+    // them the source of truth for a slider would mean a recomposition could
+    // not see a change and a stroke could see half of one.
+    var ink by remember { mutableIntStateOf(PALETTE.first()) }
+    var sizeMax by remember { mutableFloatStateOf(DEFAULT_SIZE_MAX) }
+    var smoothing by remember { mutableFloatStateOf(DEFAULT_SMOOTHING) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // Applied on every change and once when the view arrives, because the view
+    // is built by the AndroidView factory after the first composition.
+    LaunchedEffect(surface, ink, sizeMax, smoothing) {
+        val v = surface ?: return@LaunchedEffect
+        v.inkColorArgb = ink
+        v.pen.sizeMax = sizeMax
+        v.pen.stabilization = smoothing
+    }
 
     // Polled twice a second rather than pushed. The counters this reads live on
     // the input and render paths, and making them Compose state would put a
@@ -114,54 +245,108 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(500)
-            if (polling) generation++
+            if (polling && stats) generation++
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
-            factory = { context ->
+            factory = { ctx ->
                 // No transform is set here. The view fits the document to its
                 // own surface in surfaceChanged, which is the only place the
                 // real size is known — displayMetrics is the display, not the
                 // window, and the two differ by the system bars at minimum.
-                InkSurfaceView(context, document).also {
+                InkSurfaceView(ctx, document).also {
                     surface = it
                     onView(it)
                 }
             },
             modifier = Modifier.fillMaxSize(),
         )
-        Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-            Text("artiest — W14 canvas", style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = readout(surface, document, reject, export, exporting, generation),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 6.dp),
+        Column(
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(12.dp),
+        ) {
+            Toolbar(
+                ink = ink,
+                onInk = { ink = it },
+                sizeMax = sizeMax,
+                onSizeMax = { sizeMax = it },
+                smoothing = smoothing,
+                onSmoothing = { smoothing = it },
+                exporting = exporting,
+                stats = stats,
+                onStats = { stats = !stats; generation++ },
+                onClear = { surface?.clear(); generation++ },
+                onFit = { surface?.fitToView(); generation++ },
+                onExport = {
+                    // A redraw first, on this thread, because the export
+                    // cannot ask for one — it waits for the commit queue to
+                    // drain and only the render thread drains it.
+                    //
+                    // Stated at its real size: every path that queues a
+                    // commit already asks for a render of its own
+                    // (`commitStroke` calls `commit()`, `clear` calls
+                    // `redrawDry`), so on a live surface this is a second
+                    // chance and not the first, and measured on the tablet
+                    // the export's wait was 0 ms every time. What it covers
+                    // is a render that was scheduled and then deferred, and
+                    // it is a no-op when there is no surface — which is the
+                    // only state in which the queue is reliably non-empty,
+                    // and also the one in which this button cannot be
+                    // pressed.
+                    surface?.redrawDry()
+                    exporting = true
+                    export = null
+                    scope.launch {
+                        export = PngExporter.export(context, document)
+                        exporting = false
+                        generation++
+                    }
+                },
             )
-            Row {
-                TextButton(onClick = {
-                    surface?.clear()
-                    generation++
-                }) { Text("Clear") }
-                TextButton(onClick = {
-                    surface?.fitToView()
-                    generation++
-                }) { Text("Fit") }
-                TextButton(
-                    enabled = surface != null && pinch?.running != true,
-                    onClick = {
-                        val v = surface ?: return@TextButton
+            ExportStatus(export, exporting)
+            if (stats) {
+                Text(
+                    text = readout(
+                        surface, document, report, refreshHzNow(), policy,
+                        reject, export, exporting, generation,
+                    ),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    // A ground of its own, like the bars. Without it this is
+                    // grey monospace over a dark desk on one side and white
+                    // paper on the other, and the half over the desk is
+                    // unreadable — which is a readout that exists and cannot be
+                    // read, the worst of both.
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+                DebugRow(
+                    surface = surface,
+                    policy = policy,
+                    onPolicy = { policy = it; onRefreshPolicy(it); generation++ },
+                    pinchRunning = pinch?.running == true,
+                    rejectRunning = reject?.running == true,
+                    stressRunning = stress?.running == true,
+                    onPinch = {
+                        val v = surface ?: return@DebugRow
                         val g = pinch ?: GestureStress(v).also { pinch = it }
                         polling = false
                         g.start { polling = true; generation++ }
                     },
-                ) { Text("Pinch") }
-                TextButton(
-                    enabled = surface != null && reject?.running != true,
-                    onClick = {
-                        val v = surface ?: return@TextButton
+                    onDoubleTap = {
+                        val v = surface ?: return@DebugRow
+                        val g = pinch ?: GestureStress(v).also { pinch = it }
+                        polling = false
+                        g.doubleTap { polling = true; generation++ }
+                    },
+                    onReject = {
+                        val v = surface ?: return@DebugRow
                         val g = reject ?: RejectionStress(v).also { reject = it }
                         // Cleared first: three of the eight cases commit ink on
                         // purpose, and the seven that must not are counted
@@ -170,63 +355,208 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                         polling = false
                         g.start { polling = true; generation++ }
                     },
-                ) { Text("Reject") }
-                TextButton(
-                    enabled = !exporting,
-                    onClick = {
-                        // A redraw first, on this thread, because the export
-                        // cannot ask for one — it waits for the commit queue to
-                        // drain and only the render thread drains it.
-                        //
-                        // Stated at its real size: every path that queues a
-                        // commit already asks for a render of its own
-                        // (`commitStroke` calls `commit()`, `clear` calls
-                        // `redrawDry`), so on a live surface this is a second
-                        // chance and not the first, and measured on the tablet
-                        // the export's wait was 0 ms every time. What it covers
-                        // is a render that was scheduled and then deferred, and
-                        // it is a no-op when there is no surface — which is the
-                        // only state in which the queue is reliably non-empty,
-                        // and also the one in which this button cannot be
-                        // pressed.
-                        surface?.redrawDry()
-                        exporting = true
-                        export = null
-                        scope.launch {
-                            export = PngExporter.export(context, document)
-                            exporting = false
+                    onPredict = {
+                        val v = surface ?: return@DebugRow
+                        v.predictionEnabled = !v.predictionEnabled
+                        v.predictor?.enabled = v.predictionEnabled
+                        generation++
+                    },
+                    onStress = { pressure, path ->
+                        val v = surface ?: return@DebugRow
+                        val s = stress ?: StrokeStress(v).also { stress = it }
+                        v.clear()
+                        // The readout is paused for the duration: recomposing
+                        // it allocates, and this run is measuring allocation.
+                        polling = false
+                        s.start(pressure = pressure, path = path) {
+                            polling = true
                             generation++
                         }
                     },
-                ) { Text("Export") }
-                TextButton(onClick = {
-                    val v = surface ?: return@TextButton
-                    v.predictionEnabled = !v.predictionEnabled
-                    v.predictor?.enabled = v.predictionEnabled
-                    generation++
-                }) { Text(if (surface?.predictionEnabled == true) "Predict ON" else "Predict off") }
-                // Two runs, not one. See StrokeStress.start's pressure
-                // parameter: the sweep is the worst case and the firm press is
-                // what most of a real stroke looks like, and the pair is what
-                // shows the cost tracking dabs rather than samples.
-                for ((label, p, path) in STRESS_MODES) {
-                    TextButton(
-                        enabled = surface != null && stress?.running != true,
-                        onClick = {
-                            val v = surface ?: return@TextButton
-                            val s = stress ?: StrokeStress(v).also { stress = it }
-                            v.clear()
-                            // The readout is paused for the duration:
-                            // recomposing it allocates, and this run is
-                            // measuring allocation.
-                            polling = false
-                            s.start(pressure = p, path = path) {
-                                polling = true
-                                generation++
-                            }
-                        },
-                    ) { Text(label) }
-                }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Toolbar(
+    ink: Int,
+    onInk: (Int) -> Unit,
+    sizeMax: Float,
+    onSizeMax: (Float) -> Unit,
+    smoothing: Float,
+    onSmoothing: (Float) -> Unit,
+    exporting: Boolean,
+    stats: Boolean,
+    onStats: () -> Unit,
+    onClear: () -> Unit,
+    onFit: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            // The bar floats over the canvas, so it needs a ground of its own:
+            // black ink under a black label is a toolbar that disappears
+            // exactly when the drawing gets interesting.
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        for (colour in PALETTE) {
+            Swatch(colour, selected = colour == ink, onClick = { onInk(colour) })
+        }
+        Spacer(Modifier.width(14.dp))
+        LabelledSlider("size", sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, onSizeMax)
+        Spacer(Modifier.width(10.dp))
+        LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
+        Spacer(Modifier.width(6.dp))
+        TextButton(onClick = onClear) { Text("Clear") }
+        TextButton(onClick = onFit) { Text("Fit") }
+        TextButton(enabled = !exporting, onClick = onExport) { Text("Export") }
+        TextButton(onClick = onStats) { Text(if (stats) "Stats ▴" else "Stats ▾") }
+    }
+}
+
+@Composable
+private fun Swatch(colour: Int, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 3.dp)
+            .size(if (selected) 26.dp else 20.dp)
+            .clip(CircleShape)
+            .background(Color(colour))
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (selected) 0.9f else 0.3f),
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+    )
+}
+
+/**
+ * A slider with its value beside it.
+ *
+ * The number is shown because these two are the only controls in the app whose
+ * effect is invisible until the next stroke: a smoothing change does nothing to
+ * the ink already down, and `RoundPen.sizeMax` is the *upper* end of a pressure
+ * curve, so at a light touch moving it changes nothing at all. Without the
+ * readout that reads as a broken slider.
+ */
+@Composable
+private fun LabelledSlider(
+    label: String,
+    value: Float,
+    from: Float,
+    to: Float,
+    places: Int,
+    onChange: (Float) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$label ${r(value, places)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Slider(
+            value = value,
+            onValueChange = onChange,
+            valueRange = from..to,
+            modifier = Modifier.width(120.dp).padding(start = 6.dp),
+        )
+    }
+}
+
+/**
+ * What the last export did, in one line that goes away.
+ *
+ * A `Toast` is what `:spike` used and it is the wrong instrument here: W16 films
+ * the screen at 240 fps, and a floating black rectangle over the canvas for two
+ * seconds after every save is in the frame. This is a line of the app's own
+ * chrome, and a failure keeps it until the next attempt rather than fading —
+ * the whole point of W14's sealed result is that a failed export is something
+ * the user is told about.
+ */
+@Composable
+private fun ExportStatus(export: ExportResult?, exporting: Boolean) {
+    val text = when {
+        exporting -> "saving…"
+        export is ExportResult.Written -> "saved ${export.bytes} B to Pictures/Artiest" +
+            if (export.notYetStamped > 0) "  (${export.notYetStamped} strokes not yet drawn)" else ""
+        export is ExportResult.Failed -> "export failed at ${export.stage.name.lowercase()}: ${export.detail}"
+        else -> null
+    } ?: return
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        color = if (export is ExportResult.Failed) MaterialTheme.colorScheme.error else Color.Unspecified,
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * The instruments, behind the Stats toggle.
+ *
+ * These are the synthetic drivers W9 through W13 were judged by, and they stay
+ * in the shipping build on purpose: they are the only way to reproduce a
+ * multi-touch gesture or an eight-case rejection sweep on a device where
+ * `adb shell input` is single-touch. Hidden, not removed.
+ */
+@Composable
+private fun DebugRow(
+    surface: InkSurfaceView?,
+    policy: RefreshPolicy,
+    onPolicy: (RefreshPolicy) -> Unit,
+    pinchRunning: Boolean,
+    rejectRunning: Boolean,
+    stressRunning: Boolean,
+    onPinch: () -> Unit,
+    onDoubleTap: () -> Unit,
+    onReject: () -> Unit,
+    onPredict: () -> Unit,
+    onStress: (Float?, StrokeStress.Path) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 6.dp),
+    ) {
+        Text("Hz", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        for (p in RefreshPolicy.entries) {
+            TextButton(onClick = { onPolicy(p) }) {
+                Text(
+                    text = when (p) {
+                        RefreshPolicy.HIGHEST -> "max"
+                        RefreshPolicy.UNSPECIFIED -> "auto"
+                        RefreshPolicy.SIXTY -> "60"
+                    },
+                    fontSize = 12.sp,
+                    color = if (p == policy) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    },
+                )
+            }
+        }
+        TextButton(enabled = surface != null && !pinchRunning, onClick = onPinch) { Text("Pinch") }
+        TextButton(enabled = surface != null && !pinchRunning, onClick = onDoubleTap) { Text("Tap2") }
+        TextButton(enabled = surface != null && !rejectRunning, onClick = onReject) { Text("Reject") }
+        TextButton(onClick = onPredict) {
+            Text(if (surface?.predictionEnabled == true) "Predict ON" else "Predict off")
+        }
+        // Two runs, not one. See StrokeStress.start's pressure parameter: the
+        // sweep is the worst case and the firm press is what most of a real
+        // stroke looks like, and the pair is what shows the cost tracking dabs
+        // rather than samples.
+        for ((label, p, path) in STRESS_MODES) {
+            TextButton(enabled = surface != null && !stressRunning, onClick = { onStress(p, path) }) {
+                Text(label)
             }
         }
     }
@@ -253,6 +583,9 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
 private fun readout(
     surface: InkSurfaceView?,
     document: Document,
+    report: DeviceReport,
+    refreshHz: Float,
+    policy: RefreshPolicy,
     reject: RejectionStress?,
     export: ExportResult?,
     exporting: Boolean,
@@ -267,7 +600,8 @@ private fun readout(
         "${r(s.bytesPerSample(), 1)} B/sample   " +
             "drag ${s.dragBytes} B over ${s.dragSamples}   commit ${s.commitBytes} B"
     }
-    return "doc      ${document.widthPx}x${document.heightPx}   " +
+    return deviceLines(report, refreshHz, policy) +
+        "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
         "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}   " +
         // In flight *right now*, which at rest must be zero. Non-zero on an
@@ -308,25 +642,32 @@ private fun readout(
 }
 
 /**
- * W14's line. Every field on it is one the export could otherwise get wrong
- * silently.
+ * W15's two lines: what the device is, and whether the refresh request took.
  *
- * `notYetStamped` is the one to watch: non-zero means the file on the tablet is
- * missing strokes the document counts, and on a working render thread it never
- * is. `bytes` is there because a zero-byte PNG is precisely the artifact this
- * exporter was written to stop publishing — seeing the number is what makes
- * that checkable by looking rather than by opening the file.
+ * `req` against `now` is the whole point of the toggle. On this tablet they
+ * disagree by default — Wacom's display config pins peak to 61 with
+ * `mAlwaysRespectAppRequest=false`, so asking for 90 gets 60 until
+ * `adb shell settings put system peak_refresh_rate 90.0` is also set — and a
+ * refresh toggle whose effect cannot be read is one nobody can trust. The
+ * digitizer rate tracks the panel (246.85 Hz at 60, 321.75 Hz at 90), so this
+ * line is also the sample rate, indirectly.
  */
-private fun exportLine(export: ExportResult?, exporting: Boolean): String = "export   " + when {
-    exporting -> "running"
-    export == null -> "not run"
-    export is ExportResult.Failed -> "FAILED at ${export.stage.name.lowercase()}: ${export.detail}"
-    export is ExportResult.Written ->
-        "${export.bytes} B   ${export.strokes} strokes" +
-            (if (export.notYetStamped > 0) " (${export.notYetStamped} NOT STAMPED)" else "") +
-            "   wait ${export.waitMs} copy ${export.copyMs} encode ${export.encodeMs} " +
-            "total ${export.totalMs} ms\n         ${export.uri}"
-    else -> "?"
+private fun deviceLines(report: DeviceReport, refreshHz: Float, policy: RefreshPolicy): String {
+    val modes = report.modes.joinToString("  ") {
+        "${it.widthPx}x${it.heightPx}@${r(it.refreshHz, 1)}"
+    }
+    val front = when (report.frontBufferSupported) {
+        null -> "not asked (<API 33)"
+        true -> "yes"
+        false -> "NO (running in the fallback path)"
+    }
+    return "device   ${report.manufacturer} ${report.model}   ${report.soc}   " +
+        "Android ${report.androidRelease} (API ${report.sdkInt})\n" +
+        "gpu      ${report.glRenderer}   maxTexture ${report.glMaxTextureSize}   " +
+        "fullCanvas ${report.supportsFullCanvas}   frontBuffer $front\n" +
+        "refresh  req ${policy.name.lowercase()}   now ${r(refreshHz, 1)} Hz   modes $modes\n" +
+        "mem      ${gib(report.availMemBytes)} free of ${gib(report.totalMemBytes)} GiB   " +
+        "heap ${report.memoryClassMb}/${report.largeMemoryClassMb} MB\n"
 }
 
 /**
@@ -368,16 +709,51 @@ private fun rejectionLines(surface: InkSurfaceView, reject: RejectionStress?): S
 }
 
 /**
+ * W14's line. Every field on it is one the export could otherwise get wrong
+ * silently.
+ *
+ * `notYetStamped` is the one to watch: non-zero means the file on the tablet is
+ * missing strokes the document counts, and on a working render thread it never
+ * is. `bytes` is there because a zero-byte PNG is precisely the artifact this
+ * exporter was written to stop publishing — seeing the number is what makes
+ * that checkable by looking rather than by opening the file.
+ */
+private fun exportLine(export: ExportResult?, exporting: Boolean): String = "export   " + when {
+    exporting -> "running"
+    export == null -> "not run"
+    export is ExportResult.Failed -> "FAILED at ${export.stage.name.lowercase()}: ${export.detail}"
+    export is ExportResult.Written ->
+        "${export.bytes} B   ${export.strokes} strokes" +
+            (if (export.notYetStamped > 0) " (${export.notYetStamped} NOT STAMPED)" else "") +
+            "   wait ${export.waitMs} copy ${export.copyMs} encode ${export.encodeMs} " +
+            "total ${export.totalMs} ms\n         ${export.uri}"
+    else -> "?"
+}
+
+/**
  * Round to [places] decimals, without `String.format`.
  *
  * `String.format` and `DecimalFormat` follow the default locale, which on this
  * machine is nl-BE and prints a comma. That is banned outright in serialization
  * — an `:engine` test pins it — and while a debug readout is not serialization,
  * having exactly one rule about number formatting is cheaper than having two.
- * `Float.toString` is locale-independent by specification.
+ * `Float.toString` is locale-independent by specification. `:spike`'s device
+ * report used `"%.1f".format(…)` for exactly this and shipped a locale-
+ * dependent probe; the port drops it.
  */
 private fun r(v: Float, places: Int): String {
     var m = 1f
     repeat(places) { m *= 10f }
     return (kotlin.math.round(v * m) / m).toString()
 }
+
+private fun gib(bytes: Long): String = r(bytes / (1024f * 1024f * 1024f), 2)
+
+/** `RoundPen.sizeMax`'s default, mirrored so the slider starts where the pen is. */
+private const val DEFAULT_SIZE_MAX = 24f
+
+/** `RoundPen.stabilization`'s default. The plan's number, on the plan's slider. */
+private const val DEFAULT_SMOOTHING = 0.15f
+
+private const val MIN_SIZE_MAX = 2f
+private const val MAX_SIZE_MAX = 48f

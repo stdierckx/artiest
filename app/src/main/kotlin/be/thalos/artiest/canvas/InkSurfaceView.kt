@@ -22,6 +22,7 @@ import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PredictionGate
 import be.thalos.artiest.engine.input.RejectionCounters
 import be.thalos.artiest.engine.input.Stabilizer
+import be.thalos.artiest.engine.input.TwoFingerDoubleTap
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.input.InkInputSink
@@ -331,6 +332,16 @@ class InkSurfaceView(
      * `:spike` measured a half-pixel translate through the bilinear filter
      * making one A/B arm look softer than another for no reason at all.
      */
+    /**
+     * What the paper sits on. View state, not document state: it is never
+     * exported, never composited into the layer, and a document has no opinion
+     * about the colour of the desk it is lying on.
+     */
+    var deskColorArgb: Int = DEFAULT_DESK_COLOR
+
+    /** The page rectangle's fill. One `Paint` for the view's life; see [blitPaint]. */
+    private val paperPaint = Paint()
+
     private val blitPaint = Paint().apply {
         isFilterBitmap = true
         isAntiAlias = false
@@ -402,7 +413,16 @@ class InkSurfaceView(
             document.drainCommits(commitSink)
             batches.markDrawn(commitWatermark)
 
-            canvas.drawColor(document.paperColor)
+            // The desk, then the paper on it. Through W14 this line was
+            // `drawColor(document.paperColor)` over the whole surface, which
+            // draws a white page on a white background: the paper is exactly
+            // where it always was and there is no way to see where it ends,
+            // so a stroke that runs off the sheet simply stops for no visible
+            // reason and pan, zoom and fit all move something invisible. The
+            // paper is still not painted *into* the layer — that invariant is
+            // untouched — it is painted into the frame, in the document's own
+            // coordinates, which is where the plan always said it belonged.
+            canvas.drawColor(deskColorArgb)
 
             val t = transform
             if (t !== dryMatrixSource) {
@@ -411,6 +431,8 @@ class InkSurfaceView(
             }
             val save = canvas.save()
             canvas.concat(dryMatrix)
+            paperPaint.color = document.paperColor
+            canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
             document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
             canvas.restoreToCount(save)
         }
@@ -816,6 +838,15 @@ class InkSurfaceView(
 
         private val gate = PredictionGate()
 
+        /** Two fingers down and up twice puts the canvas back. */
+        private val doubleTap = TwoFingerDoubleTap()
+
+        /** When the current gesture opened, for [doubleTap]'s tap duration. */
+        private var gestureBeganNanos = 0L
+
+        /** Whether [doubleTap] has been given this gesture's first centroid. */
+        private var tapPrimed = false
+
         /**
          * The fork the speculative tail is smoothed through.
          *
@@ -1014,6 +1045,13 @@ class InkSurfaceView(
 
         override fun onGestureBegin() {
             gestures.begin()
+            // The recogniser is fed from here rather than from `onTouchEvent`
+            // so that it sees exactly the gestures the exclusivity rules
+            // allowed: a palm and a finger never open one, and a gesture the
+            // pen took away arrives as a cancel. Nothing about "two fingers,
+            // and not the pen" has to be restated.
+            gestureBeganNanos = System.nanoTime()
+            tapPrimed = false
         }
 
         override fun onGesturePointers(
@@ -1023,14 +1061,36 @@ class InkSurfaceView(
             count: Int,
         ) {
             gestures.pointers(ids, xs, ys, count)
+            var cx = 0f
+            var cy = 0f
+            for (i in 0 until count) {
+                cx += xs[i]
+                cy += ys[i]
+            }
+            cx /= count
+            cy /= count
+            // The first pointer report is the tap's position, not a movement.
+            // `onGestureBegin` carries no coordinates — the decision that opens
+            // a gesture and the event that carries its pointers are separate
+            // bits in the same mask — so without this the travel would be
+            // measured from (0, 0) and every tap would look like a fling across
+            // the whole screen.
+            if (tapPrimed) {
+                doubleTap.move(count, cx, cy)
+            } else {
+                doubleTap.begin(gestureBeganNanos, count, cx, cy)
+                tapPrimed = true
+            }
         }
 
         override fun onGestureEnd() {
             gestures.end()
+            if (doubleTap.end(System.nanoTime())) fitToView()
         }
 
         override fun onGestureCancel() {
             gestures.cancel()
+            doubleTap.cancel()
         }
 
         override fun onPenPresence(inRange: Boolean) = Unit
@@ -1137,4 +1197,19 @@ class InkSurfaceView(
     /** Collections so far, or 0 if the runtime does not report the stat. */
     private fun gcCount(): Long =
         Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() ?: 0L
+
+    companion object {
+
+        /**
+         * A dark neutral, so that white paper reads as a sheet rather than as
+         * the whole screen.
+         *
+         * Dark rather than light on purpose: the ink is black, and a light desk
+         * would make the page edge the lowest-contrast line on a screen whose
+         * whole job is showing where a line is. It is not `Color.BLACK` either
+         * — a pure black surround under an antialiased black stroke makes the
+         * paper's edge look like part of the drawing.
+         */
+        const val DEFAULT_DESK_COLOR: Int = 0xFF303134.toInt()
+    }
 }

@@ -207,7 +207,7 @@ artiest/
 ├── settings.gradle.kts        includes :spike (frozen), :engine, :app
 ├── engine/                    kotlin("jvm") — ZERO Android imports, enforced by the plugin
 │   └── be.thalos.artiest.engine
-│       ├── input/  PenSample, ToolType, Stabilizer, PredictionGate
+│       ├── input/  PenSample, ToolType, Stabilizer, PredictionGate, TwoFingerDoubleTap
 │       ├── ink/    RoundPen, CatmullRomResampler, StrokeBuilder, Stroke, Bounds
 │       ├── xform/  CanvasTransform, GestureSolver
 │       └── trace/  TraceRecorder, TracePlayer
@@ -218,8 +218,8 @@ artiest/
 │       ├── canvas/ InkSurface, InkSurfaceView, DabBatch, DabBatchPool, GestureController, Matrices
 │       ├── doc/    Document, Layer
 │       ├── ink/    DabRasterizer
-│       ├── io/     PngExporter
-│       └── DeviceProbe, MainActivity
+│       ├── io/     PngExporter, ExportResult
+│       └── DeviceProbe, RefreshPolicy, MainActivity
 └── spike/                     Phase 0 harness (be.thalos.artiest.spike), frozen after W3
 ```
 
@@ -1021,7 +1021,9 @@ locking the pen out, and it is not worth reopening for a shortcut. A two-finger
 double tap would work within the rules and is W15's to add beside the rest of the
 chrome. The safety property the plan actually wanted — a lost canvas is always
 recoverable — is met by `fitToView`, which restores the fit and re-arms
-`fitOnResize` in one call.
+`fitOnResize` in one call. **Shipped at W15** as `TwoFingerDoubleTap`, fed from
+the gesture decisions rather than from `onTouchEvent`, so "two fingers, and not
+the pen" needs no restating.
 
 **W13 — DONE. The rules were already right; the bookkeeping around a cancel was
 not, and three claims the plan could not check now have counters.**
@@ -1188,6 +1190,136 @@ than no row — it holds the name, never appears in the gallery, and nothing eve
 cleans it up. A closed document fails at the pixels *before* the row is created,
 which the test pins by asserting MediaStore was never touched.
 
+**W15 — DONE. The chrome, and the refresh toggle turned out to buy more than
+the plan expected. Two ported lines were wrong and one shipped feature did
+nothing at all.**
+
+The item is mostly assembly, and the parts that were not are the ones worth
+writing down.
+
+**The refresh toggle works, and the vendor cap is one-directional.** Measured on
+the tablet, with `mAppRequestedModeByDisplay` and `mActiveSfDisplayMode` read
+back out of `dumpsys display` for every arm:
+
+```
+req highest  -> app asks id=2 90.0   active 90.0   readout 90.0 Hz
+req sixty    -> app asks id=1 60.0   active 60.0   readout 60.0 Hz
+req auto     -> no app request       active 90.0   readout 90.0 Hz
+```
+
+The 60 Hz arm works **with the adb override still on**: the app's
+`PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE` vote of 60 beats the user
+setting's `MIN_RENDER_FRAME_RATE` vote of 90. Going *up* is what the vendor cap
+refuses — `mAlwaysRespectAppRequest: false` with `mDefaultPeakRefreshRate: 61`
+governs whether an app may exceed the user's peak, not whether it may go below
+their minimum. So W16 can A/B 60 against 90 by tapping a button, without
+touching device settings between runs, which is a much better control than the
+plan expected to have.
+
+**Two things about that override W16 must not discover the hard way.** It lapses
+on its own: found mid-item with `settings get system peak_refresh_rate`
+returning `90.0` while the live vote was `render: (0.0 60.0)` and the panel was
+at 60. The setting value and the vote are different facts, and only the vote is
+the panel. And re-applying it needs a *value change* — writing 90 over 90 fires
+no observer, so it must go `put 60.0` then `put 90.0`. Verify in
+`dumpsys display | grep mDesiredDisplayModeSpecs` immediately before a run, never
+in `settings get`. This is the same lapse W2 recorded after the fact; now it has
+a procedure.
+
+**`:spike`'s `requestHighestRefreshRate` picks the wrong mode in general.** It is
+`supportedModes.maxByOrNull { it.refreshRate }`, and a `Display.Mode` carries a
+physical size as well as a rate — so on a panel that offers a faster mode at a
+smaller resolution, that line asks the compositor to **change the panel
+resolution** to gain refresh rate. Nothing in the call says so; the app is
+simply rescaled, and on a drawing app that is the pen and the ink landing in
+different places. This device offers 60 and 90 at the same 1440x2200, so the bug
+is invisible here. `RefreshPolicyTest` drives a panel where it bites, and
+carries the spike's line longhand as the control.
+
+**The `DeviceProbe` port owed two fixes and found a third.** The two
+`EGLDisplay` leaks this document lists were already fixed in `:spike` during W0
+— the port is unchanged there, and saying so is better than quietly ticking it
+off. What the port did have to fix is the probe's own output: it flattened the
+mode list to `"1440x2200 @ 90.0Hz"` with `"%.1f".format(…)`, which follows the
+default locale. nl-BE prints a comma, so the Phase 0 device report changed shape
+with the user's language, in the one file whose whole purpose is being read
+later. Modes are now `ModeInfo` data, formatted where they are shown — which is
+also what let the refresh toggle choose from them.
+
+**The texture cap is a gate now, not a note.** `documentSizeFor` clamps the
+document to the measured `GL_MAX_TEXTURE_SIZE`, keeping the aspect ratio. The
+failure it prevents is not a slow canvas but a blank one: the layer is blitted
+as a texture every frame, and an over-cap upload fails with no exception on any
+thread the app owns. This device measures 16383 against a 3300 requirement, so
+it never fires — which is exactly why it is a tested function rather than a
+`check` in `onCreate`. `DeviceReportTest` also pins the case that would
+otherwise be worse than the bug: a failed GL probe reports `0`, and trusting it
+would clamp a working device to nothing.
+
+**The double tap shipped doing nothing, and the unit tests could not have caught
+it.** `TwoFingerDoubleTap` passed ten tests on the JVM and, on the tablet, never
+fired once. The router reports a gesture's pointers again as one finger *lifts*,
+and the centroid of one finger is half a hand-span from the centroid of two:
+fingers 240 px apart move their centroid 120 px at the instant the first leaves
+the glass — five times the travel bound, on every tap, with nothing having
+moved. A centroid over a changing set of pointers is not a position, and
+comparing two of them is not a distance. `move` now takes the pointer count and
+ignores reports that do not match the one the tap was primed with, every test in
+the file drives the lift, and the control asserts the same 120 px travelled by
+the same *two* fingers is still a pan. Verified on the device: pinch to
+`scale 1.0 rot 0.576 t 1392.6,-1132.0`, then a synthetic two-finger double tap,
+and the transform returns to `scale 0.5 rot 0.0 t 1120.0,-210.0` with
+`fitOnResize` back to true.
+
+That synthetic tap is `GestureStress.doubleTap`, added for the same reason the
+pinch exists: `adb shell input` is single-touch, so a two-finger tap cannot be
+driven from a shell at all. One event per frame, so the 83 ms tap and the 167 ms
+gap are real durations and not a loop satisfying both bounds trivially.
+
+**One thing beyond the letter of the item: the paper is now visible.** Through
+W14 the dry render was `drawColor(paperColor)` over the whole surface — a white
+page on a white background, with no way to see where the sheet ends. A stroke
+running off the paper just stopped, and pan, zoom and fit moved something
+invisible; W15's own double-tap-to-fit could not be judged by eye at all. The
+render now paints a dark desk and then the page rectangle in the document's own
+coordinates. The layer is still never painted into — the alpha-carrying
+invariant is untouched — and the exported PNG's first row decodes as uniformly
+white, so the desk is not in the file.
+
+**No regression, and the way that had to be measured is itself a W16
+instruction.** Same Sweep, same device, each as the *first* action in a fresh
+process:
+
+```
+                   event p50   submit p50   over budget
+W14 build           0.211 ms     0.041 ms      2.7%
+W15 build           0.229 ms     0.041 ms      3.6%
+```
+
+The first attempt at that comparison read `1.293 ms` for W15 and looked like a
+six-fold regression. It was not: the readout is **not stationary within a
+session**. Driven as A / pinch / B / fit / C, the same Sweep with identical dab
+counts reads p50 0.229, then 1.006, then 0.857 — and C has exactly A's
+transform, so it is not the transform. Submit rises with it (0.041 to 0.186),
+which is the library's own call slowing down, so it is the device and not the
+app: the CPU read 44.7 C by then. `InputStats` already records this shape from
+W9 ("the first stroke after a process start ran at a third the cost of every
+later one, at a pinned 2.0 GHz"). **W16 must take every number as the first
+action in a fresh process, and record the thermal reading beside it**
+(`dumpsys thermalservice | grep mValue`). A run that follows a stress harness is
+measuring the harness's leftovers, not the app.
+
+The rest still holds under the new chrome: `reject 8/8 pass` with W13's exact
+counts, batches `8 slots peak 3 spills 0 in flight 0`, and an export of
+54,975 B reported in the chrome rather than in a `Toast` — a floating rectangle
+over the canvas for two seconds after every save would be in W16's 240 fps
+frame.
+
+The W9-through-W14 readout is not deleted; it is folded behind a Stats toggle
+and defaults off, because a feel pass cannot be run against eleven lines of
+monospace over the paper. Every number is still live, one tap away, with the
+stress harnesses beside it.
+
 ## Carried over from the spike
 
 **Reused:**
@@ -1208,13 +1340,13 @@ which the test pins by asserting MediaStore was never touched.
   plus `getMemoryInfo()` and the `isSupported` probe added in W0.
 - `SessionExporter.writeToDownloads()`'s MediaStore `IS_PENDING` pattern,
   retargeted and with the zero-byte-file bug fixed.
-- `requestHighestRefreshRate()` and `keepNavGesturesOutOfTheWay()`, verbatim —
-  but see W16: the refresh request becomes an explicit three-way toggle
-  (request-highest / request-nothing / request-60) with `mActiveSfDisplayMode`
-  read back, because with the current unconditional 90 Hz request there is no
-  way to construct a genuine 60 Hz control. Deleting the adb override does not
-  produce one: both Phase 0 runs were already "app requests 90, vendor cap
-  decides".
+- `keepNavGesturesOutOfTheWay()` verbatim; `requestHighestRefreshRate()`
+  **replaced at W15** by the three-way `RefreshPolicy` toggle
+  (request-highest / request-nothing / request-60) with the mode read back,
+  because with the unconditional 90 Hz request there was no way to construct a
+  genuine 60 Hz control. Deleting the adb override does not produce one: both
+  Phase 0 runs were already "app requests 90, vendor cap decides". Measured at
+  W15, and the answer is better than the plan assumed — see the W15 note.
 - The build config: compileSdk 35, minSdk 29, targetSdk 34, Java 17, release
   unminified and debug-signed so latency stays measurable on a non-debuggable
   build. Gradle wrapper pinned at 8.11.1 — the distro's Gradle 9.x is both

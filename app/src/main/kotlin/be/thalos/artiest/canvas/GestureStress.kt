@@ -51,6 +51,11 @@ class GestureStress(private val view: InkSurfaceView) {
 
     private val frame = Choreographer.FrameCallback { onFrame() }
 
+    /** One entry per frame for [doubleTap]; empty otherwise. See its KDoc. */
+    private val script = ArrayList<() -> Unit>()
+    private var scriptStep = 0
+    private val scriptFrame = Choreographer.FrameCallback { onScriptFrame() }
+
     /**
      * Run a gesture over [steps] frames: the fingers spread to twice their
      * span, twist 40 degrees and travel 300 view px, all at once.
@@ -108,6 +113,84 @@ class GestureStress(private val view: InkSurfaceView) {
         choreographer.postFrameCallback(frame)
     }
 
+    /**
+     * Two fingers down and up, twice, without moving — the gesture
+     * `TwoFingerDoubleTap` recognises and `fitToView` is bound to.
+     *
+     * Here for the same reason the pinch is: `adb shell input` is single-touch,
+     * so a two-finger tap cannot be driven from a shell at all, and this is the
+     * only way to exercise the real path — `InputRouter`, `StrokeExclusivity`,
+     * the recogniser and the transform — on the device rather than on the JVM.
+     *
+     * **One event per frame, and the timing is the test.** The recogniser's
+     * bounds are 250 ms for a tap and 300 ms between them; a script dispatched
+     * as fast as a loop can run would satisfy both trivially and prove nothing
+     * about a gesture a hand can actually make. At 60 Hz this is a 67 ms tap,
+     * a 150 ms gap, and a second 67 ms tap — comfortably inside both bounds and
+     * nowhere near either, which is what a real double tap looks like. Each
+     * tap runs DOWN, POINTER_DOWN, two MOVEs and the lift — five frames, 83 ms
+     * — and the gap between them is ten, 167 ms.
+     */
+    fun doubleTap(onDone: () -> Unit = {}) {
+        if (running) return
+        running = true
+        this.onDone = onDone
+        downTimeMs = System.nanoTime() / 1_000_000L
+        script.clear()
+        scriptStep = 0
+
+        val cx = view.width * 0.5f
+        val cy = view.height * 0.5f
+        repeat(2) { tap ->
+            script += { still(cx, cy); dispatch(MotionEvent.ACTION_DOWN, 1) }
+            script += {
+                dispatch(
+                    MotionEvent.ACTION_POINTER_DOWN or
+                        (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                    2,
+                )
+            }
+            repeat(TAP_HOLD_FRAMES) { script += { dispatch(MotionEvent.ACTION_MOVE, 2) } }
+            script += {
+                dispatch(
+                    MotionEvent.ACTION_POINTER_UP or
+                        (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                    2,
+                )
+                dispatch(MotionEvent.ACTION_UP, 1)
+            }
+            if (tap == 0) repeat(TAP_GAP_FRAMES) { script += {} }
+        }
+        choreographer.postFrameCallback(scriptFrame)
+    }
+
+    private fun onScriptFrame() {
+        if (!running) return
+        if (scriptStep >= script.size) {
+            running = false
+            val done = onDone
+            onDone = null
+            done?.invoke()
+            return
+        }
+        script[scriptStep++].invoke()
+        choreographer.postFrameCallback(scriptFrame)
+    }
+
+    /** Both fingers at a fixed spread around ([cx], [cy]), not moving. */
+    private fun still(cx: Float, cy: Float) {
+        coords[0].clear()
+        coords[0].x = cx - TAP_SPREAD_PX
+        coords[0].y = cy
+        coords[0].pressure = 1f
+        coords[0].size = 1f
+        coords[1].clear()
+        coords[1].x = cx + TAP_SPREAD_PX
+        coords[1].y = cy
+        coords[1].pressure = 1f
+        coords[1].size = 1f
+    }
+
     private fun fill(t: Float) {
         val cx = view.width * 0.5f + t * 300f
         val cy = view.height * 0.5f + t * 120f
@@ -149,5 +232,21 @@ class GestureStress(private val view: InkSurfaceView) {
 
         /** Pointer updates per frame, as unbuffered dispatch would deliver. */
         private const val MOVES_PER_FRAME = 4
+
+        /**
+         * MOVE frames inside each tap. With the DOWN, POINTER_DOWN and lift
+         * frames around them that is five frames, 83 ms at 60 Hz, against the
+         * recogniser's 250 ms bound.
+         */
+        private const val TAP_HOLD_FRAMES = 2
+
+        /**
+         * Empty frames between the taps. Ten frames from lift to next landing,
+         * 167 ms at 60 Hz, against the recogniser's 300 ms bound.
+         */
+        private const val TAP_GAP_FRAMES = 9
+
+        /** Half the finger spread. Two fingers a thumb's width apart. */
+        private const val TAP_SPREAD_PX = 120f
     }
 }
