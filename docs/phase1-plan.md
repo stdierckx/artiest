@@ -465,9 +465,17 @@ and `fitToView` is always one action away from a known state.
 **Export path.** `PngExporter` is a suspend function on `Dispatchers.IO`. The
 layer stays **alpha-carrying** — paper white is drawn by the renderer, never
 baked in — so it remains a real layer for Phase 3's stack and Phase 4's `.ora`.
-Export takes `layerLock`, allocates one transient document-sized `Bitmap`,
+~~Export takes `layerLock`, allocates one transient document-sized `Bitmap`,
 `drawColor(paperWhite)` then `drawBitmap(layer, 0f, 0f, filterPaint)`, releases
-the lock, and compresses off-lock. MediaStore write lifted from
+the lock, and compresses off-lock.~~ **Corrected at W14:** the allocation and
+the `drawColor` come *out* of the critical section, which holds nothing but one
+`drawBitmap` into a bitmap allocated before the lock was taken; the paper goes
+under the ink with `DST_OVER` afterwards, which is the same image. `Layer`'s
+contract already forbade the allocation ("no second `Bitmap` allocation" while
+holding the lock) and `Layer.read` hands out the `Bitmap` rather than a `Canvas`
+specifically so this is possible. Measured on the tablet, both shapes in the
+same export: 22.0-25.8 ms on-lock as specified against 13.6-14.8 ms as shipped.
+MediaStore write lifted from
 `SessionExporter` and retargeted at `MediaStore.Images.Media.EXTERNAL_CONTENT_URI`,
 `image/png`, `RELATIVE_PATH "Pictures/Artiest/"` — no permission.
 
@@ -1094,6 +1102,91 @@ signal this app wrote itself.
 The readout prints the router's cancel count and the view's side by side. They
 are the same number unless a cancel stopped somewhere between the decision and
 the ink, which is exactly the failure that would otherwise be silent.
+
+**W14 — DONE. The export works; the plan's critical section was twice as long
+as it needed to be, and there was a second silent failure under the first.**
+
+The MediaStore half was never a risk — Phase 0 proved it on this tablet — so
+what W14 owed was everything around it. Measured on the device, release build,
+2160x3300: a blank document is 27,533 B, a two-stroke one 54,705 B, `copy 14-17
+ms`, `encode 383-386 ms`, `total 441-467 ms`, and the pulled file is a 2160x3300
+**colour type 2** PNG, which is to say 24-bit with no alpha channel at all.
+
+**The critical section is a third of the plan's, and that is a correction and
+not a tightening.** The plan holds `layerLock` across a 27.2 MiB allocation, a
+full-canvas `drawColor` and the composite. `Layer`'s contract — written two
+items later — already forbids the first of those outright, and `Layer.read`
+hands out the `Bitmap` rather than a `Canvas` precisely so the section can be
+one blit. Both versions were built and timed on the tablet, back to back inside
+the same export so neither inherited the other's warm allocator:
+
+```
+                  on-lock        of which
+plan's shape   22.0-25.8 ms   alloc 0.07  drawColor 12.9-13.8  blit 9.1-9.9
+shipped        13.6-14.8 ms   one drawBitmap
+```
+
+Effectively all of the difference is a `drawColor` over 7.1 Mpx that does not
+need the lock. The paper goes *under* the ink afterwards with `DST_OVER`, which
+is the same image — `dst + src*(1-dstA)` with an opaque src is what painting ink
+over paper computes — and rather than leave that as a comment, the test asserts
+the exported PNG equals the paper-first composite pixel for pixel. 14 ms is
+still most of a frame, so the honest cost of pressing Save is one dropped frame
+at the next pen-up rather than two.
+
+**The second silent failure, which the plan did not have a name for.**
+`commitStroke` records the stroke's bounds on the UI thread and *queues* its
+pixels; W10 settled that skew as harmless because "nothing reads both halves —
+`PngExporter` reads the layer, undo reads the bounds". That is true of the code
+and false of the user, who lifts the pen and presses Save. Copy the layer in
+that window and the PNG is missing the last stroke, the document's own count
+says it is there, and nothing reports anything — the same shape as the zero-byte
+file, one layer down. So the export waits for the queue, bounded at 250 ms, and
+reports what is still outstanding as `notYetStamped`.
+
+**How much of that is reachable today, said plainly.** Every path that queues a
+commit already asks for a render — a pen-up calls `commit()`, Clear calls
+`redrawDry` — so with a live surface the queue drains within a frame. On the
+tablet the wait was **0 ms on every export**, including one fired as close
+behind a Clear as two `input tap`s can be, and the file was the blank-paper
+27,533 B rather than the one with ink in it. The state that reliably leaves
+commits queued is having no surface, which is also the state in which the button
+cannot be pressed. So this is a guarantee and a report, not a save anyone has
+watched happen; `PngExporterTest` is where the case is real, and W15 binds export
+to more than a button.
+
+**`setHasAlpha(false)` was measured because the obvious guess is wrong in both
+directions.** On an ink-covered document the file goes from 547,826 B to
+468,416 B — a seventh — and on a blank one it saves two bytes, because a
+constant channel is exactly what PNG's row filters already reduce to nothing.
+It is conditional on an opaque paper colour: a translucent one would make the
+encoder write premultiplied colours as if they were straight, and the test
+carries that as the other side of the branch.
+
+**The `:spike` bug is fixed, and the fix is tested against the bug rather than
+around it.** `SessionExporter` swallows a null from `openOutputStream` and then
+flips `IS_PENDING` to 0 unconditionally, publishing an empty file and returning
+a perfectly good `Uri` for it. `PngExporterTest` builds that version longhand,
+watches it publish and clean up nothing, and then asserts the port's behaviour
+against the same failure: `Failed(OPEN)`, the row deleted, and **no** update
+statement at all.
+
+Reaching that branch needed a seam, and it is worth saying why rather than
+hiding it. Robolectric's `ContentResolver` catches `FileNotFoundException` and
+`SecurityException` inside `openOutputStream` and returns a no-op stream
+instead (bytecode, `ShadowContentResolver$1`), so under test it never returns
+null and never throws — the branch the class exists for is unreachable. So
+`export` takes the opener as a parameter whose default is
+`ContentResolver::openOutputStream`. Nothing in the app passes it. A branch that
+cannot be reached in a test is a branch nobody has run.
+
+The other three failure stages are reached with a real `ContentProvider`
+registered for the `media` authority, which is the instrument that fits there:
+refusing the insert gives `Failed(INSERT)`, refusing the update gives
+`Failed(PUBLISH)` **and one delete**, because an invisible pending row is worse
+than no row — it holds the name, never appears in the gallery, and nothing ever
+cleans it up. A closed document fails at the pixels *before* the row is created,
+which the test pins by asserting MediaStore was never touched.
 
 ## Carried over from the spike
 

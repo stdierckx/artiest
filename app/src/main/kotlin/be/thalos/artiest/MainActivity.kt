@@ -18,8 +18,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +33,9 @@ import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.input.CancelCause
+import be.thalos.artiest.io.ExportResult
+import be.thalos.artiest.io.PngExporter
+import kotlinx.coroutines.launch
 
 /**
  * Placeholder chrome around the real canvas.
@@ -98,6 +103,10 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     var pinch by remember { mutableStateOf<GestureStress?>(null) }
     var reject by remember { mutableStateOf<RejectionStress?>(null) }
     var polling by remember { mutableStateOf(true) }
+    var export by remember { mutableStateOf<ExportResult?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // Polled twice a second rather than pushed. The counters this reads live on
     // the input and render paths, and making them Compose state would put a
@@ -124,9 +133,9 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
         Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-            Text("artiest — W13 canvas", style = MaterialTheme.typography.titleSmall)
+            Text("artiest — W14 canvas", style = MaterialTheme.typography.titleSmall)
             Text(
-                text = readout(surface, document, reject, generation),
+                text = readout(surface, document, reject, export, exporting, generation),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 6.dp),
@@ -162,6 +171,34 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
                         g.start { polling = true; generation++ }
                     },
                 ) { Text("Reject") }
+                TextButton(
+                    enabled = !exporting,
+                    onClick = {
+                        // A redraw first, on this thread, because the export
+                        // cannot ask for one — it waits for the commit queue to
+                        // drain and only the render thread drains it.
+                        //
+                        // Stated at its real size: every path that queues a
+                        // commit already asks for a render of its own
+                        // (`commitStroke` calls `commit()`, `clear` calls
+                        // `redrawDry`), so on a live surface this is a second
+                        // chance and not the first, and measured on the tablet
+                        // the export's wait was 0 ms every time. What it covers
+                        // is a render that was scheduled and then deferred, and
+                        // it is a no-op when there is no surface — which is the
+                        // only state in which the queue is reliably non-empty,
+                        // and also the one in which this button cannot be
+                        // pressed.
+                        surface?.redrawDry()
+                        exporting = true
+                        export = null
+                        scope.launch {
+                            export = PngExporter.export(context, document)
+                            exporting = false
+                            generation++
+                        }
+                    },
+                ) { Text("Export") }
                 TextButton(onClick = {
                     val v = surface ?: return@TextButton
                     v.predictionEnabled = !v.predictionEnabled
@@ -217,6 +254,8 @@ private fun readout(
     surface: InkSurfaceView?,
     document: Document,
     reject: RejectionStress?,
+    export: ExportResult?,
+    exporting: Boolean,
     generation: Int,
 ): String {
     if (surface == null) return "surface  -"
@@ -264,7 +303,30 @@ private fun readout(
         "gesture  ${surface.gestures.updates} updates   " +
         "${surface.gestures.framesDrawn} frames drawn   " +
         "${surface.gestures.framesSkipped} skipped\n" +
-        rejectionLines(surface, reject)
+        rejectionLines(surface, reject) + "\n" +
+        exportLine(export, exporting)
+}
+
+/**
+ * W14's line. Every field on it is one the export could otherwise get wrong
+ * silently.
+ *
+ * `notYetStamped` is the one to watch: non-zero means the file on the tablet is
+ * missing strokes the document counts, and on a working render thread it never
+ * is. `bytes` is there because a zero-byte PNG is precisely the artifact this
+ * exporter was written to stop publishing — seeing the number is what makes
+ * that checkable by looking rather than by opening the file.
+ */
+private fun exportLine(export: ExportResult?, exporting: Boolean): String = "export   " + when {
+    exporting -> "running"
+    export == null -> "not run"
+    export is ExportResult.Failed -> "FAILED at ${export.stage.name.lowercase()}: ${export.detail}"
+    export is ExportResult.Written ->
+        "${export.bytes} B   ${export.strokes} strokes" +
+            (if (export.notYetStamped > 0) " (${export.notYetStamped} NOT STAMPED)" else "") +
+            "   wait ${export.waitMs} copy ${export.copyMs} encode ${export.encodeMs} " +
+            "total ${export.totalMs} ms\n         ${export.uri}"
+    else -> "?"
 }
 
 /**
