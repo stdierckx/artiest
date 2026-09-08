@@ -1591,6 +1591,77 @@ on a slow deliberate curve, which is where tremor shows and where the 4.5 ms is
 being spent. 60 against 90 back to back on the same stroke shape, by the toggle,
 which is the control W15 built and which no earlier item had.
 
+### Runs B and C — what they returned
+
+**Run B (smoothing 0.15, 90 Hz): no measurable difference, and the reason is a
+correction to this document's own arithmetic.**
+
+```
+                      apex method              cross-correlation
+run A  (smoothing 0)  45.2 ms, 4 readings      42.8 ms   r = +0.62
+run B  (smoothing 0.15) 43.4 ms, 3 readings    41-44 ms  r = +0.20
+```
+
+B read *lower*, so the filter was driven with a triangle wave using its own exact
+arithmetic. **A first-order lag delays a corner by about 0.6 tau, not tau** — the
+continuous-time limit is `ln 2` = 0.693, and the discrete filter gives a little
+less:
+
+```
+strength 0.15 at 321.75 Hz   ramp lag 4.58 ms   corner delay 2.79 ms   ratio 0.61
+strength 0.15 at 246.85 Hz   ramp lag 4.20 ms   corner delay 2.17 ms   ratio 0.52
+```
+
+So **the smoothing costs 4.58 ms on a straight stroke and 2.79 ms at a
+reversal**, and a reversal is exactly the feature this film measures. 2.79 ms is
+inside the method's resolution — run A's four apexes spanned 43.6 to 47.6, and
+its two methods disagreed by 2.4 — and B's zigzag was about 35% slower besides
+(118 events against 86). **The film cannot see this term and should not be asked
+to.** `StabilizerTest` measures the filter exactly and deterministically; that is
+the right instrument for it. The useful output of run B is the distinction
+between the two figures, which was not previously drawn.
+
+**Run C (60 Hz): attempted twice, and it does not have an answer.** Reported as
+inconclusive rather than resolved, because the two methods straddle the two
+hypotheses it exists to separate:
+
+```
+apex readings, where the pen stayed in frame     46-48 ms
+cross-correlation, five windows across two takes 30-34 ms   r = 0.15-0.40
+```
+
+Both takes failed for instrument reasons rather than for want of another window.
+The first had a pen lift and the pen left the frame for half the stroke. The
+second is a clean stroke — but the camera was reframed closer, and **the tool's
+ROI and thresholds are tuned to one framing and do not transfer**: with the page
+filling the frame there is no dark surround, the pen tracker latches onto a fixed
+ink feature after the sixth peak, and the ink-top staircase sticks. On top of
+that the cross-correlation is *structurally* weaker at 60 Hz — the ink advances
+every 4.05 frames instead of 2.69, so its growth series is a sparser spike train
+and the correlation peak flattens (r 0.62 at 90 Hz against 0.15-0.40 at 60).
+
+What C would decide is worth stating so it does not get lost: **if 60 Hz reads
+near 60 ms the compositor's 36 ms is refresh-quantised and a faster panel buys
+latency directly; if it reads near 45 ms the term is largely fixed — most likely
+the panel's own response — and Phase 2's front-buffer work would be chasing
+something it cannot move.** That is a Phase 2 question with a Phase 2 budget, and
+the honest thing is to leave it open rather than settle it from a reading the
+instrument does not support. Getting it would need either a reshoot at run A's
+exact framing, or a tool that finds the page and sets its own thresholds.
+
+**Two things the runs did settle, both solid.**
+
+- **The frame-rate self-calibration survives a panel change**, which is what
+  makes it trustworthy rather than a coincidence: 2.690 and 2.700 frames a step
+  at 90 Hz, 4.040 and 4.050 at 60, giving 242.1, 243.0, 242.4 and 243.0 fps for
+  the same camera. It also confirms independently that the panel really was at 60
+  for the C runs.
+- **The digitizer-and-dispatch age does not move with the refresh rate.**
+  5.75, 5.78 ms at 90 Hz; 5.71, 5.69 at 60. The digitizer itself slows from
+  321.75 to 246.85 Hz between those, so **those 5.7 ms are dispatch, not
+  sampling** — which means the one term of the software budget that looked like
+  it might shrink with a faster panel does not.
+
 **W17 — DONE. The analysis reconciled, with its wrong predictions left standing
 beside the corrections.**
 
