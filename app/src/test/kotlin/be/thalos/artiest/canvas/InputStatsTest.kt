@@ -27,7 +27,7 @@ class InputStatsTest {
     fun `percentiles come off the recorded events, not off a mean`() {
         val stats = InputStats(capacity = 100)
         // 1..100 microseconds, recorded out of order so a sort is required.
-        for (i in 100 downTo 1) stats.recordEvent(i * 1_000L, 0L, 1, 1, 1 * 3)
+        for (i in 100 downTo 1) stats.recordEvent(i * 1_000L, 0L, 0L, 1, 1, 1 * 3)
         assertEquals(100, stats.events)
         // Index ((n-1) * p), so p50 of 100 samples is index 49 -> 50 us.
         assertEquals(0.050f, stats.eventMs(0.5f), 1e-6f)
@@ -41,8 +41,8 @@ class InputStatsTest {
         // five 20x stalls. The mean stays comfortably under budget and the p99
         // does not, and it is the p99 that describes what the pen felt.
         val stats = InputStats(capacity = 100)
-        repeat(95) { stats.recordEvent(ms(0.05), 0L, 3, 1, 3 * 3) }
-        repeat(5) { stats.recordEvent(ms(1.0), 0L, 3, 1, 3 * 3) }
+        repeat(95) { stats.recordEvent(ms(0.05), 0L, 0L, 3, 1, 3 * 3) }
+        repeat(5) { stats.recordEvent(ms(1.0), 0L, 0L, 3, 1, 3 * 3) }
 
         val mean = (95 * 0.05f + 5 * 1.0f) / 100f
         assertTrue(mean < InputStats.BUDGET_MS, "the control's mean is not under budget")
@@ -58,8 +58,8 @@ class InputStatsTest {
         // index 98, so the single worst event is never the answer — and a
         // single outlier is therefore visible in max, not in p99.
         val single = InputStats(capacity = 100)
-        repeat(99) { single.recordEvent(ms(0.05), 0L, 3, 1, 3 * 3) }
-        single.recordEvent(ms(1.0), 0L, 3, 1, 3 * 3)
+        repeat(99) { single.recordEvent(ms(0.05), 0L, 0L, 3, 1, 3 * 3) }
+        single.recordEvent(ms(1.0), 0L, 0L, 3, 1, 3 * 3)
         assertEquals(0.05f, single.eventMs(0.99f), 1e-6f)
         assertEquals(1.0f, single.eventMs(1f), 1e-6f)
     }
@@ -69,7 +69,7 @@ class InputStatsTest {
         val stats = InputStats(capacity = 8)
         // 20 events: the first 12 must fall out, so nothing under 13 us
         // survives and the p50 is drawn from 13..20.
-        for (i in 1..20) stats.recordEvent(i * 1_000L, 0L, 1, 1, 1 * 3)
+        for (i in 1..20) stats.recordEvent(i * 1_000L, 0L, 0L, 1, 1, 1 * 3)
         assertEquals(8, stats.events)
         assertEquals(0.020f, stats.eventMs(1f), 1e-6f)
         assertEquals(0.013f, stats.eventMs(0f), 1e-6f)
@@ -94,7 +94,7 @@ class InputStatsTest {
         val stats = InputStats(capacity = 16)
         // 321.75 Hz into 90 Hz frames is 3.575 samples an event, which arrives
         // as an alternating 3, 4, 4, 3 rather than as a fraction.
-        for (n in intArrayOf(4, 3, 4, 4, 3, 4, 3, 4)) stats.recordEvent(ms(0.1), 0L, n, 1, n * 3)
+        for (n in intArrayOf(4, 3, 4, 4, 3, 4, 3, 4)) stats.recordEvent(ms(0.1), 0L, 0L, n, 1, n * 3)
         assertEquals(3.625f, stats.samplesPerEvent(), 1e-6f)
         assertEquals(29L, stats.samples)
         assertEquals(10.875f, stats.dabsPerEvent(), 1e-6f)
@@ -136,7 +136,7 @@ class InputStatsTest {
     @Test
     fun `reset clears the window and the stroke figures`() {
         val stats = InputStats(capacity = 4)
-        stats.recordEvent(ms(0.2), 0L, 3, 1, 3 * 3)
+        stats.recordEvent(ms(0.2), 0L, 0L, 3, 1, 3 * 3)
         stats.recordStroke(1000L, 10, 500L, 0L)
         stats.reset()
         assertEquals(0, stats.events)
@@ -148,5 +148,34 @@ class InputStatsTest {
     @Test
     fun `a nonsense capacity is refused at construction`() {
         assertFailsWith<IllegalArgumentException> { InputStats(capacity = 0) }
+    }
+
+    @Test
+    fun `input age is its own distribution, not a share of the event cost`() {
+        val stats = InputStats()
+
+        // The shape this exists to catch: cheap events that arrived late. An
+        // implementation that derived age from the event duration — or reused
+        // one ring for both — would report a fast p99 here, and the whole point
+        // of the number is that these two are independent.
+        repeat(99) { stats.recordEvent(ms(0.05), 0L, ms(6.0), 2, 1, 6) }
+        stats.recordEvent(ms(0.05), 0L, ms(20.0), 2, 1, 6)
+
+        assertEquals(0.05f, stats.eventMs(0.5f), 0.001f)
+        assertEquals(6.0f, stats.inputAgeMs(0.5f), 0.001f)
+        assertEquals(20.0f, stats.inputAgeMs(1f), 0.001f)
+    }
+
+    @Test
+    fun `a reset clears the ages with everything else`() {
+        val stats = InputStats()
+        stats.recordEvent(ms(0.05), 0L, ms(6.0), 2, 1, 6)
+
+        stats.reset()
+
+        // Not a formality: `reset` zeroes `count`, and a percentile that read
+        // the array without consulting `count` would keep returning the old
+        // 6 ms forever after a reset.
+        assertEquals(0f, stats.inputAgeMs(0.5f))
     }
 }

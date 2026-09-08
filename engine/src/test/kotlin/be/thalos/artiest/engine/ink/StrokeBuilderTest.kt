@@ -332,4 +332,71 @@ class StrokeBuilderTest {
         assertEquals(control.dabCount, b.dabCount)
     }
 
+
+    @Test
+    fun `the ink's leading edge trails the pen by a measurable time, and W16 needs the number`() {
+        // The engine's own contribution to tip lag, end to end, on the JVM.
+        //
+        // The 240 fps film measures one gap: pen tip to ink. That gap is the
+        // digitizer's, the framework's, this pipeline's and the panel's, added
+        // together, and the film cannot separate them. This is the pipeline's
+        // share, and it is not small — two structural terms, both by design:
+        //
+        //  - Catmull-Rom needs four knots to emit the segment between the
+        //    middle two, so the newest dab is one sample behind the newest
+        //    sample. One sample is 3.11 ms at 321.75 Hz.
+        //  - the stabilizer settles a fixed time behind a steady pen; see
+        //    `StabilizerTest`.
+        //
+        // On top of those, dabs land on an arc-length grid, so the last one can
+        // be up to one spacing short of where the spline actually ends. That is
+        // real ink the eye can see missing, so it belongs in the number.
+        val rateHz = 321.75f
+        val plain = tipLagMs(strength = 0f, rateHz = rateHz)
+        val smoothed = tipLagMs(strength = 0.15f, rateHz = rateHz)
+
+        // Measured: 3.21 ms, against a 3.11 ms sample interval. One sample for
+        // the spline's knots plus 0.1 ms of spacing quantum, and nothing else
+        // hiding in there.
+        assertEquals(3.21f, plain, 0.1f, "lag with no smoothing")
+        assertEquals(7.71f, smoothed, 0.1f, "lag at the shipped default")
+
+        // The default adds the stabilizer's share and nothing more, which is
+        // what makes the film's two runs subtractable — and 4.5 ms of it, on a
+        // software path whose every other term put together is under 3.3.
+        assertEquals(4.5f, smoothed - plain, 0.1f)
+
+        // The same at the other panel rate: the spline's share tracks the
+        // sample interval and the smoothing's does not, which is the whole
+        // point of integrating the filter over dt.
+        val slow = tipLagMs(strength = 0f, rateHz = 246.85f)
+        val slowSmoothed = tipLagMs(strength = 0.15f, rateHz = 246.85f)
+        assertEquals(4.07f, slow, 0.1f)
+        assertEquals(4.5f, slowSmoothed - slow, 0.1f)
+    }
+
+    /**
+     * Feed a constant-velocity straight stroke and report how far the last dab
+     * is behind the last sample pushed, expressed as time.
+     */
+    private fun tipLagMs(strength: Float, rateHz: Float): Float {
+        val pen = RoundPen().apply { stabilization = strength }
+        val builder = StrokeBuilder(pen)
+        builder.begin(0)
+        val dtNanos = (1e9f / rateHz).toLong()
+        val velocityPxPerMs = 2f
+        var t = 0L
+        var x = 0f
+        repeat(600) {
+            // Full pressure throughout, so the onset ramp is over long before
+            // the measurement and the radius — and therefore the dab spacing —
+            // is constant.
+            builder.add(x, 0f, 1f, t)
+            t += dtNanos
+            x += velocityPxPerMs * (dtNanos / 1e6f)
+        }
+        val lastSampleX = x - velocityPxPerMs * (dtNanos / 1e6f)
+        val lastDabX = builder.x(builder.dabCount - 1)
+        return (lastSampleX - lastDabX) / velocityPxPerMs
+    }
 }

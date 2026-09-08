@@ -111,6 +111,44 @@ internal fun MotionEvent.sampleAt(
 }
 
 /**
+ * How stale the freshest thing in [this] event already is, at [nowNanos].
+ *
+ * The term in the latency chain nothing else measures. `InputStats.eventMs` is
+ * the app's own work — `onTouchEvent` to `renderFrontBufferedLayer` — and it is
+ * a fifth of a millisecond; what happens *before* `onTouchEvent` is the
+ * digitizer's own sampling and the framework's dispatch, and it is not
+ * observable from anywhere else in the app. Measured against the newest sample,
+ * because that is the one whose ink is being drawn now; the *oldest* sample in a
+ * batched event is older by up to one more sample interval, 3.1 ms at 321.75 Hz,
+ * and `samplesPerEvent` on the readout is what says how many are in the batch.
+ *
+ * **Both clocks have to be the same clock, and that is checked rather than
+ * assumed.** `getEventTimeNanos` is documented in the `SystemClock.uptimeMillis`
+ * base and `System.nanoTime` is `CLOCK_MONOTONIC`; on Android those are the same
+ * counter, but a mismatch would not fail — it would produce a plausible,
+ * completely wrong number, which is the worst kind. The readout prints
+ * `clockSkewNanos` beside the figure so the assumption is visible at the point
+ * of use.
+ *
+ * Never negative: an event cannot arrive before it happened, and a clamped zero
+ * is a better answer than a negative percentile if the clocks ever do diverge.
+ */
+internal fun MotionEvent.eventAgeNanos(nowNanos: Long): Long =
+    (nowNanos - timeNanos()).coerceAtLeast(0L)
+
+/**
+ * `System.nanoTime()` minus the `SystemClock.uptimeMillis` base, in nanoseconds.
+ *
+ * Expected in `[0, 1_000_000)` — the two read the same counter and the only
+ * difference is that `uptimeMillis` truncates to milliseconds and a moment
+ * passes between the two calls. Anything outside that range means
+ * [eventAgeNanos] is subtracting one clock from another and its output is
+ * meaningless.
+ */
+internal fun clockSkewNanos(): Long =
+    System.nanoTime() - android.os.SystemClock.uptimeMillis() * 1_000_000L
+
+/**
  * Nanosecond event times landed in API 34. The MovinkPad runs 14, so it takes
  * the precise path; the millisecond fallback exists because minSdk is 29 and a
  * comparison device would otherwise crash rather than lose resolution.

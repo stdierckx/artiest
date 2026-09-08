@@ -119,8 +119,13 @@ nothing and it has already paid for itself once.
   at 60. Only a fresh 60 -> 90 bounce revives it; rewriting 90.0 over 90.0 is a
   no-op that changes nothing. Ruled out as a cause: the app's 1000 fps frame-rate
   vote, which holds 90 Hz fine once bounced. **Bounce and verify `activeMode`
-  immediately before any judged run**, and read the Hz on the Latency tab, which
-  is red below 90.
+  immediately before any judged run.** **W16 pinned the trigger and it changes
+  the procedure: starting an activity drops the vote.** Bounced *before* a launch
+  it is gone by the time the app is on screen; bounced *after*, it survived 200 s
+  of continuous polling and a full stress run start to finish. So the order is
+  launch, then bounce, then verify, then run — and **verify again afterwards**,
+  because a run that began at 90 and ended at 60 is void and otherwise
+  indistinguishable from a good one.
 - **Memory: 7.70 GiB total**, 4.4 GiB free, low-memory threshold 0.21 GiB.
   `memoryClass` 256 / `largeMemoryClass` 512 do not bind, because on API 34
   bitmap pixels are native-heap allocations. **Do not set `android:largeHeap`.**
@@ -136,9 +141,13 @@ nothing and it has already paid for itself once.
   presentation deadline, or buffer-queue depth. **Not a Phase 1 blocker** — we
   ship the winner. It becomes load-bearing in Phase 2, when a GL engine has to
   reproduce the win without the library.
-- **No absolute latency number exists.** The A/B verdict is comparative and
-  visual. Deliberately deferred: the number is worth more measured against
-  Phase 1's real ink than against the spike's `drawLine` segments.
+- ~~**No absolute latency number exists.**~~ **Half-answered at W16.** Every
+  software term is now measured or tested — the digitizer-plus-dispatch age has
+  an instrument on the readout, the engine's own tip lag is 3.21 ms at 321.75 Hz
+  (7.71 with the shipped smoothing), and the app's work is 0.175 ms. What is
+  still missing is SurfaceFlinger and the panel, which nothing inside the
+  process can observe. **That term needs the 240 fps film**, and the film is the
+  part of W16 that has not been run. See the W16 note and the filming protocol.
 - ~~Whether `MotionPredictor.isPredictionAvailable` returns true for this pen, or
   `SystemMotionEventPredictor` silently falls back to the bundled Kalman
   predictor.~~ **Answered at W11, and the answer is odd.**
@@ -654,7 +663,7 @@ half a day** before any of it is built on.
 | 13 | ~~Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw)~~ **DONE — `7b6698f`. Eight contact sequences run on the tablet, 8/8. The rules were already right; a cancel released no batches, and the counters now say which of six ways a stroke died.** | `:app` | — | — | ✔ |
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
 | 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
-| 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** | device | Medium | 15 | 1.5 |
+| 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** — **PART DONE (`PENDING`). Every software term measured: engine tip lag 3.21 ms (7.71 with the shipped smoothing), app work 0.175 ms, an `age` instrument for the dispatch term, and the 60/90 A/B. The film and the feel pass need a pen and a camera and have not been run.** | device | Medium | 15 | 0.75 left |
 | 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
 
 **≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
@@ -1319,6 +1328,158 @@ The W9-through-W14 readout is not deleted; it is folded behind a Stats toggle
 and defaults off, because a feel pass cannot be run against eleven lines of
 monospace over the paper. Every number is still live, one tap away, with the
 stress harnesses beside it.
+
+**W16 — PART DONE. Every software term of the latency is measured; the panel's
+term needs the camera, and that run has not happened.**
+
+W16 is the one item that cannot be finished from a shell. The film needs a
+phone at 240 fps, a tripod and a hand holding the pen, and the feel pass needs
+someone to feel it. What could be done without either was: build the instrument
+the film is missing, measure everything on this side of the panel, and pin the
+procedure so the filmed run is one pass rather than three. **The item stays open
+until the film is shot** — see *The filmed run* below, which is the whole of
+what is left.
+
+**The chain, and who measures each term.** Pen to photons has five links. Three
+are now numbers:
+
+```
+                                    90 Hz / 321.75 Hz pen   60 Hz / 246.85 Hz pen
+digitizer sampling + dispatch          the `latency` line      the `latency` line
+engine pipeline, smoothing 0                      3.21 ms                 4.07 ms
+  + the shipped smoothing 0.15                   +4.50 ms                +4.50 ms
+app work, onTouchEvent -> submit                  0.175 ms                0.178 ms
+SurfaceFlinger + panel                            the film                the film
+```
+
+**The engine's own tip lag was not known and is larger than the app's work by a
+factor of forty.** `StrokeBuilderTest` drives a constant-velocity stroke and
+measures how far the last dab is behind the last sample, as time: **3.21 ms**
+with smoothing off, **7.71 ms** at the shipped default. The first figure is one
+sample interval — Catmull-Rom needs four knots to emit the segment between the
+middle two — plus a tenth of a millisecond of arc-length quantum. The second
+adds the stabilizer.
+
+**And the stabilizer's share is not its time constant, which is the trap.**
+`strength * TAU_MAX` is 6.0 ms at the default, and that is the continuous-time
+limit; this filter is evaluated at sample instants, and the exact discrete lag
+on a steady line is `dt * q / (1 - q)` with `q = exp(-dt / tau)` — **4.58 ms at
+321.75 Hz, 4.20 ms at 246.85**. Out by a quarter, in the direction that would
+have had the film subtracting more smoothing than the smoothing does.
+`StabilizerTest` pins the formula, both device rates, and the naive answer as
+the control.
+
+The consequence is worth stating plainly before anyone judges the feel: **at the
+shipped default, smoothing costs more latency than the entire rest of the
+software path put together**, and it is one slider away from zero. That is a
+tuning decision the feel pass now gets to make with a number in hand rather than
+by taste alone.
+
+**`latency` on the readout is the term nothing else could reach.** `age` is how
+stale the newest sample already was when `onTouchEvent` was handed it — the
+digitizer's own sampling plus the framework's dispatch. It is measured against
+`System.nanoTime` at the top of the same window `event` measures, so the two
+meet exactly with no gap and no overlap.
+
+Two things about it. First, **nothing synthetic can produce this number**:
+`StrokeStress` stamps its events with the current time, so a Sweep reads
+`age p50 0.0`, and an `adb shell input stylus swipe` reads whatever the
+injection path happened to cost — 0.0, 0.41, 6.1 and 8.73 ms on four runs of the
+same command, which is a measurement of `adb` and not of a digitizer. Only a
+real pen on the glass answers it, which is one stroke of the filmed run. Second, **the figure is refused rather than approximated when the
+clocks disagree**: `getEventTimeNanos` is documented in the
+`SystemClock.uptimeMillis` base and `System.nanoTime` is `CLOCK_MONOTONIC`, and
+a mismatch would give a plausible wrong number rather than a failure. The skew
+is remeasured every time the line is built and an out-of-range value replaces
+the figure with the reason. That check cannot live in a unit test —
+Robolectric's `uptimeMillis` is a simulated clock and the first version of the
+test failed with a skew of 74,071 seconds — so it is an assertion left running
+on the only machine that can answer it.
+
+**60 against 90, both fresh-process and first-action, same 1201-sample stroke,
+CPU at 44.7 C:**
+
+```
+                        90 Hz      60 Hz
+events for the stroke     336        226
+samples/event            3.57       5.31
+dabs/event               51.9       77.2
+event p50              0.175 ms   0.178 ms
+event p99              0.284 ms   0.355 ms
+over the 0.31 ms budget   0.9%       4.9%
+submit p50             0.031 ms   0.027 ms
+per sample             48.8 us    33.4 us
+```
+
+The app's cost per *event* is the same at both rates; what changes is the tail
+and the budget. At 60 Hz each event carries half again as many samples, so the
+same work arrives in bigger lumps and misses the per-event ceiling five times as
+often. Per *sample* the picture inverts — 48.8 us against 33.4 — because fewer
+samples per event amortise the fixed per-event cost over less work. Neither
+number is felt latency; both are inputs to it, and the film is what closes it.
+
+**The measurement procedure, which W16 owed as much as it owed numbers.**
+Starting an activity drops the 90 Hz vote: bounced before a launch it is gone by
+the time the app is on screen, and the first A/B attempt of this item ran its
+90 Hz arm at 60 without saying so. Bounced *after* the launch it held for 200 s
+of continuous polling and through a full stress run. Launch, bounce, verify,
+run, **verify again**. Together with W15's finding — take every number as the
+first action in a fresh process, and record the CPU temperature beside it — that
+is the whole of how a Phase 1 number is taken.
+
+### The filmed run — W16's outstanding half
+
+Everything below needs a person, a pen and a camera. It is written out so it is
+one session rather than three.
+
+**Equipment.** A phone that films at 240 fps, something to hold it still, bright
+flicker-free light. Avoid mains-frequency lighting: a 50 Hz flicker beating
+against a 90 Hz panel puts a rolling band through the footage exactly where the
+ink is.
+
+**Setup.**
+
+1. Launch the app. *Then* bounce the refresh override:
+   `adb shell settings put system peak_refresh_rate 60.0` and the same for
+   `min_refresh_rate`, then both to `90.0`.
+2. Verify: `adb shell dumpsys display | grep mDesiredDisplayModeSpecs` shows
+   `primary=physical: (90.0 Infinity)`. The app's `refresh` line should read
+   `now 90.0 Hz`.
+3. In the app: Stats **off**, prediction **off**, smoothing **0**, size 24, Fit.
+4. Frame the camera on the middle third of the page, as close as it will focus,
+   so the pen tip and the ink's leading edge are both in shot and large.
+
+**The runs.** Each is one long, fast, straight stroke left to right, as close to
+a constant speed as a hand manages. Four of them:
+
+| run | smoothing | prediction | panel | what it isolates |
+|---|---|---|---|---|
+| A | 0 | off | 90 Hz | the baseline: everything but the engine's 3.21 ms |
+| B | 0.15 | off | 90 Hz | what the shipped default costs, felt |
+| C | 0 | off | 60 Hz | the panel's share |
+| D | 0 | on | 90 Hz | whether the lead cancels the lag or overshoots |
+
+**The analysis needs no ruler and no calibration, and that is worth knowing
+before setting up.** In one frame from the middle of the stroke, measure in
+image pixels: `gap`, from the pen tip to the leading edge of the ink; and
+`speed`, how far the tip moved between that frame and the next, times 240. The
+latency is `gap / speed`, and the pixel units cancel — the screen's size, the
+camera's distance and the lens are all irrelevant. Do it on five frames and take
+the median; where the eye puts "the leading edge" is the dominant error, not the
+arithmetic.
+
+**Record beside each run**, from the app with Stats on: the `latency` line
+(`age` p50/p95/p99 — this is the run that finally produces it, because only a
+real pen carries real event times), `event`, `submit`, `xform scale`, and
+`adb shell dumpsys thermalservice | grep mValue` for the CPU temperature.
+Re-verify the refresh vote afterwards.
+
+**The feel pass, same session, camera off.** Prediction on against off, judged on
+tip-lead *and* on reversal spurs — a fast zigzag, not a straight line, because a
+straight line is where prediction is always right. Smoothing at 0, 0.15 and 0.4
+on a slow deliberate curve, which is where tremor shows and where the 4.5 ms is
+being spent. 60 against 90 back to back on the same stroke shape, by the toggle,
+which is the control W15 built and which no earlier item had.
 
 ## Carried over from the spike
 

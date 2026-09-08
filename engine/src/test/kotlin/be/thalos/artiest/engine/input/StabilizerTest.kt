@@ -250,4 +250,92 @@ class StabilizerTest {
         assertEquals(b.y.toRawBits(), a.y.toRawBits())
         assertEquals(b.pressure.toRawBits(), a.pressure.toRawBits())
     }
+
+    @Test
+    fun `on a steady line the filter settles a fixed time behind the pen`() {
+        // W16 needs this as a number, not as filter theory. A first-order lag
+        // fed a constant-velocity input settles a fixed *distance* behind it,
+        // and that distance over the velocity is a time — so the smoothing
+        // slider is, directly and only, a latency slider, and the 240 fps film
+        // cannot tell this apart from the render path: it sees one gap between
+        // the pen tip and the ink.
+        //
+        // **And the number is not the time constant.** The obvious answer —
+        // `strength * TAU_MAX`, 6.0 ms at the shipped default — is the
+        // continuous-time limit, and it is wrong by half a sample interval
+        // because this filter is evaluated at sample instants. At 321.75 Hz the
+        // interval is 3.1 ms, so the error is 1.5 ms on a 6 ms figure: a
+        // quarter, and in the direction that would have the film subtracting
+        // more smoothing than the smoothing is doing. The exact discrete lag is
+        // `dt * q / (1 - q)` with `q = exp(-dt / tau)`.
+        for (rateHz in floatArrayOf(321.75f, 246.85f)) {
+            for (strength in floatArrayOf(0.05f, 0.15f, 0.5f, 1f)) {
+                assertEquals(
+                    discreteLagMs(strength, rateHz),
+                    steadyStateLagMs(strength, rateHz),
+                    0.02f,
+                    "strength $strength at $rateHz Hz",
+                )
+            }
+        }
+
+        // The control, and the whole reason this test states a formula instead
+        // of a constant: at the shipped default the naive answer is out by
+        // more than the tolerance above, in both device rates.
+        val naive = 0.15f * Stabilizer.TAU_MAX_NANOS / 1e6f
+        assertEquals(6f, naive, 0.001f)
+        assertTrue(naive - steadyStateLagMs(0.15f, 321.75f) > 1.3f)
+        assertTrue(naive - steadyStateLagMs(0.15f, 246.85f) > 1.7f)
+    }
+
+    @Test
+    fun `the shipped default costs between four and five milliseconds of lag`() {
+        // Pinned as a number because it is a line item in Phase 1's latency
+        // budget and W16 subtracts it from the filmed figure. If a future
+        // tweak to DEFAULT_STRENGTH or TAU_MAX moves it, the budget is stale
+        // and this is where that is noticed.
+        assertEquals(4.58f, steadyStateLagMs(Stabilizer.DEFAULT_STRENGTH, 321.75f), 0.05f)
+        assertEquals(4.20f, steadyStateLagMs(Stabilizer.DEFAULT_STRENGTH, 246.85f), 0.05f)
+    }
+
+    @Test
+    fun `at strength zero the filter is not behind at all`() {
+        // The control, and the reason the film's baseline run can trust the
+        // slider: bit-exact identity means zero lag, so a measurement at 0
+        // carries no smoothing term to subtract out.
+        assertEquals(0f, steadyStateLagMs(0f, 321.75f), 0.0001f)
+    }
+
+    /** `dt * q / (1 - q)`, `q = exp(-dt / tau)`. Zero when the filter is identity. */
+    private fun discreteLagMs(strength: Float, rateHz: Float): Float {
+        val tauMs = strength * Stabilizer.TAU_MAX_NANOS / 1e6f
+        if (tauMs == 0f) return 0f
+        val dtMs = 1000f / rateHz
+        val q = kotlin.math.exp(-dtMs / tauMs)
+        return dtMs * q / (1f - q)
+    }
+
+    /**
+     * Drive [Stabilizer] with a point moving at a constant velocity until it
+     * settles, and report how far behind the input it ends up, as time.
+     */
+    private fun steadyStateLagMs(strength: Float, rateHz: Float): Float {
+        val stabilizer = Stabilizer(strength)
+        val dtNanos = (1e9f / rateHz).toLong()
+        val velocityPxPerMs = 2f
+        var t = 0L
+        var x = 0f
+        // Ten time constants past the longest, plus a floor, so the ramp is
+        // established for every strength including zero.
+        val steps = (10f * Stabilizer.TAU_MAX_NANOS / dtNanos).toInt() + 400
+        repeat(steps) {
+            stabilizer.push(x, 0f, 0.5f, t)
+            t += dtNanos
+            x += velocityPxPerMs * (dtNanos / 1e6f)
+        }
+        // `x` has already advanced past the last point pushed, so the input's
+        // position at the moment of that push is one step back.
+        val inputAtLastPush = x - velocityPxPerMs * (dtNanos / 1e6f)
+        return (inputAtLastPush - stabilizer.x) / velocityPxPerMs
+    }
 }

@@ -27,6 +27,7 @@ import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
+import be.thalos.artiest.input.eventAgeNanos
 import be.thalos.artiest.input.Predictor
 import kotlin.math.sqrt
 
@@ -734,6 +735,10 @@ class InkSurfaceView(
         val heapBefore = heapUsed()
         submitNanos = 0L
         val t0 = System.nanoTime()
+        // Read from the same `nanoTime` that starts the measured window, so the
+        // two halves of the app-visible latency meet exactly at this line with
+        // no gap and no overlap between them.
+        val ageNs = event.eventAgeNanos(t0)
         // Inside the measured window on purpose. Prediction is not free, and
         // when it is on the readout should say what it costs rather than
         // reporting the cost of the path without it.
@@ -744,6 +749,7 @@ class InkSurfaceView(
         stats.recordEvent(
             elapsed,
             submitNanos,
+            ageNs,
             (driver.totalSamples - samplesBefore).toInt(),
             (batches.issuedCount - batchesBefore).toInt(),
             (driver.totalDabs - dabsBefore).toInt(),

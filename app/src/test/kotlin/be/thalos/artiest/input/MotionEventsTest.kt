@@ -1,5 +1,6 @@
 package be.thalos.artiest.input
 
+import android.os.SystemClock
 import android.view.MotionEvent
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.ToolType
@@ -7,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.math.abs
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -168,5 +170,58 @@ class MotionEventsTest {
     private companion object {
         const val PEN_ID = 7
         const val PALM_ID = 3
+    }
+
+    @Test
+    fun `input age is measured against the newest sample`() {
+        // Robolectric fabricates eventTimeNanos as milliseconds x 1e6, which is
+        // exactly the fallback path this runs on below API 34 — so the number
+        // here is the arithmetic, not the platform's nanosecond clock. The
+        // nanosecond path is the device's, and the readout is where it is read.
+        val event = motionEvent(MotionEvent.ACTION_MOVE, listOf(TestPointer(0)), eventTimeMs = 2_000L)
+        try {
+            val now = 2_007L * 1_000_000L
+            assertEquals(7_000_000L, event.eventAgeNanos(now))
+        } finally {
+            event.recycle()
+        }
+    }
+
+    @Test
+    fun `an event from the future reads as zero, not as a negative age`() {
+        // Not defensive tidiness: a negative sample would drag a percentile
+        // below zero and make the latency figure read *better* than perfect,
+        // which is the one direction a latency number must never be wrong in.
+        val event = motionEvent(MotionEvent.ACTION_MOVE, listOf(TestPointer(0)), eventTimeMs = 2_000L)
+        try {
+            assertEquals(0L, event.eventAgeNanos(1_990L * 1_000_000L))
+        } finally {
+            event.recycle()
+        }
+    }
+
+    @Test
+    fun `the clock check subtracts the two clocks the age depends on`() {
+        // **This cannot assert the fact it exists for, and that is the finding.**
+        // The question is whether `MotionEvent.eventTimeNanos` (documented in
+        // the `SystemClock.uptimeMillis` base) and `System.nanoTime` read the
+        // same counter, because if they do not the input-age figure is a
+        // plausible number that is simply wrong. Under Robolectric they do not:
+        // `uptimeMillis` is a *simulated* clock that starts near zero while
+        // `nanoTime` is the host JVM's, and the first version of this test
+        // failed with a skew of 74,071 seconds — which says nothing whatsoever
+        // about the tablet.
+        //
+        // So the arithmetic is pinned here and the fact is checked at the point
+        // of use: `MainActivity`'s readout refuses to print an age at all when
+        // the skew is out of range, which is an assertion left running on the
+        // only machine that can answer it.
+        val expected = System.nanoTime() - SystemClock.uptimeMillis() * 1_000_000L
+        val actual = clockSkewNanos()
+
+        assertTrue(
+            abs(actual - expected) < 50_000_000L,
+            "clockSkewNanos is not nanoTime minus the uptime base: $actual vs $expected",
+        )
     }
 }

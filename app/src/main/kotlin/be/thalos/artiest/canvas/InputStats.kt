@@ -54,6 +54,16 @@ class InputStats(val capacity: Int = DEFAULT_CAPACITY) {
      * of app-side work produces.
      */
     private val submitNs = LongArray(capacity)
+    /**
+     * How old the newest sample already was when `onTouchEvent` received it.
+     *
+     * The other half of the latency the app can see. [eventNs] is what the app
+     * spends; this is what was spent before it was asked, and on this device it
+     * is the larger of the two by a wide margin. See
+     * `MotionEvent.eventAgeNanos`.
+     */
+    private val ageNs = LongArray(capacity)
+
     private val eventSamples = IntArray(capacity)
     private val eventDabs = IntArray(capacity)
 
@@ -125,12 +135,14 @@ class InputStats(val capacity: Int = DEFAULT_CAPACITY) {
     fun recordEvent(
         durationNs: Long,
         submitDurationNs: Long,
+        inputAgeNs: Long,
         sampleCount: Int,
         batchCount: Int,
         dabCount: Int,
     ) {
         eventNs[cursor] = durationNs
         submitNs[cursor] = submitDurationNs
+        ageNs[cursor] = inputAgeNs
         eventSamples[cursor] = sampleCount
         eventDabs[cursor] = dabCount
         cursor = (cursor + 1) % capacity
@@ -165,6 +177,12 @@ class InputStats(val capacity: Int = DEFAULT_CAPACITY) {
 
     /** Of that, the part spent inside `renderFrontBufferedLayer`. */
     fun submitMs(p: Float): Float = percentileMs(submitNs, p)
+
+    /**
+     * Age of the newest sample at `onTouchEvent`, at percentile [p], in
+     * milliseconds. See [ageNs].
+     */
+    fun inputAgeMs(p: Float): Float = percentileMs(ageNs, p)
 
     private fun percentileMs(src: LongArray, p: Float): Float {
         if (count == 0) return 0f

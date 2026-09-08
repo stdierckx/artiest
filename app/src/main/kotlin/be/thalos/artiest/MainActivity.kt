@@ -53,6 +53,7 @@ import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.input.CancelCause
+import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
 import be.thalos.artiest.io.PngExporter
 import kotlinx.coroutines.launch
@@ -619,6 +620,7 @@ private fun readout(
         "submit   p50 ${r(s.submitMs(0.5f), 3)}  " +
         "p95 ${r(s.submitMs(0.95f), 3)}  " +
         "p99 ${r(s.submitMs(0.99f), 3)} ms in renderFrontBufferedLayer\n" +
+        latencyLine(s) +
         "sample   p50 ${r(s.msPerSample(0.5f) * 1000f, 1)}  " +
         "p99 ${r(s.msPerSample(0.99f) * 1000f, 1)} us/sample   " +
         "of a 3108 us interval\n" +
@@ -640,6 +642,47 @@ private fun readout(
         rejectionLines(surface, reject) + "\n" +
         exportLine(export, exporting)
 }
+
+/**
+ * W16's line: the part of the latency chain the app can see.
+ *
+ * Two terms, and they are wildly different sizes. `age` is how stale the newest
+ * sample already was when `onTouchEvent` was handed it — the digitizer's own
+ * sampling plus the framework's dispatch, which no other number in this readout
+ * reaches. `app` is everything from there to `renderFrontBufferedLayer`
+ * returning, which is a fifth of a millisecond. What is still missing at the end
+ * of this line is the panel: SurfaceFlinger's composition and scanout, which
+ * nothing inside the process can observe, and which is what the 240 fps film
+ * measures. `age + app + film` is the whole chain.
+ *
+ * **The age is refused rather than approximated when the clocks disagree.**
+ * `getEventTimeNanos` is documented in the `SystemClock.uptimeMillis` base and
+ * `System.nanoTime` is `CLOCK_MONOTONIC`; on Android those are the same counter,
+ * but nothing enforces it and a mismatch would produce a perfectly plausible
+ * wrong number instead of a failure. So the skew is measured every time this
+ * line is built, and a skew outside one millisecond replaces the figure with
+ * the reason it is missing. `MotionEventsTest` explains why this check cannot
+ * live in a unit test: Robolectric's `uptimeMillis` is a simulated clock and
+ * answers a different question.
+ */
+private fun latencyLine(s: InputStats): String {
+    val skew = clockSkewNanos()
+    if (skew < 0L || skew >= MAX_CLOCK_SKEW_NANOS) {
+        return "latency  UNMEASURABLE: nanoTime and the uptime base differ by " +
+            "${r(skew / 1e6f, 1)} ms\n"
+    }
+    return "latency  age p50 ${r(s.inputAgeMs(0.5f), 2)}  " +
+        "p95 ${r(s.inputAgeMs(0.95f), 2)}  " +
+        "p99 ${r(s.inputAgeMs(0.99f), 2)} ms before onTouchEvent   " +
+        "app p50 ${r(s.eventMs(0.5f), 3)} ms   " +
+        "panel: film it\n"
+}
+
+/**
+ * One millisecond, because `uptimeMillis` truncates to milliseconds and a
+ * moment passes between the two reads. Anything larger is two clocks.
+ */
+private const val MAX_CLOCK_SKEW_NANOS = 1_000_000L
 
 /**
  * W15's two lines: what the device is, and whether the refresh request took.
