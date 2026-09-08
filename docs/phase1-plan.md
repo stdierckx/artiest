@@ -661,7 +661,7 @@ half a day** before any of it is built on.
 | 13 | ~~Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw)~~ **DONE — `7b6698f`. Eight contact sequences run on the tablet, 8/8. The rules were already right; a cancel released no batches, and the counters now say which of six ways a stroke died.** | `:app` | — | — | ✔ |
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
 | 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
-| 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** — **BASELINE DONE — `77676e7` + this commit. 45 ms pen to photons at 90 Hz, of which 9.3 ms is the app and 36 ms is the compositor and the panel. The feel pass — prediction, smoothing, 60 against 90 — is the remaining half and needs a hand, not a shell.** | device | Medium | 15 | 0.5 left |
+| 16 | ~~Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline**~~ **DONE — `77676e7`, `15fab21`. 45 ms pen to photons at 90 Hz: 9.3 ms app, 36 ms compositor and panel. Prediction judged under a real pen and stays off — the wet ink is visibly jagged until pen-up. Verdict on the feel: fast enough.** | device | — | — | ✔ |
 | 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
 
 **≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
@@ -938,8 +938,22 @@ wrong it is a spur, and it stays until pen-up.
 
 So the toggle exists, it works, and it defaults **off** — which the plan already
 called an acceptable outcome and which now has arithmetic behind it rather than
-one A/B by eye. W16 re-judges it under a real pen, on tip-lead and reversal
-spurs rather than on the spike's translucent grey.
+one A/B by eye. **W16 judged it under a real pen and the verdict is the harsher
+one: with prediction on, the wet ink carries visibly jagged sections that stay
+until the pen lifts.** That is this arm's predicted failure mode observed rather
+than reasoned about — the spurs are speculation the pen never reached, they
+cannot be taken back because front-buffer ink is unretractable, and they vanish
+at pen-up because the committed stroke is built from real samples alone. The
+layer was always clean; it is the screen that was not, and a user drawing does
+not care which.
+
+**The blocker is unretractable wet ink, not prediction.** Nothing measured about
+`MotionPredictor` was wrong — the lead is real and large. What makes it unusable
+here is that this render path can only add pixels. A Phase 2 engine that
+re-renders the wet stroke each frame turns every spur into something erasable,
+and at that point prediction is worth re-testing against the 5.75 ms of
+digitizer-and-dispatch lag it exists to hide. Until then it stays off, and the
+reason is recorded here so nobody re-derives it from the lead figures alone.
 
 Three things worth keeping from building it:
 
@@ -1327,11 +1341,23 @@ and defaults off, because a feel pass cannot be run against eleven lines of
 monospace over the paper. Every number is still live, one tap away, with the
 stress harnesses beside it.
 
-**W16 — BASELINE DONE. Pen to photons is 45 ms, and four fifths of it is
-downstream of the app.**
+**W16 — DONE. Pen to photons is 45 ms, four fifths of it is downstream of the
+app, and the pen holder's verdict on it is "fast enough for now".**
 
-The film was shot. The feel pass — prediction, smoothing, 60 against 90 — still
-needs a hand and is the remaining half of this item.
+Both halves ran: the film, and the feel pass under a real hand. The feel pass
+returned two judgements and they are recorded as judgements rather than
+measurements, because that is what they are.
+
+- **Prediction is off, and now for an observed reason.** With it on, the wet ink
+  carries visibly jagged sections that persist until the pen lifts. See the W11
+  note: the spurs are unretractable front-buffer ink, they clear at pen-up
+  because the committed stroke is built from real samples only, and the blocker
+  is the render path rather than the predictor.
+- **45 ms is acceptable for Phase 1.** Judged on the tablet, with the pen, by the
+  person who will use it. That is the phase's stated bar — felt quality — and it
+  is met. It is *not* a claim that 45 ms is good: three quarters of it is the
+  compositor, Phase 2 is where that becomes addressable, and the number is
+  recorded here precisely so the improvement can be shown rather than asserted.
 
 **The number, and the whole chain it decomposes into.** At 90 Hz, smoothing off,
 prediction off, size 24:
@@ -1493,10 +1519,11 @@ is the whole of how a Phase 1 number is taken.
 
 ### The filmed run — the procedure, and W16's outstanding half
 
-The 90 Hz baseline above was taken this way. What is still outstanding is the
-**feel pass** at the end of this section, and runs B, C and D — what the shipped
-smoothing costs, what 60 Hz costs, and whether prediction's lead cancels the lag
-or overshoots it.
+The 90 Hz baseline above was taken this way, and run D — prediction — was
+judged by eye rather than filmed, because it did not survive the first stroke.
+Runs B and C are **not** done: what the shipped smoothing costs and what 60 Hz
+costs are still arithmetic rather than measurement. They are cheap now that the
+procedure exists, and Phase 2 will want them as a before-picture.
 
 **Equipment.** A phone that films at 240 fps, something to hold it still, bright
 flicker-free light. Avoid mains-frequency lighting: a 50 Hz flicker beating
@@ -1523,7 +1550,7 @@ a constant speed as a hand manages. Four of them:
 | A | 0 | off | 90 Hz | the baseline — **done: 45.2 ms** |
 | B | 0.15 | off | 90 Hz | what the shipped default costs, felt |
 | C | 0 | off | 60 Hz | the panel's share |
-| D | 0 | on | 90 Hz | whether the lead cancels the lag or overshoots |
+| D | 0 | on | 90 Hz | **judged, not filmed: visibly jagged wet ink, rejected** |
 
 **Draw a zigzag, not a straight line, and run
 `tools/latency-from-video.py`.** The reversal method above needs no ruler, no
