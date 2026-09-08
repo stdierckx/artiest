@@ -141,13 +141,11 @@ nothing and it has already paid for itself once.
   presentation deadline, or buffer-queue depth. **Not a Phase 1 blocker** — we
   ship the winner. It becomes load-bearing in Phase 2, when a GL engine has to
   reproduce the win without the library.
-- ~~**No absolute latency number exists.**~~ **Half-answered at W16.** Every
-  software term is now measured or tested — the digitizer-plus-dispatch age has
-  an instrument on the readout, the engine's own tip lag is 3.21 ms at 321.75 Hz
-  (7.71 with the shipped smoothing), and the app's work is 0.175 ms. What is
-  still missing is SurfaceFlinger and the panel, which nothing inside the
-  process can observe. **That term needs the 240 fps film**, and the film is the
-  part of W16 that has not been run. See the W16 note and the filming protocol.
+- ~~**No absolute latency number exists.**~~ **Answered at W16: 45 ms**, pen to
+  photons, at 90 Hz with smoothing off and prediction off, measured from a
+  240 fps film of a zigzag. Of that, **9.3 ms is the app and 36 ms is
+  SurfaceFlinger and the panel** — 3.2 refreshes, which is what "no front
+  buffer" costs. See the W16 note.
 - ~~Whether `MotionPredictor.isPredictionAvailable` returns true for this pen, or
   `SystemMotionEventPredictor` silently falls back to the bundled Kalman
   predictor.~~ **Answered at W11, and the answer is odd.**
@@ -663,7 +661,7 @@ half a day** before any of it is built on.
 | 13 | ~~Cancellation and palm rejection (`ACTION_CANCEL`, `FLAG_CANCELED`, fingers and pen-back never draw)~~ **DONE — `7b6698f`. Eight contact sequences run on the tablet, 8/8. The rules were already right; a cancel released no batches, and the counters now say which of six ways a stroke died.** | `:app` | — | — | ✔ |
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
 | 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
-| 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** — **PART DONE (`PENDING`). Every software term measured: engine tip lag 3.21 ms (7.71 with the shipped smoothing), app work 0.175 ms, an `age` instrument for the dispatch term, and the 60/90 A/B. The film and the feel pass need a pen and a camera and have not been run.** | device | Medium | 15 | 0.75 left |
+| 16 | Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline** — **BASELINE DONE — `77676e7` + this commit. 45 ms pen to photons at 90 Hz, of which 9.3 ms is the app and 36 ms is the compositor and the panel. The feel pass — prediction, smoothing, 60 against 90 — is the remaining half and needs a hand, not a shell.** | device | Medium | 15 | 0.5 left |
 | 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
 
 **≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
@@ -1329,27 +1327,93 @@ and defaults off, because a feel pass cannot be run against eleven lines of
 monospace over the paper. Every number is still live, one tap away, with the
 stress harnesses beside it.
 
-**W16 — PART DONE. Every software term of the latency is measured; the panel's
-term needs the camera, and that run has not happened.**
+**W16 — BASELINE DONE. Pen to photons is 45 ms, and four fifths of it is
+downstream of the app.**
 
-W16 is the one item that cannot be finished from a shell. The film needs a
-phone at 240 fps, a tripod and a hand holding the pen, and the feel pass needs
-someone to feel it. What could be done without either was: build the instrument
-the film is missing, measure everything on this side of the panel, and pin the
-procedure so the filmed run is one pass rather than three. **The item stays open
-until the film is shot** — see *The filmed run* below, which is the whole of
-what is left.
+The film was shot. The feel pass — prediction, smoothing, 60 against 90 — still
+needs a hand and is the remaining half of this item.
 
-**The chain, and who measures each term.** Pen to photons has five links. Three
-are now numbers:
+**The number, and the whole chain it decomposes into.** At 90 Hz, smoothing off,
+prediction off, size 24:
+
+```
+digitizer sampling + dispatch     5.75 ms   the app's own `latency` line, real pen
+engine pipeline (spline)          3.21 ms   StrokeBuilderTest
+app work, onTouchEvent -> submit  0.31 ms   the app's own readout
+                                 --------
+software subtotal                 9.3 ms
+measured, pen to photons         45.2 ms   240 fps film, four zigzag reversals
+                                 --------
+SurfaceFlinger + panel           35.9 ms   = 3.2 refreshes at 90 Hz
+```
+
+**Four fifths of Phase 1's latency is in a part of the pipeline Phase 1 does not
+own**, and that is W0's finding arriving with a price on it. No front buffer
+means graphics-core runs its fallback path, so wet ink goes through the ordinary
+buffer queue, SurfaceFlinger composition and scanout: two frames of pipeline
+plus a frame of scanout plus the panel's response is 3.2 refreshes almost
+exactly. W1's verdict was always a *relative* one, and this is why it had to be
+— every arm was paying the same 36 ms, and the differences that were visible to
+the eye lived in the remaining 9.
+
+It also prices Phase 2's options honestly. Tightening the engine buys at most
+3.2 ms. Turning the shipped smoothing off buys 4.5. **The compositor is where
+the other 36 lives, and only a real front-buffered GL path can touch it** — on a
+device whose gralloc refuses `USAGE_FRONT_BUFFER`, that is a question about the
+hardware, not about the code.
+
+**How it was measured, because the method is most of the result.** The first
+take was a fast straight stroke and `gap / speed`, which the protocol below
+still describes. It gave 40-48 ms and it was hard work: separating the ink's
+leading edge from the nib is separating two adjacent dark objects, and mask
+subtraction cannot do it — every automatic attempt latched onto the pen.
+
+The second take was a zigzag, and it is a better instrument by construction.
+**At a reversal the pen is momentarily stationary, so the ink's apex is reached
+exactly one latency later.** There is no gap to estimate and no speed term; it
+is two frame numbers. And because *any* rigid feature of the pen reverses at the
+same instant the nib does, the unknown offset between the tracked feature and
+the contact point cancels — so the pen is tracked by the leftmost sliver of its
+dark blob, which is easy and robust, rather than by a nib nobody can find.
+
+```
+apex   pen frame   ink frame   d frames   latency
+  1      144.0        155        10.98     45.4 ms
+  2      179.5        191        11.53     47.6 ms
+  3      216.1        227        10.90     45.0 ms
+  4      249.4        260        10.56     43.6 ms
+                              median      45.2 ms
+```
+
+**The frame rate is calibrated from inside the clip rather than taken on trust.**
+The ink advances in discrete steps, one per panel refresh, so the ink-growth
+series carries the panel's 90 Hz as a clock: the dominant period is **2.690
+frames**, so the capture rate is 242.1 fps against a claimed 240. That is worth
+doing — a phone that quietly recorded at 120 would put the answer out by a
+factor of two with nothing else looking wrong — and it independently confirms
+the wet path really is presenting at the panel rate.
+
+`tools/latency-from-video.py` is the whole analysis, with its ROI and thresholds
+noted as tuned to one take. Phase 2 should re-run it against the same zigzag to
+prove any improvement is real.
+
+**One honest observation from the same run.** The stroke was 339 samples and
+19,826 dabs — **230 dabs an event**, against the 19.5 W9 measured and the 0.31 ms
+per-event ceiling that was sized against it. The app exceeded that ceiling on
+52% of events, at `event p50 0.311, p99 1.223 ms`. The ceiling as written is not
+met by a size-24 pen moving quickly. It also matters far less than the plan
+assumed: half a millisecond of app time against 36 ms of compositor is not where
+this device's latency is, and W9's budget was set before anyone knew that.
+
+**The chain at the other rate, for the feel pass to compare against:**
 
 ```
                                     90 Hz / 321.75 Hz pen   60 Hz / 246.85 Hz pen
-digitizer sampling + dispatch          the `latency` line      the `latency` line
-engine pipeline, smoothing 0                      3.21 ms                 4.07 ms
-  + the shipped smoothing 0.15                   +4.50 ms                +4.50 ms
-app work, onTouchEvent -> submit                  0.175 ms                0.178 ms
-SurfaceFlinger + panel                            the film                the film
+digitizer sampling + dispatch                    5.75 ms       not yet measured
+engine pipeline, smoothing 0                     3.21 ms                4.07 ms
+  + the shipped smoothing 0.15                  +4.50 ms               +4.50 ms
+app work, onTouchEvent -> submit                 0.31 ms                0.178 ms
+SurfaceFlinger + panel                          35.9 ms          film it at 60
 ```
 
 **The engine's own tip lag was not known and is larger than the app's work by a
@@ -1427,10 +1491,12 @@ run, **verify again**. Together with W15's finding — take every number as the
 first action in a fresh process, and record the CPU temperature beside it — that
 is the whole of how a Phase 1 number is taken.
 
-### The filmed run — W16's outstanding half
+### The filmed run — the procedure, and W16's outstanding half
 
-Everything below needs a person, a pen and a camera. It is written out so it is
-one session rather than three.
+The 90 Hz baseline above was taken this way. What is still outstanding is the
+**feel pass** at the end of this section, and runs B, C and D — what the shipped
+smoothing costs, what 60 Hz costs, and whether prediction's lead cancels the lag
+or overshoots it.
 
 **Equipment.** A phone that films at 240 fps, something to hold it still, bright
 flicker-free light. Avoid mains-frequency lighting: a 50 Hz flicker beating
@@ -1454,19 +1520,24 @@ a constant speed as a hand manages. Four of them:
 
 | run | smoothing | prediction | panel | what it isolates |
 |---|---|---|---|---|
-| A | 0 | off | 90 Hz | the baseline: everything but the engine's 3.21 ms |
+| A | 0 | off | 90 Hz | the baseline — **done: 45.2 ms** |
 | B | 0.15 | off | 90 Hz | what the shipped default costs, felt |
 | C | 0 | off | 60 Hz | the panel's share |
 | D | 0 | on | 90 Hz | whether the lead cancels the lag or overshoots |
 
-**The analysis needs no ruler and no calibration, and that is worth knowing
-before setting up.** In one frame from the middle of the stroke, measure in
-image pixels: `gap`, from the pen tip to the leading edge of the ink; and
-`speed`, how far the tip moved between that frame and the next, times 240. The
-latency is `gap / speed`, and the pixel units cancel — the screen's size, the
-camera's distance and the lens are all irrelevant. Do it on five frames and take
-the median; where the eye puts "the leading edge" is the dominant error, not the
-arithmetic.
+**Draw a zigzag, not a straight line, and run
+`tools/latency-from-video.py`.** The reversal method above needs no ruler, no
+calibration and no speed: at each apex the pen is stationary, so the answer is
+two frame numbers. Six or seven peaks in one stroke gives four or five
+independent readings.
+
+The straight-line alternative is `gap / speed` — in one frame, the distance from
+the nib to the ink's leading edge, over the distance the nib moved to the next
+frame times the capture rate; the pixel units cancel, so the screen size, camera
+distance and lens are all irrelevant. It works and it agreed (40-48 ms), but it
+is markedly harder to read: the ink's leading edge sits right under the nib, and
+telling two adjacent dark objects apart is the part no amount of thresholding
+fixes.
 
 **Record beside each run**, from the app with Stats on: the `latency` line
 (`age` p50/p95/p99 — this is the run that finally produces it, because only a
