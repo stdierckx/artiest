@@ -200,7 +200,7 @@ artiest/
 ├── engine/                    kotlin("jvm") — ZERO Android imports, enforced by the plugin
 │   └── be.thalos.artiest.engine
 │       ├── input/  PenSample, ToolType, Stabilizer, PredictionGate
-│       ├── ink/    RoundPen, CatmullRomResampler, StrokeBuilder, Dab, DabList, Stroke, Bounds
+│       ├── ink/    RoundPen, CatmullRomResampler, StrokeBuilder, Stroke, Bounds
 │       ├── xform/  CanvasTransform
 │       └── trace/  TraceRecorder, TracePlayer
 ├── engine/src/test/           JUnit, runs natively — no Robolectric, no mockable android.jar
@@ -328,15 +328,39 @@ a toolbar slider.
 `RoundPen` carries the doc's Phase 2 struct field *names* (`spacing`, `sizeMin`,
 `sizeMax`, `hardness`, `opacity`, pressure→size curve, `stabilization`,
 `antiAlias`) on a plain class, so Phase 2's serializable brush model is a lift
-rather than a redesign. `sizeFor(pressure)` is a cubic, plus an **onset ramp over
-the first few samples** — `ACTION_DOWN` arrives near zero pressure (0.00208
-measured), and a cubic maps that to an invisible tip, which will otherwise be
-misdiagnosed as latency.
+rather than a redesign. `sizeFor(pressure, elapsedMillis)` is a cubic plus an
+**onset ramp measured in milliseconds** — 12 ms at full lift, released linearly
+over 12 more.
 
-`StrokeBuilder` fits Catmull-Rom through the stabilized document-space points
-and resamples at `spacing` (1/8 diameter), emitting `Dab(x, y, radius)` into a
-reusable list while accumulating `Bounds`. A fast stroke leaves tens of pixels
-between samples, so this stage is not optional even at 320 Hz. Budget: **under
+Two corrections to the earlier wording, both made in W7 and both recorded in
+`RoundPen`'s own comments. **The ramp is wall-clock, not "the first few
+samples"**: four samples is 12.4 ms at 321.75 Hz and 16.2 ms at 246.85 Hz, so a
+sample-counted ramp changes length by a third with the refresh rate — the same
+defect this document correctly rejects one paragraph earlier for the stabilizer.
+And **the tip is not invisible**: with `sizeMin` at 1.5 doc px the measured
+0.00208 pressure still paints a 1.5 px mark. The real complaint is that for the
+opening stretch of every stroke the nib sits at that floor however hard the user
+pressed, then swells — which reads as the ink starting a beat behind the pen and
+gets misdiagnosed as latency. The lift is also applied *after* the curve rather
+than to the pressure: releasing a pressure floor linearly and then cubing it
+sheds 55% of the width change in the first 3 ms, measured, which is a notch.
+
+`StrokeBuilder` fits **centripetal** Catmull-Rom through the stabilized
+document-space points and resamples at `spacing` (1/8 diameter), emitting
+`x, y, radius` triples into a reusable `FloatArray` while accumulating `Bounds`.
+A fast stroke leaves tens of pixels between samples, so this stage is not
+optional even at 320 Hz.
+
+No `Dab` and no `DabList`, against the module tree above: W6 already gave
+`Stroke` a flat `FloatArray` for this, and a `Dab` object per dab is an
+allocation per dab on the one path with a per-sample budget. Centripetal rather
+than uniform is measured, not preferred — on a long approach into a short
+segment before a hard turn, uniform wanders 7.4 doc px off a straight run and
+centripetal wanders 0.6, and `CatmullRomResamplerTest` carries the uniform
+control so the comparison is against arithmetic rather than against a claim.
+The fit costs **one sample of latency** — 3.1 ms at 321.75 Hz — because a
+segment needs the point after its endpoint, and a speculative tail is not
+available here: front-buffer ink is unretractable. Budget: **under
 0.31 ms per event, and one immutable `PenSample` per digitizer sample and
 nothing else** from `onTouchEvent` to `renderFrontBufferedLayer`; the verdict on
 that one allocation is deferred to W9's allocation trace (~56 B a sample, so
@@ -525,7 +549,7 @@ half a day** before any of it is built on.
 | 4 | ~~`PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer`~~ **DONE — `f7ffa18`. A palm landing before the pen locked it out; a gesture now takes two fingers.** | both | Low | — | ✔ |
 | 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
 | 6 | `Document`, `Layer`, `Stroke`, `Bounds` | both | Low | — | 0.5 |
-| 7 | `Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens | `:engine` | Medium | 4, 5, 6 | 1.5 |
+| 7 | ~~`Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens~~ **DONE — `PENDING`. Stabilizer integrates over dt; onset ramp moved to wall-clock; centripetal measured against a uniform control.** | `:engine` | — | — | ✔ |
 | 8 | `InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool` | `:app` | **High** | 6, 7 | 1.0 |
 | 9 | Wet ink end to end, allocation trace, batch-pool slot validation | `:app` | Medium | 8 | 0.75 |
 | 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
@@ -705,8 +729,11 @@ questions, and deleting it is defensible only after W17 records a baseline.
   different memory model, undo model and export path. Re-decide in Phase 2 with
   W1's number in hand.
 - **Pixel golden images.** W7 ships **dab-list goldens** instead — serialized
-  `(x, y, radius)` output for a fixed trace corpus, diffed on the JVM. Runs
-  without a device and does not invalidate on every AA tweak.
+  `(x, y, radius)` output for a fixed corpus, diffed on the JVM. Runs without a
+  device and does not invalidate on every AA tweak. Eight strokes (straight,
+  arc, onset, flick, taper, dwell, corner, tap), regenerated with
+  `-Dartiest.golden.write=true`, and `DabGoldenTest` carries a mutation check
+  that every stage the goldens claim to cover actually moves at least one file.
 - **Undo, the layer stack, cached compositing, tiling, mipmaps.** Phase 3+.
   Phase 1's only obligations are keeping the layer alpha-carrying and storing
   per-stroke bounds, which is what Phase 3's undo snapshots.

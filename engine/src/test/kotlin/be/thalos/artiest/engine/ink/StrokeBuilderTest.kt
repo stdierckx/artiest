@@ -1,0 +1,262 @@
+package be.thalos.artiest.engine.ink
+
+import be.thalos.artiest.engine.input.PenSample
+import be.thalos.artiest.engine.input.ToolType
+import kotlin.math.sqrt
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * `StrokeBuilder` is where the four W7 pieces meet, so most of what is worth
+ * testing here is the seams: that the bounds it accumulates actually contains
+ * the dabs it emitted, that a `Stroke` handed to the render thread cannot be
+ * rewritten by the next stroke, and that the buffer growth is invisible.
+ *
+ * The bounds property is the one to read first. Its failure is a stale rim of
+ * ink along a redrawn edge, or — after Phase 3 — an undo that restores a
+ * neighbour's pixels, and neither reproduces reliably with a hand on glass.
+ */
+class StrokeBuilderTest {
+
+    private val dtNanos = 3_107_855L // 321.75 Hz, the measured rate at 90 Hz
+
+    private fun sample(x: Float, y: Float, p: Float, i: Int) = PenSample(
+        x = x,
+        y = y,
+        pressure = p,
+        tilt = 0f,
+        orientation = 0f,
+        distance = 0f,
+        toolType = ToolType.STYLUS,
+        buttonState = 0,
+        eventTimeNanos = i * dtNanos,
+        source = PenSample.Source.CURRENT,
+    )
+
+    private fun drag(b: StrokeBuilder, n: Int, step: Float = 8f, pressure: Float = 0.6f) {
+        for (i in 0 until n) b.add(sample(100f + i * step, 200f, pressure, i))
+    }
+
+    @Test
+    fun `a stroke's bounds contains every dab it emitted, and no more`() {
+        val b = StrokeBuilder()
+        b.begin(0xFF000000.toInt())
+        // A curve, so the bounds is not trivially the sample bounding box.
+        for (i in 0 until 60) {
+            val t = i / 59f
+            b.add(sample(200f + 400f * t, 500f + 300f * sqrt(t), 0.2f + 0.6f * t, i))
+        }
+        // Read the dabs off the finished Stroke, not off the builder before
+        // end(): end() flushes the segment the resampler's one-sample lag was
+        // holding, so a snapshot taken first is short by the tail of the
+        // stroke — which is exactly the bug end() exists to prevent.
+        val s = b.end()
+        val dabs = (0 until s.dabCount).map { Triple(s.x(it), s.y(it), s.radius(it)) }
+        assertTrue(dabs.size > 100, "only ${dabs.size} dabs")
+
+        var l = Float.POSITIVE_INFINITY
+        var t = Float.POSITIVE_INFINITY
+        var r = Float.NEGATIVE_INFINITY
+        var bo = Float.NEGATIVE_INFINITY
+        for ((x, y, rad) in dabs) {
+            l = minOf(l, x - rad); t = minOf(t, y - rad)
+            r = maxOf(r, x + rad); bo = maxOf(bo, y + rad)
+        }
+        assertEquals(l, s.bounds.left, 0f, "left")
+        assertEquals(t, s.bounds.top, 0f, "top")
+        assertEquals(r, s.bounds.right, 0f, "right")
+        assertEquals(bo, s.bounds.bottom, 0f, "bottom")
+    }
+
+    @Test
+    fun `radii are the pen's curve applied to the interpolated pressure`() {
+        val pen = RoundPen()
+        val b = StrokeBuilder(pen)
+        b.begin(0xFF112233.toInt())
+        drag(b, 40, pressure = 0.6f)
+        val s = b.end()
+        // Constant pressure through a filter whose output is a convex
+        // combination of its inputs is that pressure, so every settled dab is
+        // the same size — and that size is the pen's, not something the
+        // resampler invented.
+        val expected = pen.sizeFor(0.6f, 100f) * 0.5f
+        val settled = (s.dabCount / 2 until s.dabCount).map { s.radius(it) }
+        for (r in settled) assertEquals(expected, r, 1e-4f)
+    }
+
+    @Test
+    fun `the emitted stroke does not alias the builder's buffer`() {
+        val b = StrokeBuilder()
+        b.begin(0xFFFF0000.toInt())
+        drag(b, 30)
+        val first = b.end()
+        val x0 = first.x(0)
+        val y0 = first.y(0)
+        val n0 = first.dabCount
+
+        // Draw a completely different stroke through the same builder. If the
+        // Stroke aliased the buffer, the render thread would be stamping this
+        // one while it thought it had the last one.
+        b.begin(0xFF00FF00.toInt())
+        for (i in 0 until 200) b.add(sample(1500f - i * 4f, 2000f + i * 3f, 0.9f, i))
+        b.end()
+
+        assertEquals(n0, first.dabCount)
+        assertEquals(x0, first.x(0))
+        assertEquals(y0, first.y(0))
+        assertEquals(0xFFFF0000.toInt(), first.colorArgb)
+    }
+
+    @Test
+    fun `growing past the initial buffer keeps every dab already written`() {
+        val b = StrokeBuilder()
+        b.begin(0)
+        // 3 px spacing at full pressure; INITIAL_DABS is 256, so ~800 px of
+        // path crosses the first growth and 4000 px crosses several.
+        drag(b, 500, step = 8f, pressure = 1f)
+        val snapshot = (0 until b.dabCount).map { Triple(b.x(it), b.y(it), b.radius(it)) }
+        val s = b.end()
+        assertTrue(s.dabCount > StrokeBuilder.INITIAL_DABS, "only ${s.dabCount} dabs; no growth happened")
+        for (i in snapshot.indices) {
+            assertEquals(snapshot[i].first, s.x(i), "x at $i")
+            assertEquals(snapshot[i].second, s.y(i), "y at $i")
+            assertEquals(snapshot[i].third, s.radius(i), "radius at $i")
+        }
+    }
+
+    @Test
+    fun `dabs stay evenly spaced across the whole stroke`() {
+        val pen = RoundPen()
+        val b = StrokeBuilder(pen)
+        b.begin(0)
+        drag(b, 300, step = 12f, pressure = 1f)
+        val s = b.end()
+        val want = pen.spacingFor(pen.sizeFor(1f, 100f) * 0.5f)
+        for (i in 2 until s.dabCount) {
+            val d = sqrt(
+                (s.x(i) - s.x(i - 1)) * (s.x(i) - s.x(i - 1)) +
+                    (s.y(i) - s.y(i - 1)) * (s.y(i) - s.y(i - 1)),
+            )
+            assertEquals(want, d, 0.05f, "gap $i")
+        }
+    }
+
+    @Test
+    fun `a tap is one dab with a real bounds`() {
+        val b = StrokeBuilder()
+        b.begin(0)
+        b.add(sample(300f, 400f, 0.5f, 0))
+        val s = b.end()
+        assertEquals(1, s.dabCount)
+        assertFalse(s.bounds.isEmpty)
+        assertEquals(s.x(0) - s.radius(0), s.bounds.left, 0f)
+    }
+
+    @Test
+    fun `a stroke with no samples is empty in both senses`() {
+        val b = StrokeBuilder()
+        b.begin(0)
+        val s = b.end()
+        assertEquals(0, s.dabCount)
+        assertTrue(s.bounds.isEmpty, "an empty stroke must not carry a rectangle")
+    }
+
+    @Test
+    fun `cancel produces nothing and leaves the builder reusable`() {
+        val b = StrokeBuilder()
+        b.begin(0)
+        drag(b, 50)
+        assertTrue(b.dabCount > 0)
+        b.cancel()
+        assertFalse(b.isOpen)
+        assertEquals(0, b.dabCount)
+        assertTrue(b.boundsSoFar().isEmpty, "a cancelled stroke left its rectangle behind")
+        b.begin(0)
+        drag(b, 10)
+        assertTrue(b.end().dabCount > 0, "the builder did not come back")
+    }
+
+    @Test
+    fun `add before begin and end before begin are refused`() {
+        val b = StrokeBuilder()
+        assertFailsWith<IllegalStateException> { b.add(sample(0f, 0f, 0.5f, 0)) }
+        assertFailsWith<IllegalStateException> { b.end() }
+    }
+
+    @Test
+    fun `a non finite sample is refused at the sample that carried it`() {
+        val b = StrokeBuilder()
+        b.begin(0)
+        b.add(sample(10f, 10f, 0.5f, 0))
+        assertFailsWith<IllegalArgumentException> { b.add(sample(Float.NaN, 10f, 0.5f, 1)) }
+        assertFailsWith<IllegalArgumentException> { b.add(sample(10f, Float.POSITIVE_INFINITY, 0.5f, 2)) }
+        assertFailsWith<IllegalArgumentException> { b.add(sample(10f, 10f, Float.NaN, 3)) }
+    }
+
+    @Test
+    fun `moving the stabilization slider takes effect on the next stroke`() {
+        val pen = RoundPen().apply { stabilization = 0f }
+        val b = StrokeBuilder(pen)
+        b.begin(0)
+        // With no smoothing, a hard corner stays a hard corner.
+        b.add(sample(0f, 0f, 0.5f, 0))
+        b.add(sample(100f, 0f, 0.5f, 1))
+        b.add(sample(100f, 100f, 0.5f, 2))
+        val sharp = b.end()
+
+        pen.stabilization = 0.8f
+        b.begin(0)
+        b.add(sample(0f, 0f, 0.5f, 0))
+        b.add(sample(100f, 0f, 0.5f, 1))
+        b.add(sample(100f, 100f, 0.5f, 2))
+        val smoothed = b.end()
+
+        assertTrue(
+            smoothed.bounds.width < sharp.bounds.width - 1f,
+            "smoothing did not take: ${smoothed.bounds} vs ${sharp.bounds}",
+        )
+    }
+
+    @Test
+    fun `the dab cap fails loudly rather than doubling a buffer forever`() {
+        // A degenerate brush pinned at the minimum spacing, dragged far enough
+        // to pass the cap. 524,288 dabs at half a document pixel is 262,144 px
+        // of path: not a drawing, which is the whole argument for crashing.
+        // stabilization = 0 matters here and is not incidental. The builder
+        // feeds the resampler *stabilized* points, so with smoothing on, a
+        // 150,000 px jump between two samples arrives at the spline as a
+        // 60,000 px one and the path is shorter than the samples suggest. Any
+        // test that reasons about raw sample positions has to turn it off.
+        val pen = RoundPen().apply {
+            sizeMin = 0f
+            sizeMax = 0f
+            onsetMillis = 0f
+            stabilization = 0f
+        }
+        val b = StrokeBuilder(pen)
+        b.begin(0)
+        b.add(sample(0f, 0f, 0f, 0))
+        b.add(sample(150_000f, 0f, 0f, 1))
+        val e = assertFailsWith<IllegalStateException> {
+            b.add(sample(300_000f, 0f, 0f, 2))
+            b.add(sample(450_000f, 0f, 0f, 3))
+        }
+        assertTrue(e.message!!.contains("dabs"), "unhelpful message: ${e.message}")
+    }
+
+    @Test
+    fun `antiAlias and colour are frozen at pen down`() {
+        val pen = RoundPen()
+        val b = StrokeBuilder(pen)
+        b.begin(0xFF203040.toInt())
+        drag(b, 20)
+        val s = b.end()
+        assertEquals(0xFF203040.toInt(), s.colorArgb)
+        assertTrue(s.antiAlias)
+        pen.antiAlias = false
+        assertTrue(s.antiAlias, "the finished stroke followed the pen")
+    }
+}

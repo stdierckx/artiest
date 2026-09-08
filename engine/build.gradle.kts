@@ -60,4 +60,12 @@ dependencies {
 // resolution, for a reason with nothing to do with the code being changed.
 tasks.test {
     useJUnitPlatform()
+
+    // Gradle's `-D` sets a property on the *Gradle* JVM, not on the forked test
+    // JVM, so DabGoldenTest's regeneration switch is invisible without this
+    // line — and invisible in the way that looks like the switch not working
+    // rather than like a missing forward. See DabGoldenTest for what it does.
+    System.getProperty("artiest.golden.write")?.let {
+        systemProperty("artiest.golden.write", it)
+    }
 }
