@@ -113,7 +113,7 @@ nothing and it has already paid for itself once.
 - **A full redraw holds 90 Hz with 2.8x headroom.** W2: draw p99 4.00 ms against
   an 11.1 ms budget, gap pinned to vsync, 0% dropped over 600 frames, with the
   layer rotating through a live matrix. The per-frame blit is ~2.6 Mpx because
-  the surface is view-sized (1181x2200), not the full 7.1 Mpx document.
+  the surface is view-sized (2200x1181), not the full 7.1 Mpx document.
 - **The 90 Hz override lapses on its own, and `settings get` does not show it.**
   It keeps reporting 90.0 while `dumpsys display` shows the render range capped
   at 60. Only a fresh 60 -> 90 bounce revives it; rewriting 90.0 over 90.0 is a
@@ -513,8 +513,8 @@ half a day** before any of it is built on.
 | 1 | ~~`DirectSurface` arm, A/B'd by eye~~ **DONE — `24701ab`. Graphics-core still closest to the tip; both vsync-locked arms smoother but behind.** | `:spike` | — | — | ✔ |
 | 2 | ~~Full-redraw throughput probe~~ **DONE. draw p99 4.0 ms against an 11.1 ms budget, 0% dropped over 600 frames. Full redraw is viable.** | `:spike` | — | — | ✔ |
 | 3 | Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day. Freeze `:spike` after this | `:spike` | Low | 1 | 1.0 |
-| 4 | `PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer` | both | Low | 3 | 1.5 |
-| 5 | `CanvasTransform` + native JVM tests | `:engine` | Low | 3 | 0.75 |
+| 4 | ~~`PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer`~~ **DONE — `f7ffa18`. A palm landing before the pen locked it out; a gesture now takes two fingers.** | both | Low | — | ✔ |
+| 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
 | 6 | `Document`, `Layer`, `Stroke` | `:app` | Low | 3 | 0.5 |
 | 7 | `Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens | `:engine` | Medium | 4, 5 | 1.5 |
 | 8 | `InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool` | `:app` | **High** | 6, 7 | 1.0 |
