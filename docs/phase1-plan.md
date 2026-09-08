@@ -662,7 +662,7 @@ half a day** before any of it is built on.
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
 | 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
 | 16 | ~~Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline**~~ **DONE — `77676e7`, `15fab21`. 45 ms pen to photons at 90 Hz: 9.3 ms app, 36 ms compositor and panel. Prediction judged under a real pen and stays off — the wet ink is visibly jagged until pen-up. Verdict on the feel: fast enough.** | device | — | — | ✔ |
-| 17 | Reconcile `docs/analysis.html` with what was measured | docs | Low | 16 | 0.5 |
+| 17 | ~~Reconcile `docs/analysis.html` with what was measured~~ **DONE — this commit. Three load-bearing claims refuted (no front buffer, no eraser end, `AXIS_DISTANCE` dead), one API that cannot do what it says (`preferredDisplayModeId`), prediction rejected, and the thesis' number finally filled in at 45 ms. Corrections annotated in place beside the predictions rather than replacing them.** | docs | — | — | ✔ |
 
 **≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
 handshake is back in W12 with the graphics-core decision. Still at the top of a
@@ -1578,6 +1578,51 @@ straight line is where prediction is always right. Smoothing at 0, 0.15 and 0.4
 on a slow deliberate curve, which is where tremor shows and where the 4.5 ms is
 being spent. 60 against 90 back to back on the same stroke shape, by the toggle,
 which is the control W15 built and which no earlier item had.
+
+**W17 — DONE. The analysis reconciled, with its wrong predictions left standing
+beside the corrections.**
+
+`docs/analysis.html` was written before a line of code existed, and the
+temptation with a document like that is to quietly edit the mistakes out. The
+opposite was done: every refuted claim stays where it was, struck through where
+it is simply false, with a dated note beside it saying what the device said when
+asked. Which predictions were wrong, and why, is the part worth keeping — a
+design document with its errors removed is no longer evidence of how the
+decisions were made.
+
+**Three load-bearing claims did not survive contact with the hardware**, and all
+three were in the two sections the whole design hangs on:
+
+- **"Front-buffered rendering — biggest win ... skipping the normal
+  double-buffer and compositor path."** There is no front buffer on this device.
+  W16 prices the difference exactly: 36 of the 45 ms is the compositor path the
+  claim says is skipped.
+- **"Flipping the pen reports `TOOL_TYPE_ERASER`"** and **"suppress finger input
+  while `AXIS_DISTANCE` shows the pen hovering"** — the document's two
+  palm-rejection mechanisms, and neither exists. The pen's back reports
+  `TOOL_TYPE_FINGER`, which is the bucket palm rejection *discards*, and the
+  distance axis reads 0.0 across 400 hover samples.
+- **"Pin the highest mode via `Surface.setFrameRate()` / preferred display
+  mode."** An app cannot pin this panel to 90 Hz; the vendor's config outranks
+  it, the `adb` override that works lapses on its own, and an app launch drops
+  it.
+
+Motion prediction is annotated as built, measured and rejected — the entry's own
+warning about overshoot was right, and its mitigation ("render as *temporary*
+ink", "clamp the distance") assumes ink that can be taken back, which this render
+path does not have.
+
+**Two of its questions the build answered, and two it left open**, which is now
+said in the document rather than implied: the latency number the whole thesis
+hangs on (45 ms, decomposed), and whether the front-buffer path exists here (no).
+Still open: whether textured brushes have landed in `androidx.ink` — the
+"ten-minute check that could save a month" was never done, because W3 was cut —
+and whether a re-renderable wet layer makes prediction usable, which is the one
+thing that would reopen it.
+
+The header now carries `Measured latency 45 ms` beside the design facts, which
+is what a document whose first sentence is "the whole design hangs on one
+number" should have at the top of it.
 
 ## Carried over from the spike
 

@@ -221,11 +221,21 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
     <div class="fact"><dt>Digitizer</dt><dd>EMR &middot; 8192 levels &middot; ±60° tilt</dd></div>
     <div class="fact"><dt>Display</dt><dd>2200×1440 &middot; 60/90 Hz</dd></div>
     <div class="fact"><dt>Memory</dt><dd>8 GB RAM</dd></div>
+    <div class="fact"><dt>Measured latency</dt><dd>45 ms pen &rarr; photon</dd></div>
     <div class="fact"><dt>Est. to v1</dt><dd>12–15 weeks solo</dd></div>
     <div class="fact"><dt>Canvas cap</dt><dd>4096×4096 &middot; 64 MiB/layer</dd></div>
     <div class="fact"><dt>Scope</dt><dd>Personal tool &middot; vector in v2</dd></div>
   </dl>
 </header>
+
+<div class="col stack" style="margin-top:34px;">
+  <div class="callout crit">
+    <span class="eyebrow">Reconciled against the build &middot; Phase 1 complete</span>
+    <p><strong>This document was written before a line of code existed. Phase 1 has now been built and measured on the tablet, and the notes marked below are the places where the hardware disagreed with it.</strong> Nothing has been deleted: a design document that quietly edits away its wrong predictions stops being evidence of how the decisions were made.</p>
+    <p>Three of its claims did not survive contact with the device, and all three are load-bearing. <strong>There is no front buffer on this hardware</strong> (§02.01). <strong>The pen has no eraser end and <code>AXIS_DISTANCE</code> is dead</strong>, which removes both of §03's palm-rejection mechanisms. <strong>An app cannot pin this panel to 90 Hz</strong> (§02.06). Motion prediction was built, measured and rejected (§02.02).</p>
+    <p>The thesis held. The number the design hangs on is now known: <strong>45 ms from pen tip to photons</strong>, of which 9.3 ms is the app and 36 ms is SurfaceFlinger and the panel. See <code>docs/phase1-plan.md</code> for the work items, the measurements and the reasoning behind each correction.</p>
+  </div>
+</div>
 
 <section>
   <div class="sechead"><span class="secnum">01</span><h2>The device</h2></div>
@@ -234,6 +244,12 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
     <p>The hardware suits this well. The EMR digitizer reports 8192 pressure levels and ±60° of tilt — far more headroom than expressive brushes need, so your response curves will be the limit, not the sensor. The panel runs 60 or 90 Hz, and pinning it to 90 removes a third of every frame-bound stage in the latency chain.</p>
     <p>8 GB of RAM is the quietly important number. At a 3000×2000 working canvas a layer costs 24 MB, so a full stack sits in memory comfortably and <strong>the tile system that would normally dominate a design like this isn’t needed</strong>. That deletes an entire subsystem from v1.</p>
     <p>Wacom hasn’t published the SoC, so GPU fill rate is the one hardware unknown left standing. Phase 0 measures it.</p>
+
+    <div class="callout">
+      <span class="eyebrow">Measured &middot; Phase 0 and W2</span>
+      <p><strong>MediaTek MT8781V/NA, Mali-G57 MC2, GL ES 3.2, <code>GL_MAX_TEXTURE_SIZE</code> 16383.</strong> Fill rate was never the constraint. A full redraw with the layer live as a rotating texture measured <strong>p99 4.00 ms against an 11.1 ms budget, 0% dropped over 600 frames</strong> — because the per-frame blit is destination-bound on the 2.6 Mpx surface, not on the 7.1 Mpx document. Memory came in at <strong>7.70 GiB total, 4.4 GiB free</strong>, and the peak Phase 1 graphics footprint is about 121 MiB.</p>
+      <p>One correction in the paragraph above: <strong>“pinning it to 90” is not something an app on this device can do.</strong> See §02.06.</p>
+    </div>
   </div>
 </section>
 
@@ -250,16 +266,43 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
       <span class="k">01</span>
       <span class="t">Front-buffered rendering <span class="chip pick">biggest win</span></span>
       <span class="d"><code>androidx.graphics:graphics-core</code> → <code>GLFrontBufferedRenderer</code>. Draws the in-progress stroke segment straight into the front buffer, skipping the normal double-buffer and compositor path. Implement <code>onDrawFrontBufferedLayer()</code> for wet ink and <code>onDrawMultiDoubleBufferedLayer()</code> for the committed scene; call <code>commit()</code> on pen-up. Requires API 29+.</span>
+      <span class="k"></span>
+      <span class="d">
+        <div class="callout crit" style="margin-top:12px;">
+          <span class="eyebrow">Refuted on hardware &middot; W0, priced at W16</span>
+          <p><strong>This device has no front buffer.</strong> W0 put graphics-core's own question to gralloc — its exact usage set (4294970112) and, separately, the bare <code>USAGE_FRONT_BUFFER</code> bit — and both were refused. <code>CanvasFrontBufferedRenderer</code> has therefore <em>always</em> run its fallback path: same <code>SurfaceControl</code>, same hardcoded 1000 fps frame-rate vote, no exception, no log line, and no API to ask afterwards which it got. Nothing about the code looks different when this happens.</p>
+          <p>It is still what Phase 1 ships, on the only criterion the phase has: judged by eye at a verified 90 Hz against a hand-built <code>SurfaceControl</code> arm and a plain-<code>View</code> baseline, its ink sat closest to the pen. Both other arms read as <em>smoother but further behind</em>. So the library won without the mechanism this entry credits it with, and why it wins is still unverified — it becomes a real question in Phase 2, when a GL engine has to reproduce the win without it.</p>
+          <p><strong>W16 prices the difference.</strong> Of 45 ms pen-to-photon, <strong>36 ms is SurfaceFlinger and the panel</strong> — 3.2 refreshes at 90 Hz — which is precisely the path this entry says is skipped. Four fifths of the latency is downstream of the app.</p>
+          <p>Two smaller corrections: the committed-scene callback is <code>onDrawMultiBufferedLayer()</code>, and Phase 1 uses the <code>Canvas</code> renderer rather than <code>GLFrontBufferedRenderer</code> — GL is Phase 2's, and recorded as debt rather than oversight, because Phase 1's whole render is antialiased circles plus one matrixed bitmap blit and hardware <code>Canvas</code> already does both on the GPU.</p>
+        </div>
+      </span>
     </li>
     <li>
       <span class="k">02</span>
       <span class="t">Motion prediction</span>
       <span class="d"><code>androidx.input:input-motionprediction</code> → <code>MotionEventPredictor</code>. Feed it every event with <code>record()</code>, call <code>predict()</code> on each move, and render the predicted point as <em>temporary</em> ink only. Clamp prediction distance or fast direction changes overshoot visibly.</span>
+      <span class="k"></span>
+      <span class="d">
+        <div class="callout crit" style="margin-top:12px;">
+          <span class="eyebrow">Built, measured, rejected &middot; W11 and W16</span>
+          <p><strong>The warning in this entry is right and the mitigation is not enough.</strong> “Render the predicted point as <em>temporary</em> ink only” assumes ink that can be taken back. On this render path it cannot: the front-buffered layer accumulates, so a speculative dab is baked until pen-up. Clamping the distance reduces how far the overshoot goes; it cannot erase the overshoot that happens.</p>
+          <p>Under a real pen the result is visible and stays visible — <strong>jagged sections along the wet stroke that persist until the pen lifts</strong>, then vanish, because the committed stroke is rebuilt from real samples alone. The layer was always clean; the screen was not.</p>
+          <p>The measurements, for the record: <code>MotionEventPredictor.newInstance</code> resolves to <code>SystemMotionEventPredictor</code>, and <code>MotionPredictor.isPredictionAvailable</code> returns <strong>false</strong> for this pen's device id and source — and it predicts anyway, a mean 41.5 and a maximum 110 document px ahead of the last real sample, about 27 ms of lookahead. It costs 3× the per-event time and 11× the allocation, and produces as many speculative dabs as real ones. It ships behind a toggle, defaulting <strong>off</strong>.</p>
+          <p><strong>The blocker is the render path, not the predictor.</strong> An engine that re-renders the wet stroke each frame makes every spur erasable, and at that point prediction is worth re-testing against the 5.75 ms of digitizer-and-dispatch lag it exists to hide.</p>
+        </div>
+      </span>
     </li>
     <li>
       <span class="k">03</span>
       <span class="t">Unbuffered dispatch</span>
       <span class="d"><code>view.requestUnbufferedDispatch(event)</code> on <code>ACTION_DOWN</code>. Stops Android batching motion events to the frame boundary so samples arrive as the digitizer produces them.</span>
+      <span class="k"></span>
+      <span class="d">
+        <div class="callout" style="margin-top:12px;">
+          <span class="eyebrow">Confirmed, with a caveat &middot; Phase 0</span>
+          <p>It works: <strong>1.14–1.19 samples an event at 218–271 events a second</strong>, far above the panel. But <strong>4–6% of events still carry 2–4 historical samples</strong>, so the next entry stays mandatory rather than becoming an optimisation. The <code>MotionEvent</code> overload is used, so the request lasts for the gesture and not for one event.</p>
+        </div>
+      </span>
     </li>
     <li>
       <span class="k">04</span>
@@ -275,6 +318,16 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
       <span class="k">06</span>
       <span class="t">Request 90 Hz</span>
       <span class="d">The panel does 60 and 90. Pin the highest mode via <code>Surface.setFrameRate()</code> / preferred display mode — it cuts a third off every frame-bound stage in the chain.</span>
+      <span class="k"></span>
+      <span class="d">
+        <div class="callout crit" style="margin-top:12px;">
+          <span class="eyebrow">Refuted on hardware &middot; W15</span>
+          <p><strong>An app cannot pin this panel to 90 Hz.</strong> Wacom's <code>/vendor/etc/displayconfig/display_id_0.xml</code> sets <code>mDefaultPeakRefreshRate</code> to 61 with <code>mAlwaysRespectAppRequest: false</code>, so a <code>preferredDisplayModeId</code> asking for 90 reaches SurfaceFlinger, is recorded, and loses to the user-setting vote. 90 Hz needs <code>adb shell settings put system peak_refresh_rate 90.0</code> and <code>min_refresh_rate</code> as well — every measurement in this project that says 90 Hz was taken with that override live and verified in <code>dumpsys display</code>.</p>
+          <p>Two traps that cost real time. The override <strong>lapses on its own</strong>, and <code>settings get</code> keeps reporting 90.0 while the live vote is capped at 60 — only the vote is the panel. And <strong>starting an activity drops it</strong>, so it has to be re-bounced (60.0, then 90.0 — writing 90 over 90 fires no observer) <em>after</em> the app is on screen, and verified again afterwards.</p>
+          <p>What the app <em>can</em> always do is ask for something <strong>lower</strong>: an app's base-mode request beats the user's minimum vote, which is how a genuine 60 Hz control was built without touching device settings between runs. One more caveat on “pin the highest mode”: a <code>Display.Mode</code> carries a physical size as well as a rate, so picking the fastest one can ask the compositor to change the panel <em>resolution</em>. On a drawing app that is the pen and the ink landing in different places.</p>
+          <p>The claim about what it buys is confirmed and larger than stated: the digitizer rate tracks the panel — <strong>246.85 Hz at 60, 321.75 Hz at 90</strong> — so the override buys input rate as well as frame rate.</p>
+        </div>
+      </span>
     </li>
   </ol>
 
@@ -283,6 +336,11 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
       <span class="eyebrow">Direct conflict in your spec</span>
       <p><strong>Stabilization is deliberately added latency.</strong> A pulled-string stabilizer works by holding the rendered point behind the true pen position — that is what makes the line smooth. So "stabilization" and "very little delay" pull against each other by definition.</p>
       <p>Resolution: expose it as a 0–100 slider that genuinely reaches zero, default it low (~15), and set it per-brush — high on inking pens, near-zero on sketch pencils. Don't bake a fixed amount into the pipeline.</p>
+    </div>
+    <div class="callout">
+      <span class="eyebrow">Confirmed and quantified &middot; W7 and W16</span>
+      <p>Shipped as written: a slider reaching a <strong>bit-exact</strong> zero, defaulting to 0.15, living on the brush. The conflict now has a price. On a steady line the filter settles <strong>4.58 ms behind the pen at 321.75 Hz</strong> (4.20 at 246.85) — and that is <em>not</em> its time constant, which is 6.0 ms: the filter is evaluated at sample instants, so the exact discrete lag is <code>dt·q/(1−q)</code> with <code>q = exp(−dt/τ)</code>, about <code>τ − dt/2</code>. Getting that wrong would have the latency film subtracting a quarter more smoothing than the smoothing does.</p>
+      <p>Against a 45 ms total, the default costs about a tenth — and more than the entire rest of the software path put together. The filter integrates over each sample's <code>dt</code> rather than lerping per sample, so its feel does not change with the refresh rate; a per-sample lerp would have changed the line by a third between 60 and 90 Hz.</p>
     </div>
   </div>
 </section>
@@ -309,10 +367,16 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
     <ul class="plain">
       <li><strong>Pressure.</strong> <code>AXIS_PRESSURE</code> arrives normalized 0–1 as a float, so the pen's 8192 levels survive the trip. Raw linear pressure feels terrible — ship a per-brush response curve (an editable cubic) mapping pressure to size and opacity independently.</li>
       <li><strong>Tilt &amp; orientation.</strong> <code>AXIS_TILT</code> (0–π/2) and <code>AXIS_ORIENTATION</code> (±π). These are what make a pencil shade broadly when you lay it over — the single biggest driver of "this feels like a real pencil".</li>
-      <li><strong>Eraser end.</strong> Flipping the pen reports <code>TOOL_TYPE_ERASER</code>. Route it to the eraser tool automatically and remember the last eraser brush.</li>
-      <li><strong>Palm rejection.</strong> Handle <code>ACTION_CANCEL</code> and, on Android 13+, per-pointer <code>FLAG_CANCELED</code> — both mean discard the entire stroke back to its <code>ACTION_DOWN</code>. Also suppress finger input on the canvas while <code>AXIS_DISTANCE</code> shows the pen hovering.</li>
+      <li><strong>Eraser end.</strong> <s>Flipping the pen reports <code>TOOL_TYPE_ERASER</code>. Route it to the eraser tool automatically and remember the last eraser brush.</s></li>
+      <li><strong>Palm rejection.</strong> Handle <code>ACTION_CANCEL</code> and, on Android 13+, per-pointer <code>FLAG_CANCELED</code> — both mean discard the entire stroke back to its <code>ACTION_DOWN</code>. <s>Also suppress finger input on the canvas while <code>AXIS_DISTANCE</code> shows the pen hovering.</s></li>
       <li><strong>Barrel buttons.</strong> <code>getButtonState()</code> — map to user-assignable actions (colour picker, pan, undo).</li>
     </ul>
+    <div class="callout crit" style="margin-top:18px;">
+      <span class="eyebrow">Both palm-rejection mechanisms refuted &middot; Phase 0 and W4</span>
+      <p><strong>The pen has no eraser end.</strong> Flipping it reports <code>TOOL_TYPE_FINGER</code>, never <code>TOOL_TYPE_ERASER</code>. That is not merely absent but actively unusable, because <code>FINGER</code> is the one bucket palm rejection exists to discard — so flip-to-erase would be routed to the eraser only by breaking the thing above it. Eraser becomes a <strong>barrel-button mapping</strong>; all three buttons are individually addressable (<code>BUTTON_TERTIARY</code> 4, <code>BUTTON_STYLUS_PRIMARY</code> 32, <code>BUTTON_STYLUS_SECONDARY</code> 64).</p>
+      <p><strong><code>AXIS_DISTANCE</code> is dead on this digitizer.</strong> 400 hover samples captured through a demonstrably working <code>onHoverEvent</code>/<code>getAxisValue</code> path, every one reporting 0.0. Hover-height finger suppression cannot be built as written, and it is deleted rather than deferred. <code>InputSample</code> still carries the field; it is always zero.</p>
+      <p>What replaced them is an explicit state machine rather than a heuristic: <strong>a gesture takes two fingers, lone fingers are dropped entirely, and the pen wins</strong> — a palm landing before the pen no longer locks the pen out, and a pen arriving mid-gesture is refused rather than mixed in. Eight contact sequences are replayed through the real view on the device as a regression check. <code>ACTION_CANCEL</code> and <code>FLAG_CANCELED</code> are both handled and counted; <strong><code>FLAG_CANCELED</code> has never once been observed from this driver</strong>, which is worth reading as “not yet” rather than “never”.</p>
+    </div>
   </div>
 </section>
 
@@ -351,6 +415,11 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
     <div class="callout warn">
       <span class="eyebrow">One check that could flip this</span>
       <p>Ink’s API surface has moved fast, and custom textured brushes were still experimental as of my information. If texture support in <code>BrushFamily</code> has properly landed, option A stretches much further than I’m crediting it and could carry v1 alone. Read the current <code>androidx.ink</code> release notes during Phase 0 — a ten-minute check that could save a month.</p>
+    </div>
+    <div class="callout warn">
+      <span class="eyebrow">Still open &middot; W3 was skipped by choice</span>
+      <p><strong>The ten-minute check was never done, and the day-long one that replaced it was cut.</strong> Phase 1's plan carried a timeboxed <code>androidx.ink</code> arm as a work item; it was dropped to keep the schedule, so whether textured brushes have landed in <code>BrushFamily</code> remains exactly as open as this document left it. It is the one question here that a build has <em>not</em> answered.</p>
+      <p>What did change is the price of the recommendation. The custom engine is still right for v1, and Phase 1 shipped raster ink without it — but W16 measured where the latency actually lives, and <strong>36 of 45 ms is the compositor, not the engine</strong>. A GL engine is worth building for brush feel, and for a wet layer that can be re-rendered — which is what would make prediction usable. It is <em>not</em> where the remaining latency is, and expecting it to be would be planning against the wrong number.</p>
     </div>
   </div>
 </section>
@@ -529,6 +598,11 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
       <div class="body">
         <h3>Hardware spike <span class="chip pick">go / no-go</span> <span class="chip">~1 week</span></h3>
         <p>Not an app — a logging harness. Dump every <code>MotionEvent</code> field the Pro Pen 3 produces: pressure range and quantization, tilt, orientation, hover distance, sample rate, tool types, button state. Then film the screen at 240 fps and count frames from tip movement to ink.</p>
+        <div class="callout crit" style="margin-top:12px;">
+          <span class="eyebrow">Ran, and fired a stop condition</span>
+          <p>The harness answered more than expected, and one answer was a stop: <strong>no front buffer</strong>. That triggered a build of the replacement design and a hardware A/B between three render paths — which the library won anyway. Pressure, tilt, orientation, sample rate and tool types all came back as hoped; hover distance came back dead, and the eraser tool type never appeared.</p>
+          <p><strong>The 240 fps film happened at the end of Phase 1, not in Phase 0</strong>, deliberately: the number is worth more measured against real ink than against a spike's <code>drawLine</code> segments. It gives <strong>45 ms</strong>. The better instrument turned out to be a zigzag rather than a straight stroke — at a reversal the pen is momentarily stationary, so the lag is two frame numbers with no gap and no speed to estimate.</p>
+        </div>
         <p class="out"><b>Answers:</b> what latency is actually achievable, and whether the Ink API path clears your bar on its own.</p>
       </div>
     </div>
@@ -537,6 +611,10 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
       <div class="body">
         <h3>Minimum ink <span class="chip">2–3 weeks</span></h3>
         <p>One bitmap layer, one round pen, front-buffered rendering with prediction, pan/zoom/rotate, PNG export via MediaStore.</p>
+        <div class="callout" style="margin-top:12px;">
+          <span class="eyebrow">Shipped, and it clears the bar</span>
+          <p>All of it, <strong>with prediction off</strong> (§02.02) and on a render path that turned out not to be front-buffered (§02.01). One ARGB_8888 layer at 2160&times;3300, written exactly once per stroke on the render thread; pan, zoom and rotate with the transform frozen for the life of a wet stroke; PNG export to <code>Pictures/Artiest</code> in about 450 ms. <strong>Bar cleared:</strong> judged on the tablet, with the pen, by the person who will use it — “fast enough for now”.</p>
+        </div>
         <p class="out"><b>Bar to clear:</b> it feels good to draw on. Nothing else matters until this does.</p>
       </div>
     </div>
@@ -592,7 +670,7 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
         <tr>
           <td><strong>Latency target missed</strong></td>
           <td><span class="chip crit">Critical</span></td>
-          <td>It is the requirement the app exists to satisfy. Phase 0 measures it before anything is built on the assumption, and all six techniques in section 02 stack — don’t skip any.</td>
+          <td>It is the requirement the app exists to satisfy. Phase 0 measures it before anything is built on the assumption, and all six techniques in section 02 stack — don’t skip any. <strong>Outcome: 45 ms measured, judged acceptable.</strong> “All six stack” is not true here, though — one of the six does not exist on this device (§02.01) and another is rejected (§02.02). Four of six stacked, and the missing one is the expensive one.</td>
         </tr>
         <tr>
           <td><strong>Your GL engine underdelivers on brush feel</strong><br>the reason for building it at all</td>
@@ -607,7 +685,7 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
         <tr>
           <td><strong>Unknown SoC / GPU</strong><br>Wacom doesn’t publish the MovinkPad’s chipset</td>
           <td><span class="chip warn">Medium</span></td>
-          <td>Profile in Phase 0. Stick to GLES 3.0 core, avoid exotic extensions, and set canvas-size defaults from measured fill rate.</td>
+          <td>Profile in Phase 0. Stick to GLES 3.0 core, avoid exotic extensions, and set canvas-size defaults from measured fill rate. <strong>Retired: MT8781V/NA, Mali-G57 MC2, GL ES 3.2.</strong> Fill rate was never the constraint — a full redraw ran p99 4.00 ms against an 11.1 ms budget, 0% dropped. The hardware surprises were all in the display and input stacks, not the GPU.</td>
         </tr>
         <tr>
           <td><strong>Stabilization fights the latency goal</strong></td>
@@ -617,7 +695,7 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
         <tr>
           <td><strong>Memory pressure</strong></td>
           <td><span class="chip ok">Low</span></td>
-          <td>Resolved by the hard 4096×4096 ceiling: 64 MiB per layer against 8 GB of RAM. Enforce a texture budget in the layer panel and the failure mode becomes a refused “add layer”, not a crash mid-stroke.</td>
+          <td>Resolved by the hard 4096×4096 ceiling: 64 MiB per layer against 8 GB of RAM. Enforce a texture budget in the layer panel and the failure mode becomes a refused “add layer”, not a crash mid-stroke. <strong>Confirmed with room to spare:</strong> 7.70 GiB total, 4.4 GiB free, against a 121 MiB peak Phase 1 graphics footprint. 4096 is a memory-and-bandwidth policy rather than a hardware limit — <code>GL_MAX_TEXTURE_SIZE</code> measured 16383 — and the app now clamps its document to the measured cap at startup, because an over-cap layer gives a <em>blank</em> canvas rather than a slow one and fails with no exception on any thread the app owns.</td>
         </tr>
       </tbody>
     </table>
@@ -628,6 +706,7 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
   <div class="sechead"><span class="secnum">14</span><h2>Settled, and what’s left</h2></div>
   <div class="col">
     <p class="lede">All four open questions are answered, and every one of them removed work rather than adding it. Nothing is blocking a start.</p>
+    <p><em>Written before the build. All four still hold; Phase 1 has since been built, and the two questions it answered and the two it left open are listed below.</em></p>
   </div>
   <div class="qs">
     <div class="q"><span class="qn">✓</span><p><strong>MovinkPad 11 (DTH-A116)</strong>, the standalone tablet.<em>No external display, no USB HID routing — an ordinary Android app.</em></p></div>
@@ -635,12 +714,23 @@ footer .col{display:flex; flex-direction:column; gap:7px;}
     <div class="q"><span class="qn">✓</span><p><strong>Personal tool, not a release.</strong><em>GPL prior art becomes usable while the repo stays private; the polish bar and texture-licensing pressure both drop.</em></p></div>
     <div class="q"><span class="qn">✓</span><p><strong>4096×4096 hard canvas limit.</strong><em>Deletes the tile system outright and fixes the layer budget at 64 MiB per full-size layer.</em></p></div>
   </div>
+
+  <div class="col stack" style="margin-top:26px;">
+    <p class="lede">Four more were opened by the build, and this is where they stand.</p>
+  </div>
+  <div class="qs">
+    <div class="q"><span class="qn">✓</span><p><strong>What the latency actually is: 45 ms, pen to photons.</strong><em>9.3 ms of it is the app — 5.75 digitizer and dispatch, 3.21 the spline, 0.31 the app's own work — and 36 ms is SurfaceFlinger and the panel, 3.2 refreshes at 90 Hz. Measured from a 240 fps film of a zigzag, four reversals agreeing within 4 ms, with the capture rate calibrated against the panel's own refresh visible in the ink.</em></p></div>
+    <div class="q"><span class="qn">✓</span><p><strong>Whether the front-buffer path exists here: it does not.</strong><em>And the library was shipped anyway, because it still felt closest to the pen. Why it wins is unverified and becomes load-bearing in Phase 2, when a GL engine has to reproduce the win without it.</em></p></div>
+    <div class="q open"><span class="qn">?</span><p><strong>Whether textured brushes have landed in <code>androidx.ink</code>.</strong><em>Still the ten-minute check this document recommended, still not done — the timeboxed arm that would have answered it was cut from Phase 1. See §04.</em></p></div>
+    <div class="q open"><span class="qn">?</span><p><strong>Whether a re-renderable wet layer makes prediction usable.</strong><em>Prediction's lead is real and large; what killed it is that front-buffer ink cannot be taken back. A Phase 2 engine that redraws the wet stroke each frame changes the question. Nothing else about the predictor needs revisiting.</em></p></div>
+  </div>
 </section>
 
 <footer>
   <div class="col">
     <p>Hardware specs from Wacom and the Seven Pens drawing-tablet database; Android stylus APIs from developer.android.com, verified September 2026.</p>
     <p>Estimates assume solo work at a steady pace and no prior Android GL experience — halve the engine phases if you've shipped a renderer before.</p>
+    <p><strong>Reconciled 8 September 2026, after Phase 1 shipped.</strong> The marked notes are what the DTH-A116 said when asked directly. The predictions have been left standing beside their corrections on purpose: which of them were wrong, and why, is the useful part. Work items, measurements and reasoning are in <code>docs/phase1-plan.md</code>; the latency measurement is reproducible with <code>tools/latency-from-video.py</code>.</p>
   </div>
 </footer>
 
