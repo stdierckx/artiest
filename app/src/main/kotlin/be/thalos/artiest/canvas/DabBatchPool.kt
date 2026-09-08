@@ -142,19 +142,25 @@ class DabBatchPool(
 
     companion object {
         /**
-         * 24 slots, sized from the only two numbers that bound the answer.
+         * 8 slots, and W9 measured them rather than reasoned about them.
          *
-         * The pen reports every 3.1 ms at the measured 321.75 Hz, and W2 put
-         * the render thread's whole frame at p99 4.0 ms against an 11.1 ms
-         * budget. One batch per event means a render thread that fell a full
-         * 90 Hz frame behind — 11.1 ms, far past anything W2 saw — would have
-         * about 4 batches outstanding. 24 is that with six times the room,
-         * costing 24 x 64 x 3 floats = 18 KB allocated once.
+         * W8 opened at 24, arrived at from the sample interval and W2's frame
+         * cost: a render thread a whole 90 Hz frame behind would have about
+         * four batches outstanding, and 24 was that with six times the room.
+         * W9 then drove strokes through the real path — one event per frame
+         * carrying five samples and up to 78 dabs, which is a punishing stroke
+         * and not a typical one — and `peakInFlight` never exceeded **3**, with
+         * **zero spills**, across every run. A firm-pressure stroke peaked at
+         * **1**.
          *
-         * The number is still a starting point rather than a result: W9
-         * measures [peakInFlight] on a real stroke and this constant moves to
-         * whatever that says, which is the point of counting at all.
+         * So 24 was eight times a number that was itself conservative. 8 keeps
+         * a 2.6x margin over the worst observed peak and costs 8 x 64 x 3
+         * floats = 6 KB allocated once. The margin can be this thin precisely
+         * because exhaustion is no longer a bug: [acquire] allocates outside
+         * the ring and counts a [spills], so an undersized pool degrades to one
+         * allocation and a number in the readout rather than to a batch drawn
+         * from under the library.
          */
-        const val DEFAULT_SLOTS = 24
+        const val DEFAULT_SLOTS = 8
     }
 }

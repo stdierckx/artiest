@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.os.Debug
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -119,6 +120,16 @@ class InkSurfaceView(
     val batches = DabBatchPool()
 
     /**
+     * W9's measurements: per-event cost and per-stroke allocation.
+     *
+     * Always on rather than behind a build flag. It costs two `nanoTime` calls
+     * per event and four heap reads per stroke, which is well inside the noise
+     * of the thing being measured, and a diagnostic that has to be switched on
+     * is one nobody has running when the interesting stroke happens.
+     */
+    val stats = InputStats()
+
+    /**
      * Samples and dabs in the stroke that just finished.
      *
      * Plain fields, read by the debug readout on a poll. The ratio is the one
@@ -182,6 +193,9 @@ class InkSurfaceView(
     /** Set by [clear]; consumed on the render thread. */
     @Volatile
     private var clearRequested: Boolean = false
+
+    /** Nanoseconds spent submitting during the event being handled. */
+    private var submitNanos: Long = 0L
 
     /** The open stroke's frozen paint settings, stamped onto every batch. */
     private var strokeColorArgb: Int = Color.BLACK
@@ -373,7 +387,13 @@ class InkSurfaceView(
             batches.markDrawn(batch.sequence)
             return
         }
+        // Timed separately from the rest of the event: this call is where the
+        // library can make the UI thread wait, and app work and compositor
+        // back-pressure have nothing in common but the clock. See
+        // [InputStats.submitMs].
+        val t = System.nanoTime()
         r.renderFrontBufferedLayer(batch)
+        submitNanos += System.nanoTime() - t
     }
 
     /**
@@ -445,7 +465,35 @@ class InkSurfaceView(
         router.abandon()
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean = router.onTouchEvent(event, this)
+    /**
+     * The measured window, and it is drawn where the plan draws it: `from
+     * onTouchEvent to renderFrontBufferedLayer`.
+     *
+     * The clock stops before the heap is read, so the two `Runtime` calls that
+     * take the drag watermark are not counted against the 0.31 ms budget they
+     * are there to police. `MotionEvent` expansion, routing, the transform, the
+     * stabilizer, the spline, the dab emit and the front-buffer submission are
+     * all inside it.
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        val samplesBefore = driver.totalSamples
+        val dabsBefore = driver.totalDabs
+        val batchesBefore = batches.issuedCount
+        val heapBefore = heapUsed()
+        submitNanos = 0L
+        val t0 = System.nanoTime()
+        val handled = router.onTouchEvent(event, this)
+        val elapsed = System.nanoTime() - t0
+        driver.addDragBytes(heapUsed() - heapBefore)
+        stats.recordEvent(
+            elapsed,
+            submitNanos,
+            (driver.totalSamples - samplesBefore).toInt(),
+            (batches.issuedCount - batchesBefore).toInt(),
+            (driver.totalDabs - dabsBefore).toInt(),
+        )
+        return handled
+    }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
         router.onHoverEvent(event)
@@ -479,6 +527,34 @@ class InkSurfaceView(
         private var seen = 0
 
         /**
+         * Samples since the view was created, so [onTouchEvent] can attribute
+         * an event's samples to it without racing [seen], which resets at
+         * pen-down and would go backwards across an ACTION_DOWN.
+         */
+        var totalSamples: Long = 0L
+            private set
+
+        /** Dabs since the view was created. See [totalSamples]. */
+        var totalDabs: Long = 0L
+            private set
+
+        private var dragBytes = 0L
+        private var gcAtBegin = 0L
+        private var strokeOpen = false
+
+        /**
+         * Accumulate one event's allocation, from [onTouchEvent], which has
+         * already stopped its clock.
+         *
+         * Summed per event rather than taken as one watermark across the drag,
+         * so nothing the caller allocated *between* events is charged to the
+         * input path. See [InputStats.dragBytes].
+         */
+        fun addDragBytes(bytes: Long) {
+            if (strokeOpen) dragBytes += bytes
+        }
+
+        /**
          * The transform this stroke is being drawn at, captured at pen-down.
          *
          * **The same snapshot converts the input and renders the output**, and
@@ -501,6 +577,12 @@ class InkSurfaceView(
             builder.begin(inkColorArgb)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
+            // GC count first: reading it allocates a String, and taking it
+            // before the heap watermark keeps that allocation out of the very
+            // window it is there to validate.
+            gcAtBegin = gcCount()
+            dragBytes = 0L
+            strokeOpen = true
         }
 
         /**
@@ -520,6 +602,8 @@ class InkSurfaceView(
             // allocation per event on the path with a per-sample budget.
             val n = samples.size
             seen += n
+            totalSamples += n
+            val dabsBefore = builder.dabCount
             var i = 0
             while (i < n) {
                 val s = samples[i]
@@ -528,6 +612,7 @@ class InkSurfaceView(
                 i++
             }
             flushWet()
+            totalDabs += builder.dabCount - dabsBefore
         }
 
         /**
@@ -562,17 +647,34 @@ class InkSurfaceView(
          * reads as the stroke snapping forward at pen-up.
          */
         override fun onStrokeEnd() {
+            // The drag watermark is taken before end() runs, because end()
+            // flushes the held-back segment and then allocates the Stroke, its
+            // dab copy and its Bounds. Those are the commit's, on purpose, and
+            // rolling them into the drag figure would hide a per-sample leak
+            // behind an 8 KB copy that is supposed to be there.
+            val commitStart = heapUsed()
+            val dabsBefore = builder.dabCount
             val stroke = builder.end()
             flushWet()
+            totalDabs += builder.dabCount - dabsBefore
             lastStrokeSamples = seen
             lastStrokeDabs = stroke.dabCount
             if (stroke.dabCount > 0) document.recordStroke(stroke.bounds)
             commitStroke(stroke)
+            val commitEnd = heapUsed()
+            strokeOpen = false
+            stats.recordStroke(
+                dragBytes = dragBytes,
+                dragSamples = seen,
+                commitBytes = commitEnd - commitStart,
+                gcs = gcCount() - gcAtBegin,
+            )
         }
 
         override fun onStrokeCancel() {
             builder.cancel()
             emitted = 0
+            strokeOpen = false
             cancelStroke()
         }
 
@@ -594,4 +696,23 @@ class InkSurfaceView(
 
         override fun onPenPresence(inRange: Boolean) = Unit
     }
+
+    /**
+     * Bytes live on the Java heap right now.
+     *
+     * A level, not a counter, which is why [InputStats.strokeGcs] travels with
+     * every figure derived from it: a collection inside the measured window
+     * subtracts freed bytes from allocated ones, and the delta then reads low,
+     * zero or negative. ART has no per-thread allocation counter that survived
+     * the Dalvik era — `Debug.startAllocCounting` is a no-op — so this pair of
+     * calls plus a GC guard is the honest instrument available.
+     */
+    private fun heapUsed(): Long {
+        val r = Runtime.getRuntime()
+        return r.totalMemory() - r.freeMemory()
+    }
+
+    /** Collections so far, or 0 if the runtime does not report the stat. */
+    private fun gcCount(): Long =
+        Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() ?: 0L
 }

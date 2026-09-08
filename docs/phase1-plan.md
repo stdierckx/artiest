@@ -372,9 +372,13 @@ The fit costs **one sample of latency** — 3.1 ms at 321.75 Hz — because a
 segment needs the point after its endpoint, and a speculative tail is not
 available here: front-buffer ink is unretractable. Budget: **under
 0.31 ms per event, and one immutable `PenSample` per digitizer sample and
-nothing else** from `onTouchEvent` to `renderFrontBufferedLayer`; the verdict on
-that one allocation is deferred to W9's allocation trace (~56 B a sample, so
-~18-21 KB/s at the measured rate). The earlier wording said "zero allocation",
+nothing else** from `onTouchEvent` to `renderFrontBufferedLayer`. **W9 measured
+both and both hold.** On the release build, driving a deliberately punishing
+stroke — one event per frame carrying 5.31 samples and **77.2 dabs** — the path
+costs **p50 0.119 ms, p99 0.185, max 0.295 ms**, which is 0% of events over the
+ceiling; and it allocates **54.6 B per digitizer sample** in steady state
+against the ~56 B predicted for one `PenSample`, so "and nothing else" is a
+measurement now. The earlier wording said "zero allocation",
 which the shipped input path cannot meet and should not: pooling `PenSample` is
 **off the table**, because `TraceRecorder` retains the samples it is handed and
 a recorder holding pooled instances records aliases that the next event
@@ -391,10 +395,12 @@ the sequence it drew, `acquire` compares it against what has been issued, and an
 exhausted ring **allocates and counts a spill** instead of aliasing a batch the
 library is still holding. That trades a correctness bug for an allocation, which
 is the right trade here, and it makes undersizing a number W9 reads rather than
-a glitch someone eventually notices. The 24 slots are still a starting point:
-`peakInFlight` on a real stroke is what sets them, and the first measurement —
-`adb`-injected strokes at roughly 120 Hz — reported a peak of 1 and no spills,
-which is a floor on the answer and not the answer.
+a glitch someone eventually notices. **W9 set the slot count from that number:
+8, down from W8's 24.** Across every run of the punishing stroke `peakInFlight`
+never exceeded **3** and `spills` stayed at **0**; a firm-pressure stroke peaked
+at 1. 24 was eight times a figure that was itself conservative, and 8 keeps a
+2.6x margin at 6 KB allocated once. The margin can be that thin only because
+exhaustion is no longer a bug — it degrades to one allocation and a counter.
 
 `TraceRecorder`/`TracePlayer` serialize the `PenSample` stream and replay it
 deterministically. It is the only reproducible regression test that exists for
@@ -572,7 +578,7 @@ half a day** before any of it is built on.
 | 6 | `Document`, `Layer`, `Stroke`, `Bounds` | both | Low | — | 0.5 |
 | 7 | ~~`Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens~~ **DONE — `77feb1e`. Stabilizer integrates over dt; onset ramp moved to wall-clock; centripetal measured against a uniform control.** | `:engine` | — | — | ✔ |
 | 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE — `87a8d3c`. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
-| 9 | Wet ink end to end, allocation trace, batch-pool slot validation | `:app` | Medium | 8 | 0.75 |
+| 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
 | 10 | Commit: stroke becomes dry ink at pen-up, under `layerLock` | `:app` | Medium | 9 | 0.5 |
 | 11 | `Predictor` — `Source.PREDICTED`, curvature gate, forked stabilizer state, runtime toggle | both | Medium | 10 | 0.75 |
 | 12 | `GestureController` — pan/zoom/rotate, Choreographer-coalesced dry redraw, **frozen-transform handshake** | `:app` | **High** | 10 | 1.5 |
@@ -724,6 +730,76 @@ logcat while painting invisible frames); a crash on rotation or backgrounding
 (the render thread outlived the `Surface` — `lockHardwareCanvas` on a destroyed
 one throws); or a stroke that flickers between frames (the wet dab list is being
 consumed rather than read, so a frame arriving between samples draws nothing).
+
+**W9 — DONE. Both budgets hold, and the harness was the hard part.**
+
+Measured with `StrokeStress`, which synthesizes `MotionEvent`s — `obtain` for a
+frame's first sample, `addBatch` for the rest — and dispatches them through
+`onTouchEvent`, so the router, `collectSamples`, the stabilizer, the resampler
+and the pool all run for real. The stroke is a spiral with pressure sweeping its
+whole range, which is not a typical stroke and is not meant to be: `RoundPen`
+spaces dabs at a fraction of the *diameter* and clamps at `MIN_SPACING_DOC`, so
+a feather-light dab sits 0.5 doc px from its neighbour where a full-press one
+sits 3.0, and the same movement emits six times the dabs. The sweep is therefore
+the worst case by construction — **77.2 dabs per event** against a firm press's
+19.5.
+
+**The results, release build, on a big core:**
+
+```
+event    p50 0.119   p95 0.170   p99 0.185   max 0.295 ms   over budget 0.0%
+submit   p50 0.034   p95 0.045   p99 0.054 ms  (inside renderFrontBufferedLayer)
+sample   p50 22.4    p99 34.8 us   of a 3108 us interval
+alloc    54.6 B/sample   drag 65536 B over 1201   commit 212992 B
+batches  8 slots   peak 3   spills 0        77.2 dabs/event, 5.31 samples/event
+```
+
+The per-event budget holds with the worst-case stroke and 16% to spare at max.
+The per-sample allocation lands on the predicted ~56 B, so the pipeline really
+does allocate one `PenSample` and nothing else. The commit's 212,992 B for
+17,439 dabs is 12.2 B a dab — the flat float triple plus the `Stroke` and
+`Bounds` headers — which is the one allocation W6 designed in on purpose.
+
+**Two measurement traps, both larger than the effect being measured. Anyone
+re-running this has to know about them or they will measure the wrong thing.**
+
+- **The debug build is ~3.5x slower than release.** The same firm stroke reads
+  p50 0.408 ms debug and 0.117 ms release. `:app`'s build file already says the
+  release variant is kept unminified and debug-signed *so latency stays
+  measurable*, and W9 measured on debug first anyway and spent a while
+  explaining a budget miss that does not exist on the build that ships.
+- **Core placement is worth 4-6x, and synthetic input loses it.** The MT8781 is
+  two Cortex-A76 at 2.2 GHz (cpu6, cpu7) and six A55 at 2.0 GHz. Sampling
+  `/proc/<pid>/task/<tid>/stat` during a run: real injected stylus input holds
+  the UI thread on **cpu7 for the entire stroke**, because the framework boosts
+  on input; a `Choreographer`-driven synthetic run drifts onto **cpu0-2** once
+  the boost from the launching tap decays, and the same code then reads p50 0.52
+  to 0.71 ms instead of 0.119. Every CPU was at its maximum frequency
+  throughout, so this is not throttling and a frequency check will not find it.
+  The big-core figures are the ones a hand on glass sees.
+
+**`renderFrontBufferedLayer` is not the cost**: 0.034 ms of a 0.119 ms event,
+29%, submitting 1.2 batches. That also settles a question W8 left open —
+submitting **one batch per event** rather than one per sample is right. It is
+not vsync coalescing, nothing waits, and the alternative is five times the
+submissions for the same ink.
+
+**A per-event budget is rate-dependent, and that is worth saying out loud.** The
+panel ran at 60 Hz for these runs, so an event carried 5.31 samples; at 90 Hz it
+would carry 3.57 and cost proportionally less. So "0.31 ms per event" is a
+harder target the *slower* the panel — the same shape of mistake the stabilizer
+avoids by integrating over dt. The rate-independent figure is the per-sample one,
+**22.4 us of a 3108 us interval**, and that is the number to carry forward.
+
+**The GC guard fired on the device**, which is the only evidence that it is not
+dead code: heap-used is a level, not a counter, so a collection inside the
+measured window subtracts freed bytes from allocated ones and the path reads
+*cheaper* than it is. One run reported `invalidated by 1 GC` and refused to print
+a figure. Also worth knowing: the first stroke after a process start allocates
+285-747 B a sample rather than 54.6, entirely `StrokeBuilder`'s dab array growing
+from 256 dabs to whatever the stroke needed. That is one array per session
+instead of one per stroke, which is what it was designed to be, but it means a
+single-stroke allocation measurement measures the growth and not the path.
 
 **W12 — how I'd know it went wrong.** A two-finger pinch that stutters or lags
 the fingers. Contingency ladder: (a) Choreographer coalescing is already the

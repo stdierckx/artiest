@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -24,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import be.thalos.artiest.canvas.InkSurfaceView
+import be.thalos.artiest.canvas.InputStats
+import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
 
 /**
@@ -77,10 +80,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** The two stress shapes the readout is meant to be compared across. */
+private val STRESS_MODES = listOf("Sweep" to null, "Firm" to 1f)
+
 @Composable
 private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     var generation by remember { mutableStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
+    var stress by remember { mutableStateOf<StrokeStress?>(null) }
+    var polling by remember { mutableStateOf(true) }
 
     // Polled twice a second rather than pushed. The counters this reads live on
     // the input and render paths, and making them Compose state would put a
@@ -88,7 +96,7 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(500)
-            generation++
+            if (polling) generation++
         }
     }
 
@@ -107,35 +115,100 @@ private fun CanvasScreen(document: Document, onView: (InkSurfaceView) -> Unit) {
             modifier = Modifier.fillMaxSize(),
         )
         Column(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-            Text("artiest — W8 ink surface", style = MaterialTheme.typography.titleSmall)
+            Text("artiest — W9 ink path", style = MaterialTheme.typography.titleSmall)
             Text(
                 text = readout(surface, document, generation),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 6.dp),
             )
-            TextButton(onClick = {
-                surface?.clear()
-                generation++
-            }) { Text("Clear") }
+            Row {
+                TextButton(onClick = {
+                    surface?.clear()
+                    generation++
+                }) { Text("Clear") }
+                // Two runs, not one. See StrokeStress.start's pressure
+                // parameter: the sweep is the worst case and the firm press is
+                // what most of a real stroke looks like, and the pair is what
+                // shows the cost tracking dabs rather than samples.
+                for ((label, p) in STRESS_MODES) {
+                    TextButton(
+                        enabled = surface != null && stress?.running != true,
+                        onClick = {
+                            val v = surface ?: return@TextButton
+                            val s = stress ?: StrokeStress(v).also { stress = it }
+                            v.clear()
+                            // The readout is paused for the duration:
+                            // recomposing it allocates, and this run is
+                            // measuring allocation.
+                            polling = false
+                            s.start(pressure = p) { polling = true; generation++ }
+                        },
+                    ) { Text(label) }
+                }
+            }
         }
     }
 }
 
 /**
- * The three numbers W9 needs and the only ones worth showing yet.
+ * W9's numbers, and only the ones a decision hangs on.
  *
- * `spills` is the one to watch: a non-zero count means the batch ring was
- * exhausted while the render thread was behind, so `DabBatchPool.DEFAULT_SLOTS`
- * is too small. `peak` says how close it came. [generation] is a poll tick and
- * is read only so Compose recomputes the string — see the caller for why the
- * counters are not Compose state.
+ * `spills` says whether the batch ring was ever exhausted while the render
+ * thread was behind, and `peak` says how close it came — together they set
+ * `DabBatchPool.DEFAULT_SLOTS`. `event` is the per-event cost against the
+ * plan's 0.31 ms ceiling, in percentiles because the budget is missed by a
+ * tail. `alloc` is bytes per digitizer sample during the drag, which the plan
+ * predicts at about 56 — one `PenSample` and nothing else. It refuses to print
+ * a figure that a collection ran through: heap-used is a level, so a GC inside
+ * the window makes the delta meaningless rather than merely noisy.
+ *
+ * [generation] is a poll tick, read only so Compose recomputes the string. The
+ * counters themselves are plain fields on the input and render paths and are
+ * deliberately not Compose state — a recomposition at 321 Hz would be the most
+ * expensive thing in the app, and on this screen it would also be the thing
+ * being measured.
  */
 private fun readout(surface: InkSurfaceView?, document: Document, generation: Int): String {
     if (surface == null) return "surface  -"
     val p = surface.batches
+    val s = surface.stats
+    val alloc = if (!s.allocationValid) {
+        if (s.dragSamples == 0) "no stroke measured" else "invalidated by ${s.strokeGcs} GC"
+    } else {
+        "${r(s.bytesPerSample(), 1)} B/sample   " +
+            "drag ${s.dragBytes} B over ${s.dragSamples}   commit ${s.commitBytes} B"
+    }
     return "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
         "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}\n" +
-        "last     ${surface.lastStrokeSamples} samples -> ${surface.lastStrokeDabs} dabs"
+        "last     ${surface.lastStrokeSamples} samples -> ${surface.lastStrokeDabs} dabs   " +
+        "${r(s.samplesPerEvent(), 2)} samples/event   ${r(s.dabsPerEvent(), 1)} dabs/event\n" +
+        "event    p50 ${r(s.eventMs(0.5f), 3)}  " +
+        "p95 ${r(s.eventMs(0.95f), 3)}  " +
+        "p99 ${r(s.eventMs(0.99f), 3)}  " +
+        "max ${r(s.eventMs(1f), 3)} ms   " +
+        "over ${r(s.overBudgetRate() * 100f, 1)}% of ${s.events}\n" +
+        "submit   p50 ${r(s.submitMs(0.5f), 3)}  " +
+        "p95 ${r(s.submitMs(0.95f), 3)}  " +
+        "p99 ${r(s.submitMs(0.99f), 3)} ms in renderFrontBufferedLayer\n" +
+        "sample   p50 ${r(s.msPerSample(0.5f) * 1000f, 1)}  " +
+        "p99 ${r(s.msPerSample(0.99f) * 1000f, 1)} us/sample   " +
+        "of a 3108 us interval\n" +
+        "alloc    $alloc"
+}
+
+/**
+ * Round to [places] decimals, without `String.format`.
+ *
+ * `String.format` and `DecimalFormat` follow the default locale, which on this
+ * machine is nl-BE and prints a comma. That is banned outright in serialization
+ * — an `:engine` test pins it — and while a debug readout is not serialization,
+ * having exactly one rule about number formatting is cheaper than having two.
+ * `Float.toString` is locale-independent by specification.
+ */
+private fun r(v: Float, places: Int): String {
+    var m = 1f
+    repeat(places) { m *= 10f }
+    return (kotlin.math.round(v * m) / m).toString()
 }

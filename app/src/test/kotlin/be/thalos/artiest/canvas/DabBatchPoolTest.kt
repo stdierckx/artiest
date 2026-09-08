@@ -205,4 +205,21 @@ class DabBatchPoolTest {
         repeat(slots) { safeInFlight.add(pool.acquire()) }
         assertFalse(safeInFlight.contains(pool.acquire()))
     }
+    @Test
+    fun `the default slot count clears the peak W9 measured with room`() {
+        // W9 drove a punishing stroke — 78 dabs an event — through the real
+        // path and never saw more than 3 batches outstanding. This pins the
+        // margin so a later change to DEFAULT_SLOTS has to argue with a
+        // measurement rather than with nothing.
+        assertTrue(
+            DabBatchPool.DEFAULT_SLOTS >= 3 * 2,
+            "the default ring no longer clears the measured peak of 3 with margin",
+        )
+        val pool = DabBatchPool()
+        val held = ArrayList<DabBatch>()
+        repeat(3) { held.add(pool.acquire()) }
+        assertEquals(0L, pool.spills, "the measured worst case already spills at the default")
+        assertEquals(3, held.toSet().size)
+    }
+
 }
