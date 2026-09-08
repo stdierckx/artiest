@@ -648,10 +648,10 @@ half a day** before any of it is built on.
 | 0 | ~~Front-buffer reality probe~~ **DONE — `54999d8`. Verdict: no front buffer. Stop condition fired.** | `:spike` | — | — | ✔ |
 | 1 | ~~`DirectSurface` arm, A/B'd by eye~~ **DONE — `24701ab`. Graphics-core still closest to the tip; both vsync-locked arms smoother but behind.** | `:spike` | — | — | ✔ |
 | 2 | ~~Full-redraw throughput probe~~ **DONE. draw p99 4.0 ms against an 11.1 ms budget, 0% dropped over 600 frames. Full redraw is viable.** | `:spike` | — | — | ✔ |
-| 3 | Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day. Freeze `:spike` after this | `:spike` | Low | 1 | 1.0 |
+| 3 | ~~Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day~~ **CUT, by the cut order below and on purpose. It buys Phase 2's kill criterion, not Phase 1's ink — so the one open question in `analysis.html` §04, whether textured brushes have landed in `BrushFamily`, is still open. `:spike` is frozen regardless.** | `:spike` | — | — | ✂ |
 | 4 | ~~`PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer`~~ **DONE — `f7ffa18`. A palm landing before the pen locked it out; a gesture now takes two fingers.** | both | Low | — | ✔ |
 | 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
-| 6 | `Document`, `Layer`, `Stroke`, `Bounds` | both | Low | — | 0.5 |
+| 6 | ~~`Document`, `Layer`, `Stroke`, `Bounds`~~ **DONE — `aa38787`. The row was never ticked at the time and the tick is backdated here: `Layer` could not live in `:engine` as the table says, because a `Bitmap` does not resolve in a `kotlin("jvm")` module. The module tree won that argument and the plan's column was wrong.** | both | — | — | ✔ |
 | 7 | ~~`Stabilizer`, `RoundPen`, `CatmullRomResampler`, `StrokeBuilder` + dab-list goldens~~ **DONE — `77feb1e`. Stabilizer integrates over dt; onset ramp moved to wall-clock; centripetal measured against a uniform control.** | `:engine` | — | — | ✔ |
 | 8 | ~~`InkSurface` + `InkSurfaceView` front-buffered wiring, own `SurfaceHolder.Callback`, `DabBatchPool`~~ **DONE — `87a8d3c`. Ink on the tablet. The app's own `SurfaceHolder.Callback` proved by negative control; the batch ring got a real completion signal; the front buffer is clipped to the paper.** | `:app` | — | — | ✔ |
 | 9 | ~~Wet ink end to end, allocation trace, batch-pool slot validation~~ **DONE — `49aa8c6`. Budget met on release: p50 0.119 ms an event and 54.6 B a sample. The ring drops 24 slots to 8. Two measurement traps found, both bigger than the thing being measured.** | `:app` | — | — | ✔ |
@@ -662,14 +662,26 @@ half a day** before any of it is built on.
 | 14 | ~~`PngExporter`~~ **DONE — `f54f785`. 24-bit PNGs on the tablet in 450 ms. The plan's critical section held the lock for 22-26 ms; the shipped one holds it for 14, and the skew between a stroke's history and its pixels turned out to be visible to the user after all.** | `:app` | — | — | ✔ |
 | 15 | ~~`MainActivity`, Compose chrome, refresh-rate toggle, `DeviceProbe` port~~ **DONE — `e436c22`. A 60 Hz control W16 can reach from a button, and the vendor cap turned out to be one-directional. Two ported lines were wrong; the double tap shipped doing nothing and the JVM tests could not have caught it.** | `:app` | — | — | ✔ |
 | 16 | ~~Feel pass on device; **film at 240 fps and record the Phase 1 latency baseline**~~ **DONE — `77676e7`, `15fab21`. 45 ms pen to photons at 90 Hz: 9.3 ms app, 36 ms compositor and panel. Prediction judged under a real pen and stays off — the wet ink is visibly jagged until pen-up. Verdict on the feel: fast enough.** | device | — | — | ✔ |
-| 17 | ~~Reconcile `docs/analysis.html` with what was measured~~ **DONE — this commit. Three load-bearing claims refuted (no front buffer, no eraser end, `AXIS_DISTANCE` dead), one API that cannot do what it says (`preferredDisplayModeId`), prediction rejected, and the thesis' number finally filled in at 45 ms. Corrections annotated in place beside the predictions rather than replacing them.** | docs | — | — | ✔ |
+| 17 | ~~Reconcile `docs/analysis.html` with what was measured~~ **DONE — `46c2d5a`. Three load-bearing claims refuted (no front buffer, no eraser end, `AXIS_DISTANCE` dead), one API that cannot do what it says (`preferredDisplayModeId`), prediction rejected, and the thesis' number finally filled in at 45 ms. Corrections annotated in place beside the predictions rather than replacing them.** | docs | — | — | ✔ |
 
-**≈12.75 days remaining.** W0, W1 and W2 are all spent, and the freeze-transform
-handshake is back in W12 with the graphics-core decision. Still at the top of a
-10–15 day budget, and I would rather say so than discover it in week three. If it
-runs long, cut in this order: W3 (the Ink arm — it buys Phase 2's kill criterion,
-not Phase 1's ink), then W12's fallback ladder, then W17 slides into Phase 2's
-first commit. Do **not** cut W16.
+~~**≈12.75 days remaining.**~~ **Phase 1 is complete.** Sixteen of the seventeen
+items shipped; W3 was cut, which is the first entry in the cut order below and
+the only one that had to be used. W12's fallback ladder was not needed and W16
+was not cut.
+
+The estimate said 10–15 days and the plan sat at the top of it. What actually
+happened is not a schedule number worth quoting — the work was done in sessions
+rather than days — but the shape is worth recording: **the items that ran long
+were the ones where the plan was wrong about the hardware, not the ones that
+were technically hard.** W0 fired a stop condition on day one and cost W1
+entirely. W10, W13 and W14 each turned up a defect in the design rather than in
+the code implementing it. W15's double tap shipped doing nothing. Nothing
+overran because the code was difficult.
+
+The original cut order, for the record: W3 (the Ink arm — it buys Phase 2's kill
+criterion, not Phase 1's ink), then W12's fallback ladder, then W17 sliding into
+Phase 2's first commit. Only the first was spent. Do **not** cut W16 — and it was
+not; it produced the phase's headline number.
 
 **W0 — DONE, `54999d8`.** The probe returned `false` for the library's exact
 usage set (4294970112) *and* for the bare `USAGE_FRONT_BUFFER` bit, so the stop
