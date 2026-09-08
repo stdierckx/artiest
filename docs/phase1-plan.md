@@ -648,7 +648,7 @@ half a day** before any of it is built on.
 | 0 | ~~Front-buffer reality probe~~ **DONE — `54999d8`. Verdict: no front buffer. Stop condition fired.** | `:spike` | — | — | ✔ |
 | 1 | ~~`DirectSurface` arm, A/B'd by eye~~ **DONE — `24701ab`. Graphics-core still closest to the tip; both vsync-locked arms smoother but behind.** | `:spike` | — | — | ✔ |
 | 2 | ~~Full-redraw throughput probe~~ **DONE. draw p99 4.0 ms against an 11.1 ms budget, 0% dropped over 600 frames. Full redraw is viable.** | `:spike` | — | — | ✔ |
-| 3 | ~~Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day~~ **CUT, by the cut order below and on purpose. It buys Phase 2's kill criterion, not Phase 1's ink — so the one open question in `analysis.html` §04, whether textured brushes have landed in `BrushFamily`, is still open. `:spike` is frozen regardless.** | `:spike` | — | — | ✂ |
+| 3 | ~~Timeboxed androidx.ink 1.1.0-alpha07 arm, hard stop at one day~~ **CUT, by the cut order below and on purpose. It bought Phase 2's kill criterion, not Phase 1's ink. The open question it left — whether textured brushes have landed in `BrushFamily` — was answered at the top of Phase 2 by the ten-minute check rather than the day-long arm: **they have**, and the recommendation held anyway. See `docs/phase2-plan.md`. `:spike` is frozen regardless.** | `:spike` | — | — | ✂ |
 | 4 | ~~`PenSample`, `MotionEvents.collectSamples`, `InputRouter`, `TraceRecorder`/`TracePlayer`~~ **DONE — `f7ffa18`. A palm landing before the pen locked it out; a gesture now takes two fingers.** | both | Low | — | ✔ |
 | 5 | ~~`CanvasTransform` + native JVM tests~~ **DONE — `06bd9cf`, `6aada12`. Order measured against Skia, not derived; `Matrices.kt` landed in `:app` with it.** | `:engine` | Low | — | ✔ |
 | 6 | ~~`Document`, `Layer`, `Stroke`, `Bounds`~~ **DONE — `aa38787`. The row was never ticked at the time and the tick is backdated here: `Layer` could not live in `:engine` as the table says, because a `Bitmap` does not resolve in a `kotlin("jvm")` module. The module tree won that argument and the plan's column was wrong.** | both | — | — | ✔ |
@@ -1765,7 +1765,10 @@ questions, and deleting it is defensible only after W17 records a baseline.
   an opaque `BrushFamily` with no constructor. The alpha has real textured
   brushes but replaces "one bitmap layer" with an immutable stroke list — a
   different memory model, undo model and export path. Re-decide in Phase 2 with
-  W1's number in hand.
+  W1's number in hand. **Re-decided, 2026-09-08.** The brush API went public in
+  1.1.0-alpha03 and the texture support is real, so the check flipped — and the
+  decision did not, because W16's number says Ink offers no latency win (same
+  graphics-core stack, same 36 ms) while still costing the document model.
 - **Pixel golden images.** W7 ships **dab-list goldens** instead — serialized
   `(x, y, radius)` output for a fixed corpus, diffed on the JVM. Runs without a
   device and does not invalidate on every AA tweak. Eight strokes (straight,
@@ -1930,3 +1933,11 @@ obvious failure: a half-pixel translate softening one arm, ink discarded at the
 document edge, and prediction defaulting on across arms that implement it
 incompatibly. An A/B harness needs its own adversarial review before its output
 is trusted — the instrument is as likely to be wrong as the thing measured.
+
+## What comes next
+
+**`docs/phase2-plan.md`.** It inherits three things from here: the 45.2 ms
+decomposition, which retires latency as Phase 2's organising goal and demotes the
+GL rewrite from W1 to a gated W14; the `RoundPen` tripwire, which W6 and W7 there
+finally pay; and this plan's unanswered open questions 1 and 3, which are still
+unanswered and now have consequences.
