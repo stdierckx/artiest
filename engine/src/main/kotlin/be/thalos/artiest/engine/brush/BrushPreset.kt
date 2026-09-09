@@ -67,11 +67,20 @@ enum class BrushPreset(val label: String) {
             brush.opacity = 0.85f
             brush.flow = 0.35f
             brush.stabilization = 0.10f
+            // Tuned against a screenshot rather than guessed, and the first
+            // guess was wrong in a specific way: strength 0.55 over a 0.34..0.72
+            // window came out as salt and pepper, a scatter of near-black
+            // specks on light grey. That is what a *narrow* window does — it
+            // polarises the noise, which is right for a tooth and wrong for the
+            // whole field. Widening the window keeps the tooth's character in
+            // the tails while leaving most of the stroke in the middle, and the
+            // strength comes down so the darkest specks are graphite rather
+            // than ink.
             brush.grain = GrainSpec(
-                scaleDocPx = 180f,
-                strength = 0.55f,
-                cutoffLow = 0.34f,
-                cutoffHigh = 0.72f,
+                scaleDocPx = 220f,
+                strength = 0.42f,
+                cutoffLow = 0.22f,
+                cutoffHigh = 0.86f,
                 seed = 11,
             )
             brush.aspect.min = 1f

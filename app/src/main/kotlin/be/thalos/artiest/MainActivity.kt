@@ -590,8 +590,14 @@ private fun CanvasScreen(
                     onWet = {
                         val v = surface ?: return@DebugRow
                         val on = v.pen.opacity < 1f
-                        v.pen.opacity = if (on) 1f else WET_TEST_ALPHA
-                        v.pen.flow = if (on) 1f else WET_TEST_ALPHA
+                        val p = if (on) BrushPreset.PEN else BrushPreset.PENCIL
+                        p.applyTo(v.pen)
+                        preset = p
+                        sizeMax = v.pen.sizeMax
+                        smoothing = v.pen.stabilization
+                        opacity = v.pen.opacity
+                        flow = v.pen.flow
+                        grain = v.pen.grain.strength
                         generation++
                     },
                     onStress = { pressure, path ->
@@ -872,11 +878,12 @@ private fun DebugRow(
             Text(if (surface?.scratchF16 == true) "F16" else "8888")
         }
         // The indirect path only engages for a translucent brush, so measuring
-        // it needs one. Written straight onto the pen rather than through the
-        // sliders because the point is to A/B the two scratch formats at a
-        // fixed brush, and a slider drag is not a repeatable setting.
+        // it needs one. This applies the real pencil preset rather than a
+        // hand-set opacity, so one tap exercises the scratch buffer, the grain
+        // and the tilt-driven dab together -- written straight onto the pen
+        // because the point is a repeatable setting, and a slider drag is not.
         TextButton(onClick = onWet) {
-            Text(if ((surface?.pen?.opacity ?: 1f) < 1f) "Wet ON" else "Wet off")
+            Text(if ((surface?.pen?.opacity ?: 1f) < 1f) "Pencil ON" else "Pencil off")
         }
         // Two runs, not one. See StrokeStress.start's pressure parameter: the
         // sweep is the worst case and the firm press is what most of a real

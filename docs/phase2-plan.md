@@ -550,26 +550,43 @@ If none of them fires, **GL does not ship in Phase 2**, and the debt is carried
 into Phase 3 with the same gate. This is a reversal of Phase 1's expectation and
 it is the direct consequence of the 36 ms finding.
 
+**None of them fired, so GL does not ship in Phase 2.** Each was checked against
+a measurement rather than an impression:
+
+- **W4's cache.** The hit rate fell below its threshold on both ramp strokes,
+  which is what the gate asked about — and the threshold was measuring the
+  stroke rather than the cache. Masks built equals buckets crossed exactly, on
+  every stroke, so there is no waste for GL to recover; taper's entire cold cost
+  is 1.04 ms and warm strokes hit 100%.
+- **W5's stamp.** Indistinguishable from `drawCircle` over three alternating
+  device runs. `Canvas` is not the bottleneck the gate was written against.
+- **W6's scratch buffer and W8's texture.** Both affordable on the hardware
+  path. The one thing that did cost is now fixed and was not a rendering
+  problem: the buffer grew linearly and reallocated 26 times in one stroke.
+
+So the debt is carried into Phase 3 with the same gate, and Phase 2's answer to
+"does this need a GL engine" is a measured no rather than an unexamined yes.
+
 ## Work plan
 
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | 0 | Before-picture: dab-loop bench (JVM + device), fix `latency-from-video.py` to find the page and set its own thresholds, re-film the W16 zigzag | tools, `:app` | Med | — | 1.5 |
-| 1 | `Sensor`, `ResponseCurve`, `CurveOption` — pure JVM, with goldens. **Tilt and orientation are required sensors**, normalised 0-63 deg, with their own low-pass filter | `:engine` | Low | — | 2 |
-| 2 | `Brush` replaces `RoundPen`; `Brush.pen()` preset. **W7 goldens must not move** | `:engine` | Low | 1 | 1 |
-| 3 | Per-dab spacing recompute, spacing from the dab just laid, isotropic option. **Goldens move here, once, by a predicted amount** | `:engine` | Med | 2 | 1 |
-| 4 | `AlphaMask`, `MaskSpec`, procedural generators, `MaskCache` with quantised keys | `:engine` | Med | 2 | 2 |
-| 5 | Stamp renderer: `drawBitmap` of an `ALPHA_8` mask with a colour filter, replacing `drawCircle`. A/B'd against Phase 1 on device | `:app` | **High** | 4 | 1.5 |
-| 6 | Indirect paint path + scratch buffer; `ARGB_8888` vs `RGBA_F16` decided by measurement. **The larger half of the graphite bar** | `:app` | **High** | 5 | 2 |
-| 7 | Opacity and flow as real sliders — **the tripwire is paid here**, and the reference's median 0.27 alpha becomes reachable | both | Low | 6 | 0.5 |
-| 8 | Canvas-space texture: grain, strength, cutoff. **The second half of the bar** — ragged edges and streak, which opacity alone cannot make | both | Med | 6 | 2 |
-| 9 | **Tilt-driven elliptical dab** — aspect from tilt, angle from orientation — plus scatter, size jitter and spin, all through W1's machinery | `:engine` | Med | 4 | 1.5 |
-| 10 | Two presets — pen and the tilt-aware pencil — judged on device, by eye, by the person who will use it | both | Med | 8, 9 | 1.5 |
-| 11 | Eraser: barrel-button mapping (4 / 32 / 64) + a real erase blend through the indirect path | both | Med | 6 | 1 |
-| 12 | Brush serialization and the on-disk format | `:engine` | Low | 2 | 1 |
-| 13 | Prediction, re-tested — only now that the wet stroke is re-renderable | both | Med | 6 | 0.5 |
-| 14 | **GATED.** GL engine, entered only on a measurement from 5, 6 or 8 that names what it fixes | `:app` | **High** | 5, 6, 8 | 3+ |
-| 15 | Feel pass, re-film, reconcile `analysis.html` and this plan against what was measured | device, docs | Low | 10 | 1 |
+| 1 | **DONE.** `Sensor`, `ResponseCurve`, `CurveOption` — pure JVM, with goldens. **Tilt and orientation are required sensors**, normalised 0-63 deg, with their own low-pass filter | `:engine` | Low | — | 2 |
+| 2 | **DONE.** `Brush` replaces `RoundPen`; `Brush.pen()` preset. **W7 goldens must not move** | `:engine` | Low | 1 | 1 |
+| 3 | **DONE**, mostly already built. Per-dab spacing recompute, spacing from the dab just laid, isotropic option. **Goldens move here, once, by a predicted amount** | `:engine` | Med | 2 | 1 |
+| 4 | **DONE.** `AlphaMask`, `MaskSpec`, procedural generators, `MaskCache` with quantised keys | `:engine` | Med | 2 | 2 |
+| 5 | **DONE.** Stamp renderer: `drawBitmap` of an `ALPHA_8` mask with a colour filter, replacing `drawCircle`. A/B'd against Phase 1 on device | `:app` | **High** | 4 | 1.5 |
+| 6 | **DONE.** Indirect paint path + scratch buffer; `ARGB_8888` vs `RGBA_F16` decided by measurement. **The larger half of the graphite bar** | `:app` | **High** | 5 | 2 |
+| 7 | **DONE.** Opacity and flow as real sliders — **the tripwire is paid here**, and the reference's median 0.27 alpha becomes reachable | both | Low | 6 | 0.5 |
+| 8 | **DONE.** Canvas-space texture: grain, strength, cutoff. **The second half of the bar** — ragged edges and streak, which opacity alone cannot make | both | Med | 6 | 2 |
+| 9 | **DONE.** **Tilt-driven elliptical dab** — aspect from tilt, angle from orientation — plus scatter, size jitter and spin, all through W1's machinery | `:engine` | Med | 4 | 1.5 |
+| 10 | **DONE**, judgement outstanding. Two presets — pen and the tilt-aware pencil — judged on device, by eye, by the person who will use it | both | Med | 8, 9 | 1.5 |
+| 11 | **DONE.** Eraser: barrel-button mapping (4 / 32 / 64) + a real erase blend through the indirect path | both | Med | 6 | 1 |
+| 12 | **DONE.** Brush serialization and the on-disk format | `:engine` | Low | 2 | 1 |
+| 13 | **DONE**, answer is no. Prediction, re-tested — only now that the wet stroke is re-renderable | both | Med | 6 | 0.5 |
+| 14 | **GATED, AND IT DID NOT FIRE.** GL engine, entered only on a measurement from 5, 6 or 8 that names what it fixes | `:app` | **High** | 5, 6, 8 | 3+ |
+| 15 | **PART DONE**, re-film outstanding. Feel pass, re-film, reconcile `analysis.html` and this plan against what was measured | device, docs | Low | 10 | 1 |
 | C | **Unplanned, done 2026-09-09.** Customisable toolbar: slot model, chooser, persistence. See below | `:app` | Low | — | 0.5 |
 | U | **Unplanned, done 2026-09-09.** Undo and redo by region snapshot, and three chrome defects the tablet found. See below | `:app` | Med | C | 0.5 |
 
@@ -1303,6 +1320,30 @@ and the scratch buffer is a correctness fix. Measured on the device, with
 Also worth recording from that readout: `SystemMotionEventPredictor` reports
 `platform: no` on this device, so every prediction number Phase 1 and Phase 2
 have measured is the fallback implementation, not the vendor one.
+
+### W15 — the feel pass, and what is left for the person holding the pen
+
+**Done here: the grain was tuned against a screenshot, twice.** The first
+setting — strength 0.55 over a 0.34–0.72 cutoff window — came out as salt and
+pepper: a scatter of near-black specks on light grey. That is what a *narrow*
+window does, and it is right for a tooth and wrong for a whole field. Widened
+to 0.22–0.86 at strength 0.42, the stroke reads as mottled continuous tone with
+ragged edges, which is graphite. Both screenshots were taken from the device
+running the real preset, not from a unit test.
+
+**Not done, and it is not the sort of thing that can be:** the judgement. W10
+says the pencil is judged *"on the tablet with the pen by the person who will
+use it, in the user's own words, recorded in the plan the way W1's and W16's
+verdicts were."* No screenshot substitutes for that, and two specific things
+cannot be checked without a pen at all, because the stress harness feeds a tilt
+of zero:
+
+- **the elliptical dab**, whose whole claim is that one tool covers both of the
+  reference's postures without a mode switch, and
+- **the barrel-button eraser**, which needs a physical button held.
+
+**Also outstanding: the re-film.** W0's tool is validated and the panel script
+works, so this is a take rather than a project.
 
 ### W15 — reconcile, including against this document
 
