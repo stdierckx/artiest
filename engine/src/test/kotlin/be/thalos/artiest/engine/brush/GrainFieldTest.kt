@@ -121,4 +121,67 @@ class GrainFieldTest {
         val msEach = (System.nanoTime() - t0) / 1e6 / 10
         assertTrue(msEach < 25.0, "a 128px tile took $msEach ms")
     }
+
+    /**
+     * The complaint that produced the retune, as a test: "graphite grains are
+     * very small in the real world; in our drawing app they are way too big".
+     *
+     * Measured as the average run of same-signed pixels along a row — the
+     * width of a feature. At the default scale a feature has to be a couple of
+     * document pixels, not a dozen.
+     */
+    @Test
+    fun `a feature is a couple of pixels across, not a dozen`() {
+        // The real tile size, not the small one the other tests use: the
+        // feature size is cells-per-tile against document-pixels-per-tile, so
+        // measuring a 64 px tile would report a feature four times too coarse
+        // and fail an implementation that is correct.
+        val n = GrainField.DEFAULT_TILE
+        val spec = GrainSpec(strength = 1f)
+        val t = tile(spec, n)
+        val docPxPerTilePx = spec.scaleDocPx / n
+        var runs = 0
+        var total = 0
+        for (y in 0 until n) {
+            val mean = (0 until n).sumOf { at(t, n, it, y) } / n
+            var run = 0
+            var sign = 0
+            for (x in 0 until n) {
+                val sx = if (at(t, n, x, y) >= mean) 1 else -1
+                if (sx == sign) {
+                    run++
+                } else {
+                    if (run > 0) { runs++; total += run }
+                    sign = sx; run = 1
+                }
+            }
+            if (run > 0) { runs++; total += run }
+        }
+        val featureDocPx = (total.toFloat() / runs) * docPxPerTilePx
+        assertTrue(
+            featureDocPx < 6f,
+            "the average feature is ${"%.1f".format(featureDocPx)} document pixels across",
+        )
+    }
+
+    /**
+     * A fatter pencil leaves a wider mark with the same grain, because the
+     * grain belongs to the paper. Nothing in this file reads the brush's size,
+     * and this is the assertion that keeps it that way.
+     */
+    @Test
+    fun `the grain does not depend on the brush at all`() {
+        // GrainSpec has no size, hardness or pressure field, so there is
+        // nothing a brush could pass in even by accident; what this pins is
+        // that the *same* spec is the same field every time, which is what
+        // makes the tile cacheable across brush changes.
+        val a = tile(GrainSpec(strength = 0.5f, scaleDocPx = 256f))
+        val b = tile(GrainSpec(strength = 0.5f, scaleDocPx = 256f))
+        assertTrue(a.contentEquals(b))
+        // Only its own scale moves it, and that is a property of the paper.
+        assertFalse(
+            GrainSpec(strength = 0.5f, scaleDocPx = 256f) ==
+                GrainSpec(strength = 0.5f, scaleDocPx = 120f),
+        )
+    }
 }

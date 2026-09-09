@@ -38,7 +38,16 @@ import kotlin.math.sin
 class StrokeStress(private val view: InkSurfaceView) {
 
     /** See [start]'s `path` parameter. */
-    enum class Path { SPIRAL, ZIGZAG }
+    enum class Path {
+        SPIRAL,
+        ZIGZAG,
+
+        /**
+         * A stick figure, drawn as nine separate strokes with the pen lifted
+         * between them. See [figureStrokes].
+         */
+        FIGURE,
+    }
 
     var running: Boolean = false
         private set
@@ -70,6 +79,27 @@ class StrokeStress(private val view: InkSurfaceView) {
     private var onDone: (() -> Unit)? = null
     private var constantPressure: Float? = null
     private var path: Path = Path.SPIRAL
+
+    /**
+     * Which stroke of a multi-stroke figure is being drawn, and how long each
+     * has taken.
+     *
+     * **The gap this closes was found by a person, not by the instruments.**
+     * Every stress before this drew exactly one stroke, and the worst defect
+     * the phase produced only existed *between* strokes: the scratch buffer's
+     * region ratcheted upward stroke after stroke, so the first was free, the
+     * third took a second, and a harness that never lifted the pen could not
+     * see it at all. A figure drawn as several separate strokes is the shape
+     * that catches it, and per-stroke times are the readout that makes it
+     * obvious -- a ratchet is a rising sequence, which needs no threshold to
+     * recognise.
+     */
+    private var figureStroke = 0
+    private val strokeMillis = ArrayList<Float>(16)
+    private var strokeStartNanos = 0L
+
+    /** Per-stroke wall time from the last multi-stroke run. */
+    fun strokeTimes(): List<Float> = strokeMillis
 
     /** Scratch for the doc-to-view mapping. Reused; never escapes. */
     private val viewPoint = FloatArray(2)
@@ -117,6 +147,14 @@ class StrokeStress(private val view: InkSurfaceView) {
         this.path = path
         this.onDone = onDone
         this.totalSamples = samples
+        strokeMillis.clear()
+        figureStroke = 0
+        if (path == Path.FIGURE) {
+            figure = figureStrokes()
+            // Short strokes, because a figure is drawn in short strokes and
+            // because the point of this run is how many pen-downs there are.
+            this.totalSamples = maxOf(24, samples / figure.size)
+        }
         sampleIndex = 0
         view.stats.reset()
         startNanos = System.nanoTime()
@@ -125,6 +163,42 @@ class StrokeStress(private val view: InkSurfaceView) {
         dispatch(MotionEvent.ACTION_DOWN, startNanos, 1)
         sampleIndex = 1
         choreographer.postFrameCallback(frame)
+    }
+
+    /**
+     * The strokes of a stick figure, in document coordinates, as fractions of
+     * the page.
+     *
+     * A figure and not a grid of identical dashes, because the strokes have to
+     * differ in length, direction and position: the ratchet was driven by each
+     * stroke's bounds *union*, so strokes that all sit in the same place would
+     * have hidden it as thoroughly as one long stroke did.
+     */
+    private fun figureStrokes(): Array<Array<FloatArray>> = arrayOf(
+        // head, as four arcs of a diamond -- short strokes, one region
+        arrayOf(floatArrayOf(0.50f, 0.14f), floatArrayOf(0.56f, 0.20f)),
+        arrayOf(floatArrayOf(0.56f, 0.20f), floatArrayOf(0.50f, 0.26f)),
+        arrayOf(floatArrayOf(0.50f, 0.26f), floatArrayOf(0.44f, 0.20f)),
+        arrayOf(floatArrayOf(0.44f, 0.20f), floatArrayOf(0.50f, 0.14f)),
+        // spine, a long one across the page
+        arrayOf(floatArrayOf(0.50f, 0.26f), floatArrayOf(0.50f, 0.60f)),
+        // arms and legs, reaching outward in every direction
+        arrayOf(floatArrayOf(0.50f, 0.34f), floatArrayOf(0.28f, 0.46f)),
+        arrayOf(floatArrayOf(0.50f, 0.34f), floatArrayOf(0.72f, 0.46f)),
+        arrayOf(floatArrayOf(0.50f, 0.60f), floatArrayOf(0.34f, 0.86f)),
+        arrayOf(floatArrayOf(0.50f, 0.60f), floatArrayOf(0.66f, 0.86f)),
+    )
+
+    private var figure: Array<Array<FloatArray>> = emptyArray()
+
+    private fun beginFigureStroke() {
+        strokeStartNanos = System.nanoTime()
+        sampleIndex = 0
+        startNanos = strokeStartNanos
+        nextSampleNanos = startNanos
+        downTimeMs = startNanos / 1_000_000L
+        dispatch(MotionEvent.ACTION_DOWN, startNanos, 1)
+        sampleIndex = 1
     }
 
     private fun onFrame(frameTimeNanos: Long) {
@@ -148,6 +222,16 @@ class StrokeStress(private val view: InkSurfaceView) {
 
         if (sampleIndex >= totalSamples) {
             dispatch(MotionEvent.ACTION_UP, frameTimeNanos, 1)
+            if (path == Path.FIGURE && figureStroke < figure.size - 1) {
+                strokeMillis.add((System.nanoTime() - strokeStartNanos) / 1e6f)
+                figureStroke++
+                beginFigureStroke()
+                choreographer.postFrameCallback(frame)
+                return
+            }
+            if (path == Path.FIGURE) {
+                strokeMillis.add((System.nanoTime() - strokeStartNanos) / 1e6f)
+            }
             running = false
             val done = onDone
             onDone = null
@@ -206,7 +290,13 @@ class StrokeStress(private val view: InkSurfaceView) {
         val cy = view.document.heightPx * 0.5f
         val xDoc: Float
         val yDoc: Float
-        if (path == Path.SPIRAL) {
+        if (path == Path.FIGURE) {
+            val leg = figure[figureStroke]
+            val a = leg[0]
+            val b = leg[1]
+            xDoc = view.document.widthPx * (a[0] + (b[0] - a[0]) * t)
+            yDoc = view.document.heightPx * (a[1] + (b[1] - a[1]) * t)
+        } else if (path == Path.SPIRAL) {
             val angle = t * TURNS * TWO_PI
             val radius = 200f + t * 800f
             xDoc = cx + radius * cos(angle)

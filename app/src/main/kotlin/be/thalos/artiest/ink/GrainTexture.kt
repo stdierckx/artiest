@@ -38,8 +38,7 @@ class GrainTexture {
         private set
 
     /**
-     * A shader whose alpha is the grain, in the coordinates of a buffer whose
-     * top-left is document ([docX], [docY]).
+     * A shader whose alpha is the grain, anchored to the document's origin.
      *
      * **Not applied to the buffer, composed with it.** The wet pass composites
      * the scratch every frame, so a destructive `DST_IN` pass would multiply
@@ -51,7 +50,7 @@ class GrainTexture {
      * Returns null when [want] is inactive, so callers skip the whole thing
      * rather than multiplying by a field of ones.
      */
-    fun shaderFor(want: GrainSpec, docX: Int, docY: Int): Shader? {
+    fun shaderFor(want: GrainSpec): Shader? {
         if (!want.isActive) return null
         if (spec != want || shader == null) rebuild(want)
         val sh = shader ?: return null
@@ -61,10 +60,18 @@ class GrainTexture {
         // origin sits at (docX, docY) in document space while the grain is
         // measured from the document's origin -- which is exactly what makes
         // the texture belong to the paper rather than to the stroke.
+        // Scale only. **No translate, and the translate is what was wrong.**
+        // A paint's shader is evaluated in the canvas's own coordinate space,
+        // which here is document space -- so the tile is already anchored to
+        // the page and needs nothing further. The first version translated by
+        // the scratch buffer's origin, which moves: as a stroke grew, and again
+        // between the wet pass and the commit, the grain slid to a new place.
+        // From the outside that is a stroke that visibly re-textures itself the
+        // instant the pen lifts, which is distracting in the way only a
+        // drawing tool can be -- the mark you made is not the mark you keep.
         val s = want.scaleDocPx / bmp.width
         localMatrix.reset()
         localMatrix.setScale(s, s)
-        localMatrix.postTranslate(-docX.toFloat(), -docY.toFloat())
         sh.setLocalMatrix(localMatrix)
         return sh
     }

@@ -92,13 +92,22 @@ class Stroke private constructor(
     /** Dab [i]'s major-axis angle in radians. Meaningless when [aspect] is 1. */
     fun rotation(i: Int): Float = dabs[i * STRIDE + 4]
 
+    /**
+     * Dab [i]'s own paint, 0..1 — how much of the stroke's colour it lays.
+     *
+     * Per dab and not per stroke because pressure varies within a stroke and
+     * graphite gets darker where you lean on it. 1 for every brush that does
+     * not drive flow, which is every brush before W15.
+     */
+    fun flow(i: Int): Float = dabs[i * STRIDE + 5]
+
     override fun toString(): String =
         "Stroke($dabCount dabs, color 0x${colorArgb.toUInt().toString(16)}, $bounds)"
 
     companion object {
 
         /**
-         * Floats per dab: x, y, radius, aspect, rotation.
+         * Floats per dab: x, y, radius, aspect, rotation, flow.
          *
          * **Widened from 3 at W9, and the dab goldens did not move**, which is
          * the check that matters: the golden files serialize x, y and radius,
@@ -107,7 +116,7 @@ class Stroke private constructor(
          * per stroke, against the alternative of a parallel array or a second
          * stroke type for elliptical brushes.
          */
-        const val STRIDE = 5
+        const val STRIDE = 6
 
         /**
          * Copy [dabCount] dabs out of a builder's buffer and freeze them.

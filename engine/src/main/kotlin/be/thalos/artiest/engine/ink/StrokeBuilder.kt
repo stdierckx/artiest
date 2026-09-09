@@ -289,6 +289,9 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     /** Dab [i]'s major-axis angle. See `Stroke.rotation`. */
     fun rotation(i: Int): Float = dabs[i * Stroke.STRIDE + 4]
 
+    /** Dab [i]'s own paint. See `Stroke.flow`. */
+    fun flow(i: Int): Float = dabs[i * Stroke.STRIDE + 5]
+
     /**
      * The stroke's document-space extent so far, for the wet pass's dirty
      * rectangle. Allocates; call it once per frame, not once per dab.
@@ -309,12 +312,13 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         var py = y
         var aspect = 1f
         var rotation = 0f
+        var flow = pen.flow
 
-        // W9. Skipped entirely for a brush with no shape dynamics, which is
-        // every brush Phase 1 had: filling a context and evaluating four
-        // options costs more than the pen's whole dab, and the pen's answers
-        // would all be the constants above.
-        if (pen.hasShapeDynamics) {
+        // W9. Skipped entirely for a brush with no dynamics, which is every
+        // brush Phase 1 had: filling a context and evaluating five options
+        // costs more than the pen's whole dab, and the pen's answers would all
+        // be the constants above.
+        if (pen.hasDynamics) {
             val c = context
             c.pressure = pressure
             c.elapsedMillis = elapsedMillis
@@ -324,6 +328,12 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
             c.directionRad = lastDirection
             c.randomDab = nextRandom()
             c.randomStroke = strokeRandom
+            // Size through the option when it has sensors, so tilt can widen
+            // the mark the way laying a pencil over does. Without a sensor the
+            // option is the constant max, which is why the pen keeps the
+            // two-argument form above.
+            if (pen.size.inputCount > 0) radius = pen.sizeFor(c) * 0.5f
+            flow = pen.flowOption.valueFor(c)
             aspect = pen.aspect.valueFor(c).coerceIn(ASPECT_MIN, 1f)
             rotation = pen.rotation.valueFor(c)
             val jitter = pen.sizeJitter.valueFor(c)
@@ -343,6 +353,7 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         dabs[o + 2] = radius
         dabs[o + 3] = aspect
         dabs[o + 4] = rotation
+        dabs[o + 5] = flow
         dabCount++
         // The bounds take the *major* radius whatever the aspect, because an
         // ellipse fits inside the circle of its major axis at every rotation.

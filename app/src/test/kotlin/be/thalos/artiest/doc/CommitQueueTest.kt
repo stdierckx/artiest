@@ -29,7 +29,7 @@ class CommitQueueTest {
 
     private fun stroke(x: Float): Stroke = Stroke.copyOf(
         // x, y, radius, aspect, rotation -- see Stroke.STRIDE, widened at W9.
-        dabs = floatArrayOf(x, 0f, 1f, 1f, 0f),
+        dabs = floatArrayOf(x, 0f, 1f, 1f, 0f, 1f),
         dabCount = 1,
         colorArgb = 0xFF000000.toInt(),
         antiAlias = true,

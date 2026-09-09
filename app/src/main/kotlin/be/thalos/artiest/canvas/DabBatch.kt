@@ -56,13 +56,21 @@ class DabBatch internal constructor(
     /** True for a batch allocated past the ring — see [DabBatchPool.spills]. */
     internal var spilled: Boolean = false
 
-    internal fun add(x: Float, y: Float, radius: Float, aspect: Float = 1f, rotation: Float = 0f) {
+    internal fun add(
+        x: Float,
+        y: Float,
+        radius: Float,
+        aspect: Float = 1f,
+        rotation: Float = 0f,
+        flow: Float = 1f,
+    ) {
         val o = count * STRIDE
         dabs[o] = x
         dabs[o + 1] = y
         dabs[o + 2] = radius
         dabs[o + 3] = aspect
         dabs[o + 4] = rotation
+        dabs[o + 5] = flow
         count++
     }
 
@@ -83,6 +91,9 @@ class DabBatch internal constructor(
     /** Major-axis angle in radians. See `Stroke.rotation`. */
     fun rotation(i: Int): Float = dabs[i * STRIDE + 4]
 
+    /** This dab's own paint, 0..1. See `Stroke.flow`. */
+    fun flow(i: Int): Float = dabs[i * STRIDE + 5]
+
     /** How many dabs a reader should draw. */
     val size: Int get() = count
 
@@ -91,13 +102,13 @@ class DabBatch internal constructor(
 
     companion object {
         /**
-         * Floats per dab: x, y, radius, aspect, rotation. Matches
+         * Floats per dab: x, y, radius, aspect, rotation, flow. Matches
          * `Stroke.STRIDE` by contract, and the contract is why they are written
          * as one number rather than two that happen to agree: the wet pass and
          * the dry commit read the same layout, and a batch a stride behind a
          * stroke draws garbage rather than failing.
          */
-        const val STRIDE = 5
+        const val STRIDE = 6
 
         /**
          * 64 dabs, which is not a round number chosen for looking like one.

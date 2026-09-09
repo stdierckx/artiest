@@ -138,7 +138,7 @@ class DocumentTest {
     private fun boundsOf(x: Float, y: Float, radius: Float): Bounds =
         MutableBounds().apply { add(x, y, radius) }.snapshot()
     private fun oneDabStroke(x: Float): Stroke = Stroke.copyOf(
-        dabs = floatArrayOf(x, 10f, 2f, 1f, 0f),
+        dabs = floatArrayOf(x, 10f, 2f, 1f, 0f, 1f),
         dabCount = 1,
         colorArgb = Color.BLACK,
         antiAlias = true,

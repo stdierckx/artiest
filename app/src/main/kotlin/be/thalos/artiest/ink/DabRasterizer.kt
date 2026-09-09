@@ -103,12 +103,16 @@ class DabRasterizer(
         if (n == 0) return
         paint.color = batch.colorArgb
         paint.isAntiAlias = batch.antiAlias
+        baseAlpha = android.graphics.Color.alpha(batch.colorArgb)
         val save = canvas.save()
         canvas.concat(docToView)
         canvas.clipRect(0f, 0f, docWidthPx.toFloat(), docHeightPx.toFloat())
         var i = 0
         while (i < n) {
-            dab(canvas, batch.x(i), batch.y(i), batch.radius(i), batch.aspect(i), batch.rotation(i))
+            dab(
+                canvas, batch.x(i), batch.y(i), batch.radius(i),
+                batch.aspect(i), batch.rotation(i), batch.flow(i),
+            )
             i++
         }
         canvas.restoreToCount(save)
@@ -126,13 +130,24 @@ class DabRasterizer(
         if (n == 0) return
         paint.color = batch.colorArgb
         paint.isAntiAlias = batch.antiAlias
-        if (flow < 1f) paint.alpha = (flow.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        baseAlpha = android.graphics.Color.alpha(batch.colorArgb)
+        strokeFlow = flow
         var i = 0
         while (i < n) {
-            dab(canvas, batch.x(i), batch.y(i), batch.radius(i), batch.aspect(i), batch.rotation(i))
+            dab(
+                canvas, batch.x(i), batch.y(i), batch.radius(i),
+                batch.aspect(i), batch.rotation(i), batch.flow(i),
+            )
             i++
         }
+        strokeFlow = 1f
     }
+
+    /** The stroke colour's own alpha, so per-dab flow scales it rather than replacing it. */
+    private var baseAlpha: Int = 255
+
+    /** The brush's flow, for dabs that carry none of their own. */
+    private var strokeFlow: Float = 1f
 
     /** The document-space rectangle a batch's dabs cover, rim included. */
     fun boundsOf(batch: DabBatch, out: FloatArray) {
@@ -170,18 +185,21 @@ class DabRasterizer(
     fun drawDry(canvas: Canvas, stroke: Stroke, flowOverride: Float = 1f) {
         paint.color = stroke.colorArgb
         paint.isAntiAlias = stroke.antiAlias
+        baseAlpha = android.graphics.Color.alpha(stroke.colorArgb)
         // Flow is per-dab paint and belongs on the dab; opacity is per-stroke
         // and belongs on the composite. Applying flow here and opacity there is
         // what makes the two independent rather than one slider spelled twice.
-        if (flowOverride < 1f) {
-            paint.alpha = (flowOverride.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-        }
+        strokeFlow = flowOverride
         val n = stroke.dabCount
         var i = 0
         while (i < n) {
-            dab(canvas, stroke.x(i), stroke.y(i), stroke.radius(i), stroke.aspect(i), stroke.rotation(i))
+            dab(
+                canvas, stroke.x(i), stroke.y(i), stroke.radius(i),
+                stroke.aspect(i), stroke.rotation(i), stroke.flow(i),
+            )
             i++
         }
+        strokeFlow = 1f
     }
 
     /**
@@ -206,8 +224,16 @@ class DabRasterizer(
         radius: Float,
         aspect: Float = 1f,
         rotation: Float = 0f,
+        dabFlow: Float = 1f,
     ) {
         if (!(radius > 0f)) return
+        // Per-dab flow scales the colour's own alpha rather than replacing it,
+        // so a translucent ink stays translucent. Applied for every dab because
+        // pressure varies within a stroke -- graphite gets darker where you
+        // lean on it, and a per-stroke alpha cannot express that.
+        val f = strokeFlow * dabFlow
+        paint.alpha =
+            if (f >= 1f) baseAlpha else (baseAlpha * f.coerceIn(0f, 1f) + 0.5f).toInt()
         val cache = stamps
         // An elliptical dab has no circle path. drawCircle cannot express it at
         // all, so a shaped brush forces the stamp regardless of [mode] rather

@@ -249,7 +249,7 @@ class BoundsAdversarialTest {
     /**
      * CHARACTERIZATION: `Stroke.copyOf`'s buffer-size guard is written as
      * `dabs.size >= dabCount * STRIDE`, and that product overflows Int at
-     * 715_827_883 dabs, going negative — so the guard passes for a four-float
+     * 357_913_942 dabs, going negative — so the guard passes for a four-float
      * buffer and the failure arrives from `FloatArray(negative)` instead.
      *
      * Not reachable from a pen stroke, and the throw is still a throw. Recorded
@@ -259,9 +259,9 @@ class BoundsAdversarialTest {
      */
     @Test
     fun `the dab count guard in Stroke overflows rather than rejecting`() {
-        assertTrue(715_827_883 * Stroke.STRIDE < 0, "the product is ${715_827_883 * Stroke.STRIDE}")
+        assertTrue(357_913_942 * Stroke.STRIDE < 0, "the product is ${357_913_942 * Stroke.STRIDE}")
         assertFailsWith<NegativeArraySizeException> {
-            Stroke.copyOf(FloatArray(4), 715_827_883, 0xFF000000.toInt(), true, Bounds.of(0f, 0f, 1f, 1f))
+            Stroke.copyOf(FloatArray(6), 357_913_942, 0xFF000000.toInt(), true, Bounds.of(0f, 0f, 1f, 1f))
         }
     }
 

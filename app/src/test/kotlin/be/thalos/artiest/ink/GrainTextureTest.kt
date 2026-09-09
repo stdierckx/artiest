@@ -48,17 +48,17 @@ class GrainTextureTest {
 
     @Test
     fun `an inactive grain hands back no shader at all`() {
-        assertNull(GrainTexture().shaderFor(GrainSpec(strength = 0f), 0, 0))
+        assertNull(GrainTexture().shaderFor(GrainSpec(strength = 0f)))
     }
 
     @Test
     fun `an active grain builds one tile and reuses it`() {
         val g = GrainTexture()
         val spec = GrainSpec(strength = 0.8f)
-        assertNotNull(g.shaderFor(spec, 0, 0))
-        assertNotNull(g.shaderFor(spec, 40, 40))
-        assertEquals(1L, g.builds, "moving the origin should not rebuild the tile")
-        g.shaderFor(spec.copy(strength = 0.4f), 0, 0)
+        assertNotNull(g.shaderFor(spec))
+        assertNotNull(g.shaderFor(spec))
+        assertEquals(1L, g.builds, "asking twice should not rebuild the tile")
+        g.shaderFor(spec.copy(strength = 0.4f))
         assertEquals(2L, g.builds, "a changed spec should rebuild")
     }
 
@@ -71,9 +71,7 @@ class GrainTextureTest {
             fill(scratch, 16f, 16f, 80f, 80f)
             val g = GrainTexture()
             val spec = GrainSpec(strength = strength, scaleDocPx = 64f)
-            scratch.compositeInto(
-                Canvas(out), 1f, g.shaderFor(spec, scratch.originX, scratch.originY),
-            )
+            scratch.compositeInto(Canvas(out), 1f, g.shaderFor(spec))
             return coverage(out)
         }
         val plain = paint(0f)
@@ -92,24 +90,39 @@ class GrainTextureTest {
      * under it is different. If the two came out identical the texture would be
      * locked to the stroke, which is the failure this whole design avoids.
      */
+    /**
+     * The canvas-space property, and the bug that broke it.
+     *
+     * The same shape drawn at two different places on the page must pick up
+     * *different* grain, because the paper under it is different — and the same
+     * shape drawn twice at the *same* place must pick up the same grain, which
+     * is what makes a stroke keep its texture when the pen lifts. The grain
+     * used to be anchored to the scratch buffer's origin, which moves as the
+     * stroke grows and again between the wet pass and the commit, so it failed
+     * the second half: the stroke visibly re-textured itself at pen-up.
+     */
     @Test
-    fun `the grain belongs to the paper, not to the stroke`() {
-        fun strip(originX: Int): IntArray {
+    fun `the grain belongs to the paper, and stays put`() {
+        fun strip(atX: Float, bufferOrigin: Float): IntArray {
             val out = surface()
             val scratch = ScratchLayer()
-            scratch.begin(Bounds.of(0f, 0f, 64f, 64f))
-            fill(scratch, 0f, 0f, 64f, 64f)
+            // The buffer's own origin is varied independently of where the
+            // ink lands, which is exactly what happens as a stroke grows.
+            scratch.begin(Bounds.of(bufferOrigin, 0f, bufferOrigin + 90f, 90f))
+            fill(scratch, atX, 10f, atX + 40f, 60f)
             val g = GrainTexture()
-            val spec = GrainSpec(strength = 1f, scaleDocPx = 48f)
-            // Pretend the buffer sits at a different place on the page.
-            scratch.compositeInto(Canvas(out), 1f, g.shaderFor(spec, originX, 0))
-            return IntArray(48) { Color.alpha(out.getPixel(it, 20)) }
+            scratch.compositeInto(
+                Canvas(out), 1f, g.shaderFor(GrainSpec(strength = 1f, scaleDocPx = 48f)),
+            )
+            return IntArray(40) { Color.alpha(out.getPixel(atX.toInt() + it, 30)) }
         }
-        val here = strip(0)
-        val elsewhere = strip(23)
         assertTrue(
-            !here.contentEquals(elsewhere),
+            !strip(4f, 0f).contentEquals(strip(40f, 0f)),
             "the grain followed the stroke instead of staying on the page",
+        )
+        assertTrue(
+            strip(4f, 0f).contentEquals(strip(4f, -30f)),
+            "the grain moved when the buffer did: a stroke would re-texture itself at pen-up",
         )
     }
 
@@ -126,7 +139,7 @@ class GrainTextureTest {
         fill(scratch, 16f, 16f, 80f, 80f)
         val g = GrainTexture()
         val spec = GrainSpec(strength = 1f, scaleDocPx = 64f)
-        val shader = g.shaderFor(spec, scratch.originX, scratch.originY)
+        val shader = g.shaderFor(spec)
 
         val once = surface()
         scratch.drawOnto(Canvas(once), 1f, shader)

@@ -37,10 +37,19 @@ object GrainField {
     fun tile(spec: GrainSpec, size: Int = DEFAULT_TILE): ByteArray {
         require(size >= 8 && (size and (size - 1)) == 0) { "tile size must be a power of two, was $size" }
         val out = ByteArray(size * size)
-        // Three octaves. One is too regular to read as paper; more than three
-        // is invisible at the scales a dab covers and costs generation time.
-        val lattices = intArrayOf(size / 4, size / 8, size / 16)
-        val weights = floatArrayOf(0.6f, 0.3f, 0.1f)
+        // Three octaves, weighted toward the *finest*, which is the correction
+        // that made this read as graphite rather than as noise.
+        //
+        // The first version put 0.6 of the weight on a 32-cell lattice, so at
+        // any sensible tile scale the dominant feature was several document
+        // pixels across. Real graphite tooth is a fraction of a millimetre —
+        // on this page, one or two pixels — and a speck you can pick out
+        // individually reads as dirt on the paper, not as pencil. The fine
+        // octave now leads and the coarse ones only modulate it, which is what
+        // gives the patchiness a real page has without making the patches
+        // visible as objects.
+        val lattices = intArrayOf(size / 2, size / 4, size / 8)
+        val weights = floatArrayOf(0.55f, 0.30f, 0.15f)
         var i = 0
         for (y in 0 until size) {
             for (x in 0 until size) {
@@ -115,11 +124,17 @@ object GrainField {
     }
 
     /**
-     * 128 px. Small enough to generate in a millisecond and to upload once,
-     * large enough that the repeat is not visible as a pattern at the scales a
-     * dab covers.
+     * 256 px, raised from 128 together with the octave weights above.
+     *
+     * The two go together: a finer dominant octave needs more tile pixels to
+     * carry it, or the noise lands at the tile's own resolution and aliases.
+     * 256 with a 128-cell fine lattice puts two tile pixels in each cell, and
+     * at the default scale that is about two document pixels a cell — paper
+     * tooth rather than gravel. Generation is a few milliseconds, once per
+     * grain setting, and the repeat is 256 document pixels, which is far enough
+     * apart not to read as a pattern.
      */
-    const val DEFAULT_TILE: Int = 128
+    const val DEFAULT_TILE: Int = 256
 }
 
 /**
@@ -133,10 +148,15 @@ data class GrainSpec(
     /**
      * How many document pixels one tile covers. Larger is coarser paper.
      *
-     * Independent of dab size on purpose — this is a property of the *paper*,
-     * not of the pencil, so it must not change when the nib does. That is what
-     * "canvas-space texture" means, and getting it wrong is the classic
-     * mistake: grain locked to the dab swims with the stroke and reads as a
+     * **Independent of dab size, and that is the point rather than an
+     * incidental property.** In the world a fatter pencil leaves a wider mark
+     * with grain of exactly the same size, because the grain belongs to the
+     * paper and the paper has not changed. A texture that scaled with the nib
+     * would make a big brush look like a close-up photograph of a small one.
+     * Nothing here reads the brush's size, so the size slider cannot move it.
+     *
+     * It is also why the grain is anchored to the document rather than to the
+     * dab: grain locked to the dab swims along with the stroke and reads as a
      * dirty brush rather than as a rough surface.
      */
     val scaleDocPx: Float = 256f,

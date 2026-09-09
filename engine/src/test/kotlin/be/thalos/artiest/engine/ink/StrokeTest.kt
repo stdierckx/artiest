@@ -21,8 +21,14 @@ class StrokeTest {
     private fun dabs(vararg values: Float) = values
 
     /** One dab's five floats: x, y, radius, aspect, rotation. See [Stroke.STRIDE]. */
-    private fun dab(x: Float, y: Float, r: Float, aspect: Float = 1f, rot: Float = 0f) =
-        floatArrayOf(x, y, r, aspect, rot)
+    private fun dab(
+        x: Float,
+        y: Float,
+        r: Float,
+        aspect: Float = 1f,
+        rot: Float = 0f,
+        flow: Float = 1f,
+    ) = floatArrayOf(x, y, r, aspect, rot, flow)
 
     @Test
     fun `the accessors read back the dabs they were given`() {

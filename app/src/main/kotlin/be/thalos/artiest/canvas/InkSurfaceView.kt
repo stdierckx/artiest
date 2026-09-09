@@ -612,9 +612,14 @@ class InkSurfaceView(
         pen.erase = eraserTool || barrel
     }
 
-    /** The grain shader anchored to the scratch's current origin, or null. */
-    private fun grainShader() =
-        grain.shaderFor(pen.grain, scratch.originX, scratch.originY)
+    /**
+     * The grain shader, or null when the brush has none.
+     *
+     * Anchored to the document, not to the scratch buffer — see
+     * [GrainTexture.shaderFor]. That is what makes a stroke keep the texture it
+     * was drawn with when the pen lifts.
+     */
+    private fun grainShader() = grain.shaderFor(pen.grain)
 
     /** The scratch's composite paint for the wet pass. See [drawWetIndirect]. */
     private val wetPaint = Paint().apply {
@@ -1281,6 +1286,19 @@ class InkSurfaceView(
                 frozen.viewToDoc(s.x, s.y, docPoint)
                 lastRealDocX = docPoint[0]
                 lastRealDocY = docPoint[1]
+                // Tilt first, so the filter has this sample's attitude before
+                // the dab that uses it is emitted. It is a separate call
+                // because the coordinates are converted in place and handed
+                // over as floats, while tilt needs no conversion at all -- it
+                // is an angle of the pen against the glass and has nothing to
+                // do with where the document is.
+                //
+                // **Missing this line is why tilt did nothing on the device.**
+                // StrokeBuilder.add(PenSample) feeds the filter, but the app
+                // uses the by-parts overload for the reason above, so every dab
+                // the app ever laid was drawn at a tilt of zero. The engine
+                // tests passed throughout, because they use the PenSample form.
+                builder.addTilt(s.tilt, s.orientation, s.eventTimeNanos)
                 builder.add(docPoint[0], docPoint[1], s.pressure, s.eventTimeNanos)
                 // Stabilized and in document space, which is what the gate has
                 // to see: raw samples carry the digitizer's jitter, and jitter
@@ -1386,7 +1404,7 @@ class InkSurfaceView(
                 val b = batch ?: acquireBatch().also { batch = it }
                 b.add(
                     builder.x(emitted), builder.y(emitted), builder.radius(emitted),
-                    builder.aspect(emitted), builder.rotation(emitted),
+                    builder.aspect(emitted), builder.rotation(emitted), builder.flow(emitted),
                 )
                 emitted++
                 if (b.isFull) {

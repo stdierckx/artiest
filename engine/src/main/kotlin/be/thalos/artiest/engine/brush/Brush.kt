@@ -132,7 +132,11 @@ class Brush {
      * a limit instead of straight to black. Collapsing the two into one slider
      * is the shortcut that makes a pencil impossible.
      */
-    var flow: Float = 1f
+    val flowOption: CurveOption = CurveOption(0f, 1f)
+
+    var flow: Float
+        get() = flowOption.max
+        set(v) { flowOption.max = v }
 
     /**
      * The paper's tooth. See [GrainField] for why it is generated rather than
@@ -382,6 +386,8 @@ class Brush {
         copyOption(rotation, it.rotation)
         copyOption(scatter, it.scatter)
         copyOption(sizeJitter, it.sizeJitter)
+        copyOption(flowOption, it.flowOption)
+        copyOption(size, it.size)
     }
 
     /** Whether any W9 shape dynamic is switched on. */
@@ -390,6 +396,10 @@ class Brush {
             scatter.inputCount > 0 || sizeJitter.inputCount > 0 ||
             aspect.min != 1f || aspect.max != 1f ||
             scatter.max != 0f || sizeJitter.max != 0f
+
+    /** Whether anything at all has to be evaluated per dab. */
+    val hasDynamics: Boolean
+        get() = hasShapeDynamics || size.inputCount > 0 || flowOption.inputCount > 0
 
     override fun toString(): String =
         "Brush(size=$sizeMin..$sizeMax, spacing=$spacing, curve=$sizeCurve, " +

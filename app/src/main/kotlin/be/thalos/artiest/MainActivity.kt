@@ -262,6 +262,10 @@ private val STRESS_MODES = listOf(
     Triple("Sweep", null, StrokeStress.Path.SPIRAL),
     Triple("Firm", 1f, StrokeStress.Path.SPIRAL),
     Triple("Zigzag", 1f, StrokeStress.Path.ZIGZAG),
+    // Nine separate strokes with the pen lifted between them. The only mode
+    // that puts the pen down more than once, and the only one that could have
+    // caught the scratch buffer ratcheting between strokes.
+    Triple("Figure", null, StrokeStress.Path.FIGURE),
 )
 
 @Composable
@@ -523,6 +527,7 @@ private fun CanvasScreen(
                     text = readout(
                         surface, document, report, refreshHzNow(), policy,
                         reject, export, exporting, generation,
+                        stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
                     ),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -925,6 +930,7 @@ private fun readout(
     export: ExportResult?,
     exporting: Boolean,
     generation: Int,
+    strokeTimes: String,
 ): String {
     if (surface == null) return "surface  -"
     val p = surface.batches
@@ -981,6 +987,7 @@ private fun readout(
         "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
         "${surface.grainBuilds} built\n" +
         "wetpass  ${r(surface.wetMeanMs, 3)} ms mean over ${surface.wetCalls} batches\n" +
+        "figure   ${strokeTimes.ifEmpty { "not run" }}\n" +
         "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
         "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +
         "${surface.scratchGrowths} grown\n" +

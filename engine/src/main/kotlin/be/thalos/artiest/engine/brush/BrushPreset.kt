@@ -64,8 +64,14 @@ enum class BrushPreset(val label: String) {
             brush.sizeMin = 1.5f
             brush.sizeMax = 32f
             brush.hardness = 0.85f
-            brush.opacity = 0.85f
-            brush.flow = 0.35f
+            // Less opaque than a pen, and it builds. A stroke tops out at 0.72
+            // however often it crosses itself, and each pass lays between 0.10
+            // and 0.45 depending on how hard you lean -- so going over the same
+            // place darkens it toward the ceiling instead of straight to black.
+            brush.opacity = 0.72f
+            brush.flowOption.min = 0.10f
+            brush.flowOption.max = 0.45f
+            brush.flowOption.drive(Sensor.PRESSURE, ResponseCurve.power(1.4f))
             brush.stabilization = 0.10f
             // Tuned against a screenshot rather than guessed, and the first
             // guess was wrong in a specific way: strength 0.55 over a 0.34..0.72
@@ -76,13 +82,30 @@ enum class BrushPreset(val label: String) {
             // the tails while leaving most of the stroke in the middle, and the
             // strength comes down so the darkest specks are graphite rather
             // than ink.
+            // 160 doc px a tile, against a 128-cell fine lattice, puts a grain
+            // cell at about 1.25 document pixels -- roughly a fifth of a
+            // millimetre on this page, which is paper tooth. The first two
+            // attempts were 220 and 256, where a cell was several pixels and
+            // the specks could be picked out individually: that reads as dirt
+            // on the paper rather than as pencil.
             brush.grain = GrainSpec(
-                scaleDocPx = 220f,
+                scaleDocPx = 160f,
                 strength = 0.42f,
                 cutoffLow = 0.22f,
                 cutoffHigh = 0.86f,
                 seed = 11,
             )
+            // **Tilt widens the mark, and that is the half that was missing.**
+            // An ellipse whose minor axis shrinks with tilt gets *narrower*
+            // laid over, which is the opposite of a pencil: laying one down
+            // puts the side of the lead on the paper and makes a broader mark.
+            // So tilt drives the size as well, combined with pressure by
+            // MAXIMUM rather than MULTIPLY -- a pencil on its side leaves a
+            // broad mark however lightly it is held, and multiplying would
+            // make a light tilted stroke vanish.
+            brush.size.combine = CurveOption.Combine.MAXIMUM
+            brush.size.drive(Sensor.PRESSURE, ResponseCurve.CUBIC)
+            brush.size.drive(Sensor.TILT, ResponseCurve.power(1.3f))
             brush.aspect.min = 1f
             brush.aspect.max = 0.30f
             brush.aspect.drive(Sensor.TILT)

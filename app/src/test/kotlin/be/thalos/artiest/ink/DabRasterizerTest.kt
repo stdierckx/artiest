@@ -152,7 +152,7 @@ class DabRasterizerTest {
         // that: a stroke at doc (60,60) lands at bitmap (60,60), not somewhere
         // a view transform would have put it.
         clear()
-        val dabs = floatArrayOf(60f, 60f, 5f, 1f, 0f, 100f, 60f, 5f, 1f, 0f)
+        val dabs = floatArrayOf(60f, 60f, 5f, 1f, 0f, 1f, 100f, 60f, 5f, 1f, 0f, 1f)
         val stroke = Stroke.copyOf(
             dabs = dabs,
             dabCount = 2,
@@ -180,7 +180,7 @@ class DabRasterizerTest {
 
         clear()
         val stroke = Stroke.copyOf(
-            dabs = floatArrayOf(70f, 90f, 7f, 1f, 0f),
+            dabs = floatArrayOf(70f, 90f, 7f, 1f, 0f, 1f),
             dabCount = 1,
             colorArgb = Color.BLACK,
             antiAlias = true,
