@@ -95,6 +95,32 @@ enum class BrushPreset(val label: String) {
     /** A fresh brush configured as this preset. */
     fun create(): Brush = Brush().also { applyTo(it) }
 
+    /**
+     * Re-attach only this preset's sensor wiring, leaving every scalar alone.
+     *
+     * For restoring a saved brush: [BrushCodec] round-trips the sensors
+     * faithfully, but a stored file is also the one place a *partial* brush
+     * comes from — an older build's save has no `aspect.drive` line at all —
+     * and a pencil that loads without its tilt is a pencil that has silently
+     * become a fat pen. Re-applying the wiring costs nothing and cannot be
+     * wrong, because the preset is what the wiring is *for*.
+     */
+    fun applyToShapeOnly(brush: Brush) {
+        val fresh = create()
+        for ((from, to) in listOf(
+            fresh.aspect to brush.aspect,
+            fresh.rotation to brush.rotation,
+            fresh.scatter to brush.scatter,
+            fresh.sizeJitter to brush.sizeJitter,
+        )) {
+            if (to.inputCount > 0) continue
+            to.min = from.min
+            to.max = from.max
+            to.combine = from.combine
+            for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
+        }
+    }
+
     protected fun reset(brush: Brush) {
         val d = Brush()
         brush.sizeMin = d.sizeMin

@@ -57,7 +57,9 @@ import be.thalos.artiest.canvas.InputStats
 import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
+import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
@@ -302,8 +304,11 @@ private fun CanvasScreen(
     /** W8. Zero is the pen, untextured, which is what Phase 1 shipped. */
     var grain by remember { mutableFloatStateOf(0f) }
 
-    /** W10. Which of the two tools is in the hand. */
-    var preset by remember { mutableStateOf(BrushPreset.PEN) }
+    val brushCtx = LocalContext.current
+    val brushStore = remember(brushCtx) { BrushStore(brushCtx) }
+
+    /** W10. Which of the two tools is in the hand, restored from last time. */
+    var preset by remember { mutableStateOf(brushStore.loadPreset()) }
 
     /** W11. Whether that tool is currently taking ink out instead of putting it in. */
     var eraser by remember { mutableStateOf(false) }
@@ -327,6 +332,43 @@ private fun CanvasScreen(
 
     // Applied on every change and once when the view arrives, because the view
     // is built by the AndroidView factory after the first composition.
+    // W12. The stored brush is applied once, when the view arrives, and the
+    // slider states are pulled back from it — the same order the preset button
+    // uses, and for the same reason: pushing the sliders first would write
+    // their defaults over the brush that was just restored.
+    LaunchedEffect(surface) {
+        val v = surface ?: return@LaunchedEffect
+        val stored = brushStore.load()
+        BrushCodec.decode(BrushCodec.encode(stored))?.let { b ->
+            // Qualified, every one of them: `sizeMax`, `opacity`, `flow` and
+            // `grain` are all names of Compose state in this scope, and a local
+            // variable shadows an implicit receiver's member. Unqualified, this
+            // block would assign the sliders to themselves and leave the brush
+            // untouched -- and only `grain` would fail to compile.
+            val pen = v.pen
+            pen.sizeMin = b.sizeMin
+            pen.sizeMax = b.sizeMax
+            pen.sizeCurve = b.sizeCurve
+            pen.spacing = b.spacing
+            pen.isotropicSpacing = b.isotropicSpacing
+            pen.hardness = b.hardness
+            pen.opacity = b.opacity
+            pen.flow = b.flow
+            pen.stabilization = b.stabilization
+            pen.antiAlias = b.antiAlias
+            pen.onsetMillis = b.onsetMillis
+            pen.onsetPressure = b.onsetPressure
+            pen.grain = b.grain
+            pen.erase = b.erase
+            preset.applyToShapeOnly(v.pen)
+        }
+        sizeMax = v.pen.sizeMax
+        smoothing = v.pen.stabilization
+        opacity = v.pen.opacity
+        flow = v.pen.flow
+        grain = v.pen.grain.strength
+    }
+
     LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
@@ -338,6 +380,7 @@ private fun CanvasScreen(
         v.pen.opacity = opacity
         v.pen.flow = flow
         v.pen.grain = v.pen.grain.copy(strength = grain)
+        brushStore.save(v.pen, preset)
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
