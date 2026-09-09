@@ -569,6 +569,7 @@ it is the direct consequence of the 36 ms finding.
 | 14 | **GATED.** GL engine, entered only on a measurement from 5, 6 or 8 that names what it fixes | `:app` | **High** | 5, 6, 8 | 3+ |
 | 15 | Feel pass, re-film, reconcile `analysis.html` and this plan against what was measured | device, docs | Low | 10 | 1 |
 | C | **Unplanned, done 2026-09-09.** Customisable toolbar: slot model, chooser, persistence. See below | `:app` | Low | — | 0.5 |
+| U | **Unplanned, done 2026-09-09.** Undo and redo by region snapshot, and three chrome defects the tablet found. See below | `:app` | Med | C | 0.5 |
 
 **≈18.5 days if W14 does not fire, plus 3 or more if it does.** Same caveat
 Phase 1's estimate earned: the work happens in sessions, not days, and the items
@@ -649,6 +650,95 @@ scoped, not forgotten. Zoom in and zoom out shipped, because
 **Marker is a question, not a backlog item.** The plan deleted it when the
 reference turned out to be one pencil at two tilts. It comes back only if it is
 wanted for its own sake, and that is the user's call rather than a gap to fill.
+
+### Wu — undo and redo, brought forward out of Phase 3
+
+Asked for directly, while the camera was still away. The plan deferred undo to
+Phase 3 and the deferral had a real reason, so it is worth saying exactly which
+part of that reason survived and which did not.
+
+**What the deferral was actually about.** Undo was grouped with the layer stack,
+tiling and mipmaps because the *good* undo — Krita's `KisTiledDataManager` and
+`KisMementoManager` — is a copy-on-write tile grid, and that grid is the same
+piece of machinery the layer stack and the mipmap chain want. Building it is
+weeks. Grouping them was right. What was wrong was the inference that **no**
+undo could ship before it.
+
+**Region snapshots, not stroke replay, and not tiles.** The edit records the
+pixels under the rectangle it is about to touch, and undo puts them back. Two
+alternatives were considered and rejected on their merits:
+
+- **Replaying the stroke list** is the obvious cheap undo and it is the wrong one
+  *here specifically*, because W9 adds scatter, size jitter and spin. A
+  re-rasterised stroke through a randomised brush is similar, not identical, so
+  undo-then-redo would quietly alter the drawing. It also costs the whole
+  document: undoing the last of three hundred strokes rasterises two hundred and
+  ninety-nine.
+- **Tiles** are the right long-term answer and remain Phase 3.
+
+The snapshot is not a detour around tiling — *"save what is under this rectangle
+before writing it"* is precisely what a tile manager does, one tile at a time.
+`UndoHistory` is written against an `UndoStep` interface with a `bytes` cost, so
+the tiled implementation slots in underneath without the policy above it moving.
+
+**What it costs, stated as numbers rather than as comfort.** A snapshot is the
+stroke's own bounds, which `MutableBounds.add` already accumulates at each dab's
+painted radius — plus one pixel of margin, because antialiasing tints the pixel
+outside the geometry and a patch one pixel short leaves an outline behind every
+undone stroke. A sweeping stroke across the page snapshots the page: 3300 x 2160
+x 4 is 28.5 MB. So there are two caps — **48 MB and 32 steps**, whichever bites
+first — and eviction is from the oldest end, which is the end you will not miss.
+Bitmap pixels are native rather than Java heap since API 26, so this is spent
+against the 4.65 GiB the device reports free, not against the 512 MB heap.
+
+**The one invariant that took real care.** The layer is alpha-carrying, and the
+restore is `PorterDuff.Mode.SRC` rather than ordinary source-over. Compositing a
+patch *over* the layer restores colour and cannot lower alpha, so an undone
+stroke's ink would vanish and its opacity would stay — the drawing would look
+right and export wrong. `PixelPatchTest` asserts a pixel the undone stroke had
+made opaque is transparent again, which is the assertion that fails under
+source-over.
+
+Undo and redo are queued through `CommitQueue` exactly as Clear is, for the same
+reason Clear is: applied directly from the UI thread they would land in front of
+a stroke the render thread has not stamped yet, and undo the wrong one.
+
+**Not shipped with it:** a visual document history you can jump around in. That
+one genuinely does need the tile grid, and it stays in Phase 3.
+
+### Three chrome defects the tablet found, all of them mine or Phase 1's
+
+Worth recording because two of the three had been shipped and passing tests.
+
+**1. The zoom buttons moved the transform and never repainted.** Mine, the same
+day. `requestTransform` deliberately does not redraw — the gesture path calls it
+once per frame and schedules its own render on the Choreographer — and every
+caller without a frame loop of its own therefore has to redraw. `fitToView` had
+the same hole, shipped in Phase 1, and only ever looked correct because
+something else repainted soon after. Fixed with `applyTransform`, which is the
+method that should have existed for button callers all along.
+
+**2. `MIN_SCALE` was 0.5 and the opening view was 0.5.** Phase 1 chose the floor
+for a measured reason that is still true: bilinear filtering is honest to about
+2x minification, below which a panning canvas shimmers, and the fix is a mip
+chain costing ~11 ms to build. What nobody checked was **where the floor sat
+relative to ordinary use**. A portrait document in a landscape window fitted at
+0.436, clamped up to 0.5, and overflowed the viewport by 210 px — and zoom out
+did nothing from the moment the app started. `CanvasMappingTest` had a test
+asserting the overflow was *centred*, which was the right thing to check about
+the wrong situation. Floor lowered to 0.25; the shimmer is accepted at a zoom
+level you look at rather than draw at, and mipmaps stay Phase 3.
+
+**3. The page was portrait on a landscape tablet.** `Document`'s default was
+2160x3300 and the rule behind it — 1.5x the panel on both axes, so the fit is
+exactly two thirds with no letterbox — transfers to landscape unchanged, because
+the panel is 1440x2200 held the other way. 3300x2160 now fills the screen edge
+to edge. Every property the constant's KDoc claims is a property of the pixel
+count, which a rotation does not change.
+
+The pattern in all three is the same and is worth naming: **a limit or a default
+that is correct in isolation and wrong where it actually lands.** None would
+have been caught by more unit tests; all three took a person holding the tablet.
 
 ### W0 — the before-picture, and why it is first
 
@@ -884,8 +974,11 @@ be corrected.
 
 - **Smudge and colour pickup.** A second engine and a second canvas read per dab.
   Phase 3, with W0's bench to price it.
-- **Undo, the layer stack, tiling, mipmaps.** Still Phase 3. W6's scratch buffer
-  is stroke-scoped and is not a step toward tiling; do not let it become one.
+- ~~**Undo**~~ **— brought forward 2026-09-09, on request. See Wu below.** The
+  layer stack, tiling and mipmaps are **still Phase 3**, and the reason undo
+  could come early without dragging them along is written up there. W6's scratch
+  buffer is stroke-scoped and is not a step toward tiling; do not let it become
+  one.
 - **Bitmap brushes, `.gbr`/`.abr` import, brush sequences.** W4's `AlphaMask`
   interface is designed so these are additions rather than rewrites. That is the
   whole investment they get.

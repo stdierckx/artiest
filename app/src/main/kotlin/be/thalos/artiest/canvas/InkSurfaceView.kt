@@ -187,6 +187,29 @@ class InkSurfaceView(
     }
 
     /**
+     * Set a transform and repaint, for callers that are not driving their own
+     * frame loop.
+     *
+     * [requestTransform] deliberately does not redraw: the gesture path calls
+     * it up to once per frame and schedules its own render on the
+     * Choreographer, so a redraw inside it would be a second render per frame.
+     * Every *other* caller — a toolbar button, a menu item, a keyboard
+     * shortcut — has no frame loop of its own, and a transform with no render
+     * behind it is a control that does nothing at all until something else
+     * happens to repaint. That was shipped and then found by hand: the zoom
+     * buttons moved `transform` and left the pixels alone.
+     *
+     * Returns false if the transform was deferred because a stroke is open, in
+     * which case there is nothing to draw yet and the deferred request will be
+     * applied at pen-up.
+     */
+    fun applyTransform(t: CanvasTransform): Boolean {
+        if (!requestTransform(t)) return false
+        redrawDry()
+        return true
+    }
+
+    /**
      * Fit the document to the surface, discarding any pan and zoom.
      *
      * The recovery path, and the reason it exists is that a canvas can be
@@ -200,7 +223,7 @@ class InkSurfaceView(
         val h = height
         if (w <= 0 || h <= 0) return false
         fitOnResize = true
-        return requestTransform(
+        return applyTransform(
             CanvasTransform.fitTo(w, h, document.widthPx, document.heightPx),
         )
     }
@@ -283,11 +306,24 @@ class InkSurfaceView(
      */
     private val commitSink = object : CommitQueue.Sink {
         override fun onStroke(stroke: Stroke) {
+            // The snapshot first, and it is not merely ordering: this is the
+            // last moment the region exists in its pre-stroke state. Taken
+            // after the rasterise it would record the stroke as its own undo.
+            document.snapshotBeforeStroke(stroke.bounds)
             document.layer.write { rasterizer.drawDry(it, stroke) }
         }
 
         override fun onClear() {
+            document.snapshotBeforeClear()
             document.layer.blank()
+        }
+
+        override fun onUndo() {
+            document.applyUndo()
+        }
+
+        override fun onRedo() {
+            document.applyRedo()
         }
     }
 
@@ -703,6 +739,30 @@ class InkSurfaceView(
     fun clear() {
         router.abandon()
         document.requestClear()
+        redrawDry()
+    }
+
+    /**
+     * Step the drawing back one edit, and redraw.
+     *
+     * Same three lines as [clear] and for the same three reasons. The open
+     * stroke is abandoned because an undo landing mid-stroke would restore
+     * pixels under ink that is still being laid, and the wet stroke would
+     * commit on top of the restored region at pen-up — the undo would appear
+     * to work and then be silently reversed. The request is queued so it lands
+     * behind everything already committed. The redraw is the one the queue
+     * cannot ask for itself.
+     */
+    fun undo() {
+        router.abandon()
+        document.requestUndo()
+        redrawDry()
+    }
+
+    /** Step forward again. See [undo]. */
+    fun redo() {
+        router.abandon()
+        document.requestRedo()
         redrawDry()
     }
 

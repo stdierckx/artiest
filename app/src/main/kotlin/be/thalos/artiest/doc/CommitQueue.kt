@@ -48,6 +48,22 @@ class CommitQueue {
 
         /** Blank the layer. A singleton: it carries nothing. */
         object Clear : Commit
+
+        /**
+         * Walk the undo history one step back, or forward.
+         *
+         * Queued rather than applied for exactly the reason [clear] is: undo
+         * means "undo everything up to now", and a stroke finished a
+         * millisecond ago that the render thread has not stamped yet is part of
+         * "now". Applied directly from the UI thread it would land *in front
+         * of* that stroke and undo the one before it, leaving the newest stroke
+         * on the page and a hole where an older one was. Let the order be the
+         * order.
+         */
+        object Undo : Commit
+
+        /** See [Undo]. */
+        object Redo : Commit
     }
 
     /**
@@ -61,6 +77,8 @@ class CommitQueue {
     interface Sink {
         fun onStroke(stroke: Stroke)
         fun onClear()
+        fun onUndo()
+        fun onRedo()
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
@@ -86,6 +104,16 @@ class CommitQueue {
         queue.add(Commit.Clear)
     }
 
+    /** UI thread, from the Undo button. See [Commit.Undo]. */
+    fun undo() {
+        queue.add(Commit.Undo)
+    }
+
+    /** UI thread, from the Redo button. See [Commit.Undo]. */
+    fun redo() {
+        queue.add(Commit.Redo)
+    }
+
     /**
      * Render thread. Applies every commit queued so far, in order, and returns
      * how many.
@@ -102,6 +130,8 @@ class CommitQueue {
             when (commit) {
                 is Commit.Draw -> sink.onStroke(commit.stroke)
                 Commit.Clear -> sink.onClear()
+                Commit.Undo -> sink.onUndo()
+                Commit.Redo -> sink.onRedo()
             }
             applied++
         }

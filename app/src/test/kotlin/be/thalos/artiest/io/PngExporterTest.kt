@@ -403,11 +403,21 @@ class PngExporterTest {
         val rasterizer = DabRasterizer(document.widthPx, document.heightPx)
         document.drainCommits(object : CommitQueue.Sink {
             override fun onStroke(stroke: Stroke) {
+                document.snapshotBeforeStroke(stroke.bounds)
                 document.layer.write { rasterizer.drawDry(it, stroke) }
             }
 
             override fun onClear() {
+                document.snapshotBeforeClear()
                 document.layer.blank()
+            }
+
+            override fun onUndo() {
+                document.applyUndo()
+            }
+
+            override fun onRedo() {
+                document.applyRedo()
             }
         })
     }

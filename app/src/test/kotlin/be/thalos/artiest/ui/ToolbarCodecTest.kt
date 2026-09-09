@@ -18,14 +18,17 @@ class ToolbarCodecTest {
     @Test
     fun `a layout survives the round trip`() {
         val there = ToolbarCodec.encode(ToolbarLayout.STARTER)
-        assertEquals("v1|16|0=colour,4=size,8=zoom_out,9=zoom_in,10=fit,11=export,13=stats", there)
+        assertEquals(
+            "v1|20|0=undo,2=redo,4=colour,8=size,12=zoom_out,13=zoom_in,14=fit,15=stats",
+            there,
+        )
         assertEquals(ToolbarLayout.STARTER, ToolbarCodec.decode(there))
     }
 
     @Test
     fun `an empty bar survives the round trip`() {
         val there = ToolbarCodec.encode(ToolbarLayout.DEFAULT)
-        assertEquals("v1|16|", there)
+        assertEquals("v1|20|", there)
         assertEquals(ToolbarLayout.DEFAULT, ToolbarCodec.decode(there))
     }
 

@@ -26,10 +26,11 @@ import kotlin.test.assertTrue
 class DocumentTest {
 
     @Test
-    fun `a default document is 2160x3300 and its layer agrees`() {
+    fun `a default document is 3300x2160 landscape and its layer agrees`() {
         val doc = Document(enforceOffMainThread = false)
-        assertEquals(2160, doc.widthPx)
-        assertEquals(3300, doc.heightPx)
+        assertEquals(3300, doc.widthPx)
+        assertEquals(2160, doc.heightPx)
+        assertTrue(doc.widthPx > doc.heightPx, "the default page is landscape, like the tablet")
         assertEquals(doc.widthPx, doc.layer.widthPx)
         assertEquals(doc.heightPx, doc.layer.heightPx)
         doc.close()
@@ -152,6 +153,14 @@ class DocumentTest {
 
         override fun onClear() {
             log.append('C')
+        }
+
+        override fun onUndo() {
+            log.append('U')
+        }
+
+        override fun onRedo() {
+            log.append('R')
         }
     }
 

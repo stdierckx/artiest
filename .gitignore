@@ -28,3 +28,6 @@ out/
 *.log
 .env
 local.properties
+
+# Claude Code worktrees (transient, one per parallel session)
+.claude/worktrees/

@@ -152,11 +152,23 @@ class ToolbarLayoutTest {
     fun `shrinking the bar drops what no longer reaches and keeps the rest`() {
         val bar = ToolbarLayout.STARTER.resized(8)
         assertEquals(8, bar.slotCount)
-        assertEquals(ToolItem.COLOUR, bar.covering(0)?.item)
-        assertEquals(ToolItem.SIZE, bar.covering(4)?.item)
-        // Everything from slot 8 on no longer reaches, and is gone rather than
-        // clipped: half a slider is not a control.
-        assertEquals(2, bar.placements.size)
+        assertEquals(ToolItem.UNDO, bar.covering(0)?.item)
+        assertEquals(ToolItem.COLOUR, bar.covering(4)?.item)
+        // The size slider starts at 8 and needs four, so it no longer reaches
+        // and is gone rather than clipped: half a slider is not a control.
+        assertEquals(3, bar.placements.size)
+    }
+
+    @Test
+    fun `growing the bar keeps every item where it was`() {
+        // What ToolbarStore.load does to a bar saved by an older build: the
+        // items must not move, or a release that adds a control silently
+        // rearranges everyone's toolbar.
+        val old = ToolbarLayout.of(8, listOf(Placement(ToolItem.FIT, 0), Placement(ToolItem.CLEAR, 6)))
+        val grown = old.resized(12)
+        assertEquals(12, grown.slotCount)
+        assertEquals(old.placements, grown.placements)
+        assertTrue(grown.fits(ToolItem.UNDO, 8), "the new room is at the end and usable")
     }
 
     @Test
@@ -164,8 +176,8 @@ class ToolbarLayoutTest {
         // A hand-written constant is exactly the kind of thing that quietly
         // loses an entry to an off-by-one width, and `of` drops rather than
         // complains — so the count is asserted here or nowhere.
-        assertEquals(7, ToolbarLayout.STARTER.placements.size)
-        assertEquals(15, ToolbarLayout.STARTER.usedSlots)
+        assertEquals(8, ToolbarLayout.STARTER.placements.size)
+        assertEquals(17, ToolbarLayout.STARTER.usedSlots)
         assertEquals(ToolbarLayout.DEFAULT_SLOTS, ToolbarLayout.STARTER.slotCount)
     }
 }

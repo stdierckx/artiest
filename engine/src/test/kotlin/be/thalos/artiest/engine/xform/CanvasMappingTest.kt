@@ -370,26 +370,45 @@ class CanvasMappingTest {
     /**
      * Neither manifest locks orientation and `:spike` ran landscape throughout,
      * so this is the case the device is actually held in as often as the one
-     * above, not a hypothetical. Landscape wants 0.436 and the floor is 0.5, so the page
-     * cannot fit: 3300 rows at 0.5 is 1650 pixels in a 1440-pixel viewport.
-     * What fit guarantees is the largest legal scale and a centred document,
-     * and the overflow is split evenly rather than hanging off one edge.
+     * above, not a hypothetical.
+     *
+     * **This test asserted the opposite until 2026-09-09, and the thing it
+     * asserted was a bug.** Landscape wants 0.436 and the floor was 0.5, so the
+     * page could not fit: 3300 rows at 0.5 is 1650 pixels in a 1440-pixel
+     * viewport, and the test checked that the 210 px of overflow was split
+     * evenly rather than hanging off one edge. Splitting it evenly was the right
+     * thing to do *given* the clamp. What nobody checked was whether the clamp
+     * should have been biting at the opening view at all — and because it was,
+     * zoom out did nothing from the moment the app started. Reported by the
+     * user as "it is not possible to zoom out more than the begin zoom level".
+     *
+     * With `MIN_SCALE` at 0.25 the fit is honoured and the page fits. The
+     * clamp is still tested, on a viewport small enough to deserve it.
      */
     @Test
-    fun `landscape fit clamps at the floor and centres the overflow`() {
+    fun `landscape fit fits, now that the floor is below it`() {
         val t = CanvasTransform.fitTo(2200, 1440, DOC_W.toInt(), DOC_H.toInt())
-        assertEquals(CanvasTransform.MIN_SCALE, t.scale)
-        assertEquals(1120f, t.txDoc)
-        assertEquals(-210f, t.tyDoc)
-        assertTrue(DOC_H * t.scale > 1440f, "landscape should overflow, not fit")
 
-        // 210 px of overflow, 105 above the viewport and 105 below it.
+        // Height binds: 1440/3300 is the smaller of the two ratios.
+        assertEquals(1440f / DOC_H, t.scale, 1e-6f)
+        assertTrue(
+            t.scale > CanvasTransform.MIN_SCALE,
+            "the opening view must not sit on the floor: scale ${t.scale}",
+        )
+
         t.docToView(0f, 0f, out)
-        assertEquals(560f, out[0], ON_PAGE)
-        assertEquals(-105f, out[1], ON_PAGE)
+        val x0 = out[0]
+        val y0 = out[1]
         t.docToView(DOC_W, DOC_H, out)
-        assertEquals(1640f, out[0], ON_PAGE)
-        assertEquals(1545f, out[1], ON_PAGE)
+        val x1 = out[0]
+        val y1 = out[1]
+
+        // Exactly top to bottom, so there is no overflow left to split.
+        assertEquals(0f, y0, ON_PAGE)
+        assertEquals(1440f, y1, ON_PAGE)
+        // Centred left to right: equal margins either side.
+        assertEquals(2200f - x1, x0, ON_PAGE)
+        assertTrue(x0 > 0f, "the page should sit inside the viewport, not overflow it")
     }
 
     /**

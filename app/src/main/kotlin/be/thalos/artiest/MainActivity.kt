@@ -54,6 +54,7 @@ import be.thalos.artiest.canvas.InputStats
 import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
@@ -243,6 +244,13 @@ private fun CanvasScreen(
     var toolbar by remember { mutableStateOf(store.load()) }
     var arranging by remember { mutableStateOf(false) }
 
+    // The undo buttons' enabled state. `Document.canUndo` is written by the
+    // render thread, so it cannot be Compose state directly; it is sampled
+    // here and assigned only when it changes, so a bar with nothing to undo
+    // recomposes zero times a second rather than four.
+    var canUndo by remember { mutableStateOf(false) }
+    var canRedo by remember { mutableStateOf(false) }
+
     // Applied on every change and once when the view arrives, because the view
     // is built by the AndroidView factory after the first composition.
     LaunchedEffect(surface, ink, sizeMax, smoothing) {
@@ -259,6 +267,18 @@ private fun CanvasScreen(
         while (true) {
             kotlinx.coroutines.delay(500)
             if (polling && stats) generation++
+        }
+    }
+
+    // Separate from the readout's poll above and faster, because this one
+    // drives a control rather than a diagnostic: a Undo button that stays grey
+    // for half a second after the first stroke reads as a broken button. Four
+    // volatile reads a second, and a recomposition only when an answer moves.
+    LaunchedEffect(document) {
+        while (true) {
+            kotlinx.coroutines.delay(250)
+            if (canUndo != document.canUndo) canUndo = document.canUndo
+            if (canRedo != document.canRedo) canRedo = document.canRedo
         }
     }
 
@@ -321,6 +341,10 @@ private fun CanvasScreen(
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
                     exporting = exporting,
+                    canUndo = canUndo,
+                    canRedo = canRedo,
+                    onUndo = { surface?.undo(); generation++ },
+                    onRedo = { surface?.redo(); generation++ },
                     stats = stats,
                     onStats = { stats = !stats; generation++ },
                     onClear = { surface?.clear(); generation++ },
@@ -331,7 +355,7 @@ private fun CanvasScreen(
                             // About the middle of the view, not the origin: a
                             // zoom button that walks the drawing off the screen
                             // is a zoom button nobody presses twice.
-                            v.requestTransform(
+                            v.applyTransform(
                                 v.transform.zoomedAbout(v.width / 2f, v.height / 2f, factor),
                             )
                             generation++
@@ -432,6 +456,10 @@ private fun ToolSlot(
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
     exporting: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     stats: Boolean,
     onStats: () -> Unit,
     onClear: () -> Unit,
@@ -451,6 +479,9 @@ private fun ToolSlot(
 
         ToolItem.SMOOTHING ->
             LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
+
+        ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
+        ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
 
         ToolItem.ZOOM_IN -> SlotButton(item.short) { onZoom(ZOOM_STEP) }
         ToolItem.ZOOM_OUT -> SlotButton(item.short) { onZoom(1f / ZOOM_STEP) }
@@ -662,6 +693,13 @@ private fun readout(
     return deviceLines(report, refreshHz, policy) +
         "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
+        // The undo budget, which is the number that decides whether a long
+        // session quietly stops being undoable. Both caps are visible so it is
+        // obvious which one bit.
+        "undo     ${document.undoDepth} back   ${document.redoDepth} forward   " +
+        "${r(document.historyBytes / (1024f * 1024f), 1)} MiB of " +
+        "${UndoHistory.DEFAULT_MAX_BYTES / (1024L * 1024L)}   " +
+        "depth cap ${UndoHistory.DEFAULT_MAX_DEPTH}\n" +
         "batches  ${p.slots} slots   peak ${p.peakInFlight}   spills ${p.spills}   " +
         // In flight *right now*, which at rest must be zero. Non-zero on an
         // idle canvas means batches were handed out and never reported drawn,

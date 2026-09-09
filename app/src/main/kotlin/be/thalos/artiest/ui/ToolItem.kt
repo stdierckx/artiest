@@ -35,12 +35,13 @@ package be.thalos.artiest.ui
  *
  * | Wanted | Unlocked by |
  * |---|---|
+ * | Undo, redo | **shipped** — region snapshots, see `UndoHistory` |
  * | Zoom in, zoom out | **shipped** |
  * | Pen, pencil, marker | W10's presets. Marker is a real question — the graphite reference turned out to be one pencil at two tilts, and no marker was cut from the plan on that evidence. It comes back only if it is wanted for its own sake. |
  * | Eraser | W11 |
  * | Tool settings, stabilisation settings | Partly shipped as the size and smoothing sliders; becomes a panel when W7 adds opacity and flow |
  * | Colour wheel | Phase 4. The five-swatch palette is the placeholder and says so. |
- * | Undo, redo, document history | Phase 3. These need the tiled copy-on-write layer the plan defers, and a toolbar button is the last five minutes of that work, not the first. |
+ * | Document history (a list you can jump around in) | Phase 3, with the tiled copy-on-write layer. Undo and redo did not need it; a visual history of every state does. |
  * | Layers: add, clear, lock | Phase 3, same reason |
  * | Export | **shipped** |
  */
@@ -55,6 +56,9 @@ enum class ToolItem(
     val slots: Int,
     val group: ToolGroup,
 ) {
+    UNDO("undo", "Undo", "Undo", 2, ToolGroup.EDIT),
+    REDO("redo", "Redo", "Redo", 2, ToolGroup.EDIT),
+
     /** Five swatches at 32dp each. Four slots is 176dp, so they fit without shrinking. */
     COLOUR("colour", "Colour", "Colour", 4, ToolGroup.DRAW),
     SIZE("size", "Size", "Size", 4, ToolGroup.DRAW),
@@ -90,6 +94,7 @@ enum class ToolItem(
  * instruments are listed last because they are not what the app is for.
  */
 enum class ToolGroup(val label: String) {
+    EDIT("Edit"),
     DRAW("Draw"),
     CANVAS("Canvas"),
     FILE("File"),

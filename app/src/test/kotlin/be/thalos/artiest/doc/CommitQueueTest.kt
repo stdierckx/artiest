@@ -48,6 +48,14 @@ class CommitQueueTest {
         override fun onClear() {
             log.append('C')
         }
+
+        override fun onUndo() {
+            log.append('U')
+        }
+
+        override fun onRedo() {
+            log.append('R')
+        }
     }
 
     @Test
@@ -171,6 +179,8 @@ class CommitQueueTest {
             }
 
             override fun onClear() = Unit
+            override fun onUndo() = Unit
+            override fun onRedo() = Unit
         }
         val sent = ArrayList<Stroke>(total)
         repeat(total) { sent.add(stroke(it.toFloat())) }

@@ -116,13 +116,18 @@ class ToolbarLayout private constructor(
 
     companion object {
         /**
-         * Sixteen 44dp slots is 704dp of bar. That is comfortable across this
-         * tablet in landscape and just over its narrow dimension in portrait,
-         * where the bar scrolls rather than reflows — position stays absolute,
-         * only the viewport moves. Not a constraint on anything: [resized]
-         * exists and the codec round-trips any count up to its ceiling.
+         * Twenty 44dp slots is 880dp of bar, against roughly 1100dp of tablet
+         * in landscape. The bar scrolls rather than reflows when it does not
+         * fit — position stays absolute, only the viewport moves.
+         *
+         * It is deliberately longer than [STARTER] needs. A bar with no spare
+         * slots cannot accept the next control that ships, and `ToolbarStore`
+         * only ever widens a saved bar, never shortens it — so headroom here is
+         * what stops a full bar from making a new feature invisible. That is
+         * not hypothetical: it is what happened the day Undo and Redo were
+         * added to a saved bar with sixteen slots and sixteen in use.
          */
-        const val DEFAULT_SLOTS = 16
+        const val DEFAULT_SLOTS = 20
 
         /**
          * A fresh install's toolbar, and it is **deliberately empty**.
@@ -149,13 +154,14 @@ class ToolbarLayout private constructor(
             get() = of(
                 DEFAULT_SLOTS,
                 listOf(
-                    Placement(ToolItem.COLOUR, 0),
-                    Placement(ToolItem.SIZE, 4),
-                    Placement(ToolItem.ZOOM_OUT, 8),
-                    Placement(ToolItem.ZOOM_IN, 9),
-                    Placement(ToolItem.FIT, 10),
-                    Placement(ToolItem.EXPORT, 11),
-                    Placement(ToolItem.STATS, 13),
+                    Placement(ToolItem.UNDO, 0),
+                    Placement(ToolItem.REDO, 2),
+                    Placement(ToolItem.COLOUR, 4),
+                    Placement(ToolItem.SIZE, 8),
+                    Placement(ToolItem.ZOOM_OUT, 12),
+                    Placement(ToolItem.ZOOM_IN, 13),
+                    Placement(ToolItem.FIT, 14),
+                    Placement(ToolItem.STATS, 15),
                 ),
             )
 

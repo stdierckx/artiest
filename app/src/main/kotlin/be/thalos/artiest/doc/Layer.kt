@@ -3,7 +3,9 @@ package be.thalos.artiest.doc
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.os.Looper
 
 /**
@@ -270,6 +272,43 @@ class Layer(
      * `renderMultiBufferedLayer(emptyList())` — survives that unchanged.
      */
     fun blank(): Boolean = write { it.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR) }
+
+    /**
+     * **There is no `copyRegion` here, and that is deliberate.**
+     *
+     * A method returning a `Bitmap` — even a fresh copy that owes the layer
+     * nothing — puts `Bitmap` on this class's public surface, and `LayerTest`'s
+     * reflective check refuses that outright. The check is coarser than the
+     * property it defends, but it is coarse in the safe direction: it cannot
+     * tell a copy from the original, so it forbids both, and the alternative is
+     * a rule that has to be re-argued at every call site. [read]'s own KDoc
+     * says how to take pixels out — copy inside the block, carry the copy out —
+     * and `PixelPatch.capture` is the one place that does it.
+     */
+    /**
+     * Put a rectangle of pixels back, **alpha and all**.
+     *
+     * `Mode.SRC`, not the default source-over, and the distinction is the whole
+     * method. This layer is alpha-carrying: unpainted pixels are transparent,
+     * and that invariant is what lets `PngExporter` composite paper underneath.
+     * Compositing a patch over the top would restore colour and leave every
+     * pixel the undone stroke had made opaque still opaque — ink would vanish
+     * and its shadow would stay. `SRC` replaces the destination outright, which
+     * is what "put it back the way it was" means.
+     */
+    fun restoreRegion(x: Int, y: Int, src: Bitmap): Boolean =
+        write { it.drawBitmap(src, x.toFloat(), y.toFloat(), replacePaint) }
+
+    /**
+     * Shared, because [restoreRegion] runs on the render thread and a `Paint`
+     * per undo is an allocation on the one path with a measured budget. Never
+     * mutated after construction.
+     */
+    private val replacePaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC)
+        isAntiAlias = false
+        isFilterBitmap = false
+    }
 
     /**
      * Release the pixels. Idempotent, and the one operation the UI thread

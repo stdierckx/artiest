@@ -31,9 +31,13 @@ class CanvasTransformTest {
 
     @Test
     fun `zoom clamps at both ends rather than throwing`() {
-        assertEquals(CanvasTransform.MIN_SCALE, CanvasTransform.IDENTITY.zoomedTo(0.4f).scale)
-        assertEquals(CanvasTransform.MAX_SCALE, CanvasTransform.IDENTITY.zoomedTo(9f).scale)
+        assertEquals(CanvasTransform.MIN_SCALE, CanvasTransform.IDENTITY.zoomedTo(CanvasTransform.MIN_SCALE / 2f).scale)
+        assertEquals(CanvasTransform.MAX_SCALE, CanvasTransform.IDENTITY.zoomedTo(CanvasTransform.MAX_SCALE + 1f).scale)
         assertEquals(2f, CanvasTransform.IDENTITY.zoomedTo(2f).scale)
+        // Stated against the constant rather than a literal, because the floor
+        // moved once already and a literal is what made that a test failure
+        // rather than a decision.
+        assertEquals(0.3f, CanvasTransform.IDENTITY.zoomedTo(0.3f).scale)
     }
 
     /**

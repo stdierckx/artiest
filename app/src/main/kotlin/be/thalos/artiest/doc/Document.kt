@@ -93,12 +93,66 @@ class Document(
     /** Commits waiting for the render thread. Diagnostic only. */
     val pendingCommits: Int get() = commits.pending
 
+    /**
+     * The undo chains. **Render thread only** — see [UndoHistory]'s threading
+     * note. Every entry point that touches it below says so in its own KDoc.
+     */
+    private val history = UndoHistory<PixelPatch>()
+
+    /**
+     * Whether the buttons should be live, published for the UI thread.
+     *
+     * Written by the render thread after each history change and read by the
+     * UI, so it can be one frame behind — the same skew already documented for
+     * the stroke history, and for the same reason: the crossing is an ordered
+     * queue, not a lock. A stale `false` costs a button that lights up 11 ms
+     * late. Nothing acts on these except the enabled state of a control; the
+     * *action* always queues and lets the render thread decide whether there
+     * was anything there, so a stale `true` costs nothing at all.
+     */
+    @Volatile
+    var canUndo: Boolean = false
+        private set
+
+    /** See [canUndo]. */
+    @Volatile
+    var canRedo: Boolean = false
+        private set
+
+    /** How much the undo history is holding. Diagnostic; render thread writes it. */
+    @Volatile
+    var historyBytes: Long = 0L
+        private set
+
+    /** See [historyBytes]. */
+    @Volatile
+    var undoDepth: Int = 0
+        private set
+
+    /** See [historyBytes]. */
+    @Volatile
+    var redoDepth: Int = 0
+        private set
+
     // Append-only, and the only history Phase 1 keeps. An ArrayList rather than
     // a primitive float buffer because a Bounds is immutable and shareable, so
     // there is nothing to copy out and no aliasing to prevent; four floats
     // unpacked into a growable FloatArray would save one header per stroke and
     // cost the type that makes the values safe to hand around.
     private val strokeBounds = ArrayList<Bounds>()
+
+    /**
+     * The bounds of strokes that have been undone, so redo can put them back.
+     *
+     * Bookkeeping for [strokeCount] and nothing more — the undo that matters is
+     * the pixel history, which the render thread owns. Two cases make this
+     * count approximate rather than exact, and they are named here rather than
+     * discovered: undoing a **Clear** restores the pixels but not the stroke
+     * list, because Clear discarded it; and a stroke evicted from the pixel
+     * history by its memory budget still has a bounds here. Both leave a
+     * diagnostic readout slightly wrong and neither can lose ink.
+     */
+    private val undoneBounds = ArrayList<Bounds>()
 
     /** How many strokes are committed into [layer]. */
     val strokeCount: Int get() = strokeBounds.size
@@ -119,6 +173,9 @@ class Document(
     fun recordStroke(bounds: Bounds) {
         require(!bounds.isEmpty) { "committed stroke has an empty bounds" }
         strokeBounds.add(bounds)
+        // Drawing leaves the branch the redo chain led onto. The pixel history
+        // does the same thing in `UndoHistory.record`; this is its shadow.
+        undoneBounds.clear()
     }
 
     /**
@@ -163,6 +220,94 @@ class Document(
     }
 
     /**
+     * Undo: queue the pixel restore, and move one stroke's bookkeeping across.
+     * UI thread.
+     *
+     * Unconditional. The queue is the authority on whether there is anything to
+     * undo — [canUndo] can be a frame stale, and refusing here on a stale read
+     * would make the button dead for the first frame after a stroke. An undo
+     * that arrives with an empty history is a no-op on the render thread, which
+     * is the cheapest possible way to be wrong.
+     */
+    fun requestUndo() {
+        if (strokeBounds.isNotEmpty()) {
+            undoneBounds.add(strokeBounds.removeAt(strokeBounds.size - 1))
+        }
+        commits.undo()
+    }
+
+    /** Redo. The mirror of [requestUndo]. UI thread. */
+    fun requestRedo() {
+        if (undoneBounds.isNotEmpty()) {
+            strokeBounds.add(undoneBounds.removeAt(undoneBounds.size - 1))
+        }
+        commits.redo()
+    }
+
+    /**
+     * Snapshot the region a stroke is about to paint. **Render thread**, called
+     * from the commit sink immediately before the stroke is rasterised.
+     *
+     * A stroke entirely off the page snapshots nothing and records nothing:
+     * there is no region to restore, and an entry that restores nothing is an
+     * undo press that appears to do nothing.
+     */
+    fun snapshotBeforeStroke(bounds: Bounds) {
+        val patch = PixelPatch.capture(layer, bounds, widthPx, heightPx) ?: return
+        history.record(patch)
+        publishHistory()
+    }
+
+    /** Snapshot the whole page, before a Clear. **Render thread.** */
+    fun snapshotBeforeClear() {
+        val patch = PixelPatch.captureAll(layer, widthPx, heightPx) ?: return
+        history.record(patch)
+        publishHistory()
+    }
+
+    /** **Render thread.** Returns false if there was nothing to undo. */
+    fun applyUndo(): Boolean {
+        val moved = history.undo(exchange)
+        publishHistory()
+        return moved
+    }
+
+    /** **Render thread.** Returns false if there was nothing to redo. */
+    fun applyRedo(): Boolean {
+        val moved = history.redo(exchange)
+        publishHistory()
+        return moved
+    }
+
+    /**
+     * Restore a patch and hand back what was under it, in one step.
+     *
+     * Stored rather than written inline at both call sites because it is
+     * identical in both directions — undo and redo differ only in which chain
+     * they pull from — and because a capturing lambda per press would allocate
+     * on the render thread, which is the one path in this app with a measured
+     * budget.
+     *
+     * The recapture happens **before** the restore. Reversed, the inverse would
+     * be a copy of the patch itself and redo would put back what undo had just
+     * removed.
+     */
+    private val exchange: (PixelPatch) -> PixelPatch = { patch ->
+        val inverse = patch.recapture(layer) ?: patch
+        patch.restoreInto(layer)
+        inverse
+    }
+
+    /** **Render thread.** Publish the history's state for the UI to read. */
+    private fun publishHistory() {
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+        undoDepth = history.undoDepth
+        redoDepth = history.redoDepth
+        historyBytes = history.bytes
+    }
+
+    /**
      * Apply every queued commit. **Render thread only**, and the sink is what
      * actually touches [layer].
      */
@@ -185,6 +330,7 @@ class Document(
      */
     fun forgetStrokes() {
         strokeBounds.clear()
+        undoneBounds.clear()
     }
 
     /**
@@ -197,16 +343,28 @@ class Document(
         // Layer.write refuses after close, so this is belt to that braces —
         // but the belt is what says the strokes are gone on purpose.
         commits.abandon()
+        // Before the layer, because these are bitmaps of their own and the
+        // history outliving the layer would be a pile of pixels nobody frees.
+        history.clear()
+        publishHistory()
         layer.close()
     }
 
     companion object {
 
         /**
-         * 2160 x 3300, which is `:spike`'s `DOC_W`/`DOC_H` finally out of a
-         * private constant in a frozen module. It is 1.5x the panel on both
-         * axes — the panel is 1440x2200 in all five Phase 0 probe dumps — so
-         * portrait fit is exactly 2/3 with no letterbox on either axis.
+         * 3300 x 2160 — **landscape**, matching how the tablet is held.
+         *
+         * The number is `:spike`'s `DOC_W`/`DOC_H` finally out of a private
+         * constant in a frozen module, and the rule behind it is unchanged: it
+         * is 1.5x the panel on both axes, so the fit is exactly 2/3 with no
+         * letterbox on either axis. The panel reports 1440x2200 portrait in all
+         * five Phase 0 probe dumps and the device is used at 2200x1440, so
+         * 1.5x is 3300x2160 and the two-thirds property survives the rotation
+         * exactly. Phase 1 shipped the portrait orientation of the same
+         * rectangle, which left a page standing up in a landscape window with
+         * bars down both sides — the user's report, and the reason this is the
+         * way round it is.
          *
          * Nothing binds at this size on this device. Memory: 27.19 MiB of a
          * 121 MiB peak against 4.4 GiB free. Texture cap: 3300 against a
@@ -214,11 +372,12 @@ class Document(
          * W2 measured the full-redraw loop at p99 4.00 ms against an 11.1 ms
          * budget with this exact layer live as a rotating texture, because the
          * per-frame blit is destination-bound on the 2.6 Mpx surface rather than
-         * on the 7.1 Mpx document.
+         * on the 7.1 Mpx document. Every one of those is a property of the
+         * pixel count, which the rotation does not change.
          */
-        const val DEFAULT_WIDTH_PX = 2160
+        const val DEFAULT_WIDTH_PX = 3300
 
         /** See [DEFAULT_WIDTH_PX]. */
-        const val DEFAULT_HEIGHT_PX = 3300
+        const val DEFAULT_HEIGHT_PX = 2160
     }
 }

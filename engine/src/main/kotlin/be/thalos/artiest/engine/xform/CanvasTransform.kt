@@ -361,15 +361,30 @@ data class CanvasTransform(
     companion object {
 
         /**
-         * The floor is 0.5, not 0.35. Bilinear filtering is honest to about 2x
-         * minification and 0.35 is past it, so a document zoomed further out
-         * shimmers while panning. Fixing that means a mip chain, and generating
-         * one over a full layer costs ~11 ms — a guaranteed dropped frame — for
-         * nothing Phase 1 gains.
+         * The floor was 0.5 in Phase 1 and is **0.25 from 2026-09-09**, on a
+         * user report. The original reasoning is not wrong and is kept: bilinear
+         * filtering is honest to about 2x minification, so a document below 0.5
+         * shimmers while panning, and the real fix is a mip chain that costs
+         * ~11 ms to generate over a full layer — a guaranteed dropped frame,
+         * still not worth it, still Phase 3.
          *
-         * It also keeps the inverse map total; see [invScale].
+         * What the reasoning missed is where the floor sits relative to
+         * ordinary use. A document 1.5x the panel fits at about 0.63, and the
+         * portrait document Phase 1 shipped fitted at about 0.5 — so the floor
+         * was not a guard rail somewhere out past normal use, it was *the
+         * opening view*. Zoom out did nothing at all from the moment the app
+         * started, which is how it was reported: not "it shimmers" but "it is
+         * not possible to zoom out more than the begin zoom level". A limit
+         * nobody can move away from is indistinguishable from a broken control.
+         *
+         * 0.25 buys about 2.5x of overview below the fit and costs shimmer
+         * while panning down there, which is a place you look rather than draw.
+         * That is the trade, made deliberately and cheap to reverse.
+         *
+         * The floor still keeps the inverse map total; see [invScale]. That is
+         * why this is 0.25 and not something arbitrarily near zero.
          */
-        const val MIN_SCALE = 0.5f
+        const val MIN_SCALE = 0.25f
 
         const val MAX_SCALE = 8.0f
 
