@@ -392,22 +392,66 @@ class LayerStack(
         activeId = active.id
     }
 
+    /**
+     * A thumbnail, built by **halving repeatedly** rather than in one step.
+     *
+     * The one-step version is the obvious code and it does not work. A single
+     * `drawBitmap` from 3300 px to 128 is a 26:1 reduction, and a bilinear
+     * filter samples a 2x2 neighbourhood however far apart the samples are — so
+     * a pencil line two document pixels wide falls between the taps about
+     * ninety-two times in a hundred and the thumbnail comes back blank. Caught
+     * on the tablet: two sheets, a stroke on each, one thumbnail showing a line
+     * and the other showing nothing, with both sheets visibly drawn on.
+     *
+     * Halving is the fix because at 2:1 the 2x2 neighbourhood *is* the four
+     * pixels being merged, so nothing can fall between the samples. Five steps
+     * get 3300 down to 206 and the last one lands on 128 exactly.
+     *
+     * The intermediates are recycled as they are consumed. The largest is
+     * 1650x1080 — 7.1 MiB — which is why they are not kept: this runs at most
+     * once a frame and only while the panel is open, but eight of them held
+     * would be another page and a half of memory for pictures 43 KB each.
+     */
     private fun buildThumbnail(layer: Layer): Bitmap? {
-        val h = ((THUMB_WIDTH.toLong() * heightPx) / widthPx).toInt().coerceAtLeast(1)
-        val out = Bitmap.createBitmap(THUMB_WIDTH, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        val src = Rect(0, 0, widthPx, heightPx)
-        val dst = Rect(0, 0, THUMB_WIDTH, h)
-        val ok = layer.read { canvas.drawBitmap(it, src, dst, thumbPaint) }
-        return if (ok) out else null
+        val targetH = ((THUMB_WIDTH.toLong() * heightPx) / widthPx).toInt().coerceAtLeast(1)
+        // The first halving is the only step that reads the layer, so it is the
+        // only one that happens on the lock.
+        var current: Bitmap? = null
+        val ok = layer.read { current = halve(it) }
+        var step = if (ok) current else null
+        if (step == null) return null
+        while (step!!.width > THUMB_WIDTH * 2) {
+            val next = halve(step!!)
+            step!!.recycle()
+            step = next
+        }
+        val out = Bitmap.createBitmap(THUMB_WIDTH, targetH, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(
+            step!!,
+            Rect(0, 0, step!!.width, step!!.height),
+            Rect(0, 0, THUMB_WIDTH, targetH),
+            thumbPaint,
+        )
+        step!!.recycle()
+        return out
+    }
+
+    /** Half the width and half the height, never below one pixel. */
+    private fun halve(src: Bitmap): Bitmap {
+        val w = (src.width / 2).coerceAtLeast(1)
+        val h = (src.height / 2).coerceAtLeast(1)
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(src, Rect(0, 0, src.width, src.height), Rect(0, 0, w, h), thumbPaint)
+        return out
     }
 
     /**
-     * Filtered, because an unfiltered 26:1 downscale is point sampling: a
-     * pencil line one document pixel wide either lands on a sample or does not,
-     * so a drawing made of fine lines produces a thumbnail that is blank in
-     * some places and speckled in others, and which changes at random as the
-     * drawing grows.
+     * Filtered, because unfiltered is point sampling: a pencil line one
+     * document pixel wide either lands on a sample or does not, so a drawing
+     * made of fine lines produces a thumbnail that is blank in some places and
+     * speckled in others, and which changes at random as the drawing grows.
+     * Filtering alone is not enough — see [buildThumbnail] for why the
+     * reduction is done in halves.
      */
     private val thumbPaint = Paint().apply {
         isFilterBitmap = true

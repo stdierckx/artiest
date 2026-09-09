@@ -1,7 +1,10 @@
 package be.thalos.artiest.doc
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -280,6 +283,66 @@ class LayerStackTest {
         // Nothing left stale, so a second call does no work and says so.
         assertFalse(s.refreshThumbnails())
         s.close()
+    }
+
+    /**
+     * **The one that caught a blank thumbnail on the tablet.** A pencil line is
+     * a couple of document pixels wide and the thumbnail is a twenty-six-fold
+     * reduction, so a single filtered `drawBitmap` misses it nine times in ten
+     * — the picture comes back empty for a sheet that is visibly drawn on.
+     *
+     * The document here is 2048 wide against a 128 px thumbnail, a sixteenfold
+     * reduction, with a three-pixel line: enough that one-step filtering finds
+     * nothing and halving finds it every time.
+     */
+    @Test
+    fun `a hairline on a full-size page survives the reduction`() {
+        val s = LayerStack(2048, 1344, enforceOffMainThread = false)
+        val p = Paint().apply {
+            color = Color.BLACK
+            isAntiAlias = false
+            strokeWidth = 3f
+        }
+        s.active.layer.write { it.drawLine(100f, 672f, 1948f, 672f, p) }
+        s.wantThumbnails = true
+        s.touchAll()
+        assertTrue(s.refreshThumbnails())
+        val thumb = assertNotNull(s.snapshot.single().thumbnail)
+
+        // A three-pixel line averaged into a sixteen-pixel cell is 19% covered,
+        // so this is faint on purpose -- it is what a page with one thin line
+        // on it actually looks like from far away. What it must not be is zero.
+        assertTrue(darkest(thumb) > 20, "the line reduced to nothing: ${darkest(thumb)}")
+
+        // The control, and the reason this test exists. The obvious code is one
+        // `drawBitmap` from 2048 to 128; a bilinear filter samples a 2x2
+        // neighbourhood however far apart the taps are, so at sixteenfold it
+        // walks straight past a three-pixel line.
+        val oneStep = Bitmap.createBitmap(128, 84, Bitmap.Config.ARGB_8888)
+        s.active.layer.read {
+            Canvas(oneStep).drawBitmap(
+                it,
+                Rect(0, 0, 2048, 1344),
+                Rect(0, 0, 128, 84),
+                Paint().apply { isFilterBitmap = true },
+            )
+        }
+        assertTrue(
+            darkest(thumb) > darkest(oneStep) * 2,
+            "halving found ${darkest(thumb)} where one step found ${darkest(oneStep)}",
+        )
+        s.close()
+    }
+
+    private fun darkest(bmp: Bitmap): Int {
+        var most = 0
+        for (y in 0 until bmp.height) {
+            for (x in 0 until bmp.width) {
+                val a = Color.alpha(bmp.getPixel(x, y))
+                if (a > most) most = a
+            }
+        }
+        return most
     }
 
     /**
