@@ -53,7 +53,12 @@ moved into the IJ platform), JetBrains `components-splitpane` (Apache-2.0, JVM
 desktop only). On Android the nearest things are floating-window helpers, which
 give a draggable snapping window and no dock model. Meanwhile `ToolbarLayout`
 is already an immutable placement algebra with `fits`, `place`, a codec that
-never throws, and twenty-three JVM tests. A dock is that, plus one axis.
+never throws, and twenty-four JVM tests. A dock is that, plus one axis.
+
+*(Count updated after `113be13`, which added Undo, Redo and the rule that a
+saved bar is widened to the current default length on load, never shortened —
+the case a dock inherits directly, since a new dock is more slots appearing
+somewhere a saved layout has never heard of.)*
 
 ## What the upgrade buys, against the list that was asked for
 
