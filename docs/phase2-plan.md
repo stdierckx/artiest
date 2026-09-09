@@ -275,7 +275,9 @@ Carried forward as fact, because it was measured on DTHA116:
 
 | Fact | Value | Where |
 |---|---|---|
-| Pen to photons, 90 Hz, smoothing 0, prediction off | **45.2 ms** | W16 film, 4 zigzag reversals |
+| Pen to photons, 90 Hz, prediction off, **smoothing 0** | **38.0 ms** | fresh film, 9 of 9 thresholds |
+| Pen to photons, 90 Hz, prediction off, **smoothing 0.15** | **45.6 ms** | fresh film, same session |
+| ~~45.2 ms, labelled "smoothing 0"~~ | superseded | W16 film; the label looks wrong, see below |
 | ...of which SurfaceFlinger + panel | **35.9 ms** (3.2 refreshes) | W16 decomposition |
 | ...of which sampling + dispatch | 5.75 ms | app `latency` readout, real pen |
 | ...of which engine spline pipeline | 3.21 ms | `StrokeBuilderTest` |
@@ -919,6 +921,37 @@ guessed: the panel must actually be holding 90 Hz for the whole take (run C was
 not, and nobody noticed for a day), and the clip needs enough clean reversals —
 run C and C2 still fail on *"only 2 usable apexes"*, which is a property of the
 footage and not of the tool.
+
+### W0 stop condition 1, met — and the baseline's label was wrong
+
+A fresh film finally produced a number, and then a second one produced a better
+one. Both were shot on the same evening, on the same tablet, minutes apart, with
+nothing changed between them but the smoothing slider:
+
+| clip | smoothing | result | thresholds |
+|---|---|---|---|
+| fE | 0.15 | 45.6 ms | 4 of 9 |
+| fF | **0** | **38.0 ms** | **9 of 9** |
+
+Panel confirmed at 90 Hz in the readout, prediction off, capture 241.2 fps
+across the whole clip with no speed ramp. Nine thresholds out of nine agreeing
+is the best consensus any clip has produced, take 2 and run B included.
+
+**This says the 45.2 ms carried forward from W16 was not measured at smoothing
+0, whatever its label said.** Smoothing 0.15 is the app's default and costs
+7.6 ms here, which is most of a refresh; 45.6 at 0.15 lands almost exactly on
+the old 45.2, and 38.0 is what the same rig does with the slider actually at
+zero. The simplest reading is that W16 filmed the default and recorded the
+intended setting rather than the one in force — the same class of mistake as
+run C being filmed at 60 Hz while labelled 90, and it survived just as long
+because nothing in the pipeline could contradict it.
+
+Two things follow. The decomposition above needs revisiting: 35.9 ms of
+SurfaceFlinger and panel does not fit inside a 38.0 ms total with 5.75 ms of
+sampling and dispatch, so at least one of those terms is measuring something
+other than what its row claims. And smoothing is now a known 7.6 ms, which
+makes it a latency control and not only a feel control — worth stating before
+W9 tunes it for feel alone.
 
 **And the first of those two turned out not to be something the app can do.**
 Told to "confirm the readout says 90 Hz", the tablet never said 90 — not on
