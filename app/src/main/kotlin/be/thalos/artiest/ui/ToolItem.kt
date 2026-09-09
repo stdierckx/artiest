@@ -79,6 +79,15 @@ enum class ToolItem(
     OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW),
     FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW),
 
+    /**
+     * W8. The paper's tooth, as one slider from smooth to full depth.
+     *
+     * One control and not four: scale, cutoffs and seed are brush parameters
+     * the format carries, but a toolbar with four grain sliders is a
+     * synthesiser, not a pencil. W10's preset sets the other three.
+     */
+    GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW),
+
     ZOOM_IN("zoom_in", "Zoom in", "+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "\u2212", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

@@ -298,6 +298,9 @@ private fun CanvasScreen(
     var opacity by remember { mutableFloatStateOf(1f) }
     var flow by remember { mutableFloatStateOf(1f) }
 
+    /** W8. Zero is the pen, untextured, which is what Phase 1 shipped. */
+    var grain by remember { mutableFloatStateOf(0f) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -317,7 +320,7 @@ private fun CanvasScreen(
 
     // Applied on every change and once when the view arrives, because the view
     // is built by the AndroidView factory after the first composition.
-    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow) {
+    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
         v.pen.sizeMax = sizeMax
@@ -327,6 +330,7 @@ private fun CanvasScreen(
         // through the scratch buffer, which is the whole of W6.
         v.pen.opacity = opacity
         v.pen.flow = flow
+        v.pen.grain = v.pen.grain.copy(strength = grain)
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -413,6 +417,8 @@ private fun CanvasScreen(
                     onOpacity = { opacity = it },
                     flow = flow,
                     onFlow = { flow = it },
+                    grain = grain,
+                    onGrain = { grain = it },
                     exporting = exporting,
                     canUndo = canUndo,
                     canRedo = canRedo,
@@ -554,6 +560,8 @@ private fun ToolSlot(
     onOpacity: (Float) -> Unit,
     flow: Float,
     onFlow: (Float) -> Unit,
+    grain: Float,
+    onGrain: (Float) -> Unit,
     exporting: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -584,6 +592,9 @@ private fun ToolSlot(
 
         ToolItem.FLOW ->
             LabelledSlider("flow", flow, MIN_ALPHA, 1f, 2, onFlow)
+
+        ToolItem.GRAIN ->
+            LabelledSlider("grain", grain, 0f, 1f, 2, onGrain)
 
         ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
         ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
@@ -866,6 +877,9 @@ private fun readout(
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "grain    ${r(surface.pen.grain.strength, 2)} strength   " +
+        "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
+        "${surface.grainBuilds} built\n" +
         "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
         "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +
         "${surface.scratchGrowths} grown\n" +

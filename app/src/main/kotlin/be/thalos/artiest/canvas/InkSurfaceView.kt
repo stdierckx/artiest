@@ -27,6 +27,7 @@ import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.input.TwoFingerDoubleTap
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
+import be.thalos.artiest.ink.GrainTexture
 import be.thalos.artiest.ink.ScratchLayer
 import be.thalos.artiest.ink.StampCache
 import be.thalos.artiest.input.InkInputSink
@@ -328,7 +329,9 @@ class InkSurfaceView(
             if (scratch.isOpen && scratchEpoch == strokeEpoch &&
                 scratch.ensureCovers(stroke.bounds)
             ) {
-                document.layer.write { scratch.compositeInto(it, pen.opacity) }
+                document.layer.write {
+                    scratch.compositeInto(it, pen.opacity, grainShader())
+                }
                 return
             }
             scratch.begin(stroke.bounds)
@@ -341,7 +344,7 @@ class InkSurfaceView(
                 return
             }
             rasterizer.drawDry(sc, stroke, flowOverride = pen.flow)
-            document.layer.write { scratch.compositeInto(it, pen.opacity) }
+            document.layer.write { scratch.compositeInto(it, pen.opacity, grainShader()) }
         }
 
         override fun onClear() {
@@ -424,6 +427,12 @@ class InkSurfaceView(
      * translucent, because for a fully opaque nib the direct path produces
      * identical pixels for less work.
      */
+    /** W8's paper tooth. See [GrainTexture]. */
+    private val grain = GrainTexture()
+
+    /** Grain tiles generated, for the instruments. */
+    val grainBuilds: Long get() = grain.builds
+
     private val scratch = ScratchLayer(
         maxWidth = document.widthPx + 2 * ScratchLayer.PAD,
         maxHeight = document.heightPx + 2 * ScratchLayer.PAD,
@@ -455,7 +464,7 @@ class InkSurfaceView(
      * beading case wearing a different hat.
      */
     private fun indirectNeeded(): Boolean =
-        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f
+        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f || pen.grain.isActive
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -520,12 +529,13 @@ class InkSurfaceView(
         paperPaint.color = document.paperColor
         canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
         document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-        scratch.peekBitmap()?.let {
-            wetPaint.alpha = (pen.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-            canvas.drawBitmap(it, scratch.originX.toFloat(), scratch.originY.toFloat(), wetPaint)
-        }
+        scratch.drawOnto(canvas, pen.opacity, grainShader())
         canvas.restoreToCount(save)
     }
+
+    /** The grain shader anchored to the scratch's current origin, or null. */
+    private fun grainShader() =
+        grain.shaderFor(pen.grain, scratch.originX, scratch.originY)
 
     /** The scratch's composite paint for the wet pass. See [drawWetIndirect]. */
     private val wetPaint = Paint().apply {
@@ -659,14 +669,7 @@ class InkSurfaceView(
             // every time the transform changed. Pinching mid-stroke is not a
             // gesture anyone makes on purpose, but the same redraw is what
             // `redrawDry` schedules after a zoom button.
-            if (scratch.isOpen) {
-                scratch.peekBitmap()?.let {
-                    wetPaint.alpha = (pen.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-                    canvas.drawBitmap(
-                        it, scratch.originX.toFloat(), scratch.originY.toFloat(), wetPaint,
-                    )
-                }
-            }
+            if (scratch.isOpen) scratch.drawOnto(canvas, pen.opacity, grainShader())
             canvas.restoreToCount(save)
         }
     }
@@ -926,6 +929,7 @@ class InkSurfaceView(
         // would otherwise hold it until the next allocation happens to reuse
         // the field.
         scratch.release()
+        grain.release()
     }
 
     /**

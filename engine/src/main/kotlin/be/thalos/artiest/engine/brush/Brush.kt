@@ -134,6 +134,17 @@ class Brush {
      */
     var flow: Float = 1f
 
+    /**
+     * The paper's tooth. See [GrainField] for why it is generated rather than
+     * shipped as an image, and [GrainSpec.scaleDocPx] for why it is measured in
+     * document pixels rather than in dab widths.
+     *
+     * Inactive by default, so the pen is untouched by W8. A brush with an
+     * active grain is translucent by construction — the grain multiplies alpha
+     * — so it goes through the scratch buffer for the same reason [flow] does.
+     */
+    var grain: GrainSpec = GrainSpec()
+
     /** Passed to `Stabilizer` at `StrokeBuilder` construction. */
     var stabilization: Float = 0.15f
 
@@ -303,6 +314,7 @@ class Brush {
         it.onsetMillis = onsetMillis
         it.onsetPressure = onsetPressure
         it.isotropicSpacing = isotropicSpacing
+        it.grain = grain
     }
 
     override fun toString(): String =

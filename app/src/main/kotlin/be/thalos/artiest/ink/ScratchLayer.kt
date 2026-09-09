@@ -1,10 +1,14 @@
 package be.thalos.artiest.ink
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.ComposeShader
+import android.graphics.Matrix
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
+import android.graphics.Shader
 import be.thalos.artiest.engine.ink.Bounds
 
 /**
@@ -166,13 +170,47 @@ class ScratchLayer(
      * [dst] must be in document space — the layer's own canvas is, because one
      * layer pixel is one document pixel.
      */
-    fun compositeInto(dst: Canvas, alpha: Float) {
-        val bmp = bitmap ?: return
-        val a = (alpha.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-        compositePaint.alpha = a
-        dst.drawBitmap(bmp, originX.toFloat(), originY.toFloat(), compositePaint)
+    fun compositeInto(dst: Canvas, alpha: Float, grain: Shader? = null) {
+        drawOnto(dst, alpha, grain)
         isOpen = false
     }
+
+    /**
+     * Paint the buffer onto [dst] without closing it. The wet pass, which has
+     * to show the stroke so far on every frame and must not consume it.
+     */
+    fun drawOnto(dst: Canvas, alpha: Float, grain: Shader? = null) {
+        val bmp = bitmap ?: return
+        val a = (alpha.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        if (grain == null) {
+            compositePaint.shader = null
+            compositePaint.alpha = a
+            dst.drawBitmap(bmp, originX.toFloat(), originY.toFloat(), compositePaint)
+            return
+        }
+        // The stroke and the grain, multiplied. DST_IN keeps the stroke's
+        // colour and multiplies its alpha by the grain's, which reads as
+        // "keep the ink where the paper caught it".
+        if (selfShader == null || selfShaderFor !== bmp) {
+            selfShader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            selfShaderFor = bmp
+        }
+        selfMatrix.reset()
+        selfMatrix.setTranslate(originX.toFloat(), originY.toFloat())
+        selfShader!!.setLocalMatrix(selfMatrix)
+        compositePaint.shader = ComposeShader(selfShader!!, grain, PorterDuff.Mode.DST_IN)
+        compositePaint.alpha = a
+        dst.drawRect(
+            originX.toFloat(), originY.toFloat(),
+            (originX + bmp.width).toFloat(), (originY + bmp.height).toFloat(),
+            compositePaint,
+        )
+        compositePaint.shader = null
+    }
+
+    private var selfShader: BitmapShader? = null
+    private var selfShaderFor: Bitmap? = null
+    private val selfMatrix = Matrix()
 
     /** Abandon without compositing. Pen-up on a cancelled stroke. */
     fun abandon() {
