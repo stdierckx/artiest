@@ -149,6 +149,18 @@ CAMERA_RATE_TOL = 0.06
 # Both are flat over 0.15-0.20 and both fail outside it, in opposite directions,
 # so the value is the middle of an overlap rather than a point that happened to
 # work. If a future clip needs it moved, sweep it again and put the table here.
+# Anything this dark in *every* sampled frame is clutter, not drawing. Set just
+# above the top of DARK_SWEEP on purpose: the question the mask answers is
+# "could the sweep ever call this ink?", so the threshold has to be the most
+# generous one the sweep uses, or clutter slips through at 0.70 having been
+# judged at 0.50.
+STATIC_FRAC = 0.72
+STATIC_FRAMES = 24
+# Slack for a handheld camera. Each frame's mask is grown before intersecting,
+# so a few pixels of drift do not empty the intersection, and the result is
+# grown again to cover the soft edge a dark object has against a lit page.
+STATIC_PAD = 2
+
 PEN_MAX_PAGE = 0.175
 
 MIN_APEXES = 3          # fewer than this is not a measurement
@@ -240,7 +252,35 @@ def find_page(files, n=24):
     return (y0 + inset, y1 - inset, x0 + inset, x1 - inset)
 
 
-def stroke_width(files, roi, frac=0.5):
+def static_mask(files, roi, n=STATIC_FRAMES, pad=STATIC_PAD):
+    """Pixels that are dark in every sampled frame: things that are not drawing.
+
+    **Why an intersection over the whole clip, anchored at the first frame.**
+    Three kinds of dark thing sit on this page and none of them is ink. A hair
+    on the glass. The keys the camera needs to focus on, resting on the bezel
+    and overlapping the page. Ink left over from a previous take. All three are
+    there before the pen is, and all three stay put. The pen is dark too, but it
+    moves, so it is dark *somewhere* in every frame and in no single place in
+    all of them. Real ink is dark too, but it appears partway through, so it is
+    not dark in the frames sampled from the start.
+
+    So "dark in every sampled frame" separates the three cleanly, and the
+    sampling starts at frame one, which is what makes ink drawn during the take
+    safe. This is not a refinement: with the keys in frame the nib locked onto
+    the keyring at a constant y for all 673 frames and the clip yielded nothing,
+    and the keys cannot simply be removed because they are what the camera
+    focuses on.
+    """
+    pick = files[::max(1, len(files) // n)][:n]
+    acc = None
+    for f in pick:
+        d = load(f, roi) < np.median(load(f, roi)) * STATIC_FRAC
+        d = morph(d, pad, "d")
+        acc = d if acc is None else (acc & d)
+    return morph(acc, pad, "d")
+
+
+def stroke_width(files, roi, static=None, frac=0.5):
     """Median horizontal run of dark pixels: the ink line's width, in pixels.
 
     This is the ruler every other spatial constant is expressed in. Measured on
@@ -251,7 +291,13 @@ def stroke_width(files, roi, frac=0.5):
     runs = []
     for f in files[int(len(files) * 0.35):int(len(files) * 0.75):8]:
         img = load(f, roi)
-        for row in (img < np.median(img) * frac):
+        dark = img < np.median(img) * frac
+        # Measured on ink only. A keyring left in shot is a very wide dark run,
+        # and this is the ruler every other spatial constant is scaled by: on
+        # the clip with the keys it read 11.0 px for a stroke that is nearer 3.
+        if static is not None:
+            dark = dark & ~static
+        for row in dark:
             edges = np.flatnonzero(np.diff(np.concatenate(([0], row.view(np.int8), [0]))))
             for a, b in zip(edges[::2], edges[1::2]):
                 if 1 <= b - a <= 40:
@@ -264,9 +310,10 @@ def stroke_width(files, roi, frac=0.5):
 class Calib:
     """What the clip says about itself. See [find_page] and [stroke_width]."""
 
-    def __init__(self, roi, stroke):
+    def __init__(self, roi, stroke, static=None):
         self.roi = roi
         self.stroke = stroke
+        self.static = static
         self.erode = max(2, int(round(ERODE_W * stroke)))
         self.dilate = self.erode + 1
         self.clearance = max(3, int(round(CLEARANCE_W * stroke)))
@@ -286,9 +333,12 @@ class Calib:
 
     def __str__(self):
         y0, y1, x0, x1 = self.roi
+        px = 0 if self.static is None else int(self.static.sum())
+        area = (y1 - y0) * (x1 - x0)
         return (f"page y {y0}..{y1} x {x0}..{x1}  stroke {self.stroke:.1f}px  "
                 f"erode {self.erode} clearance {self.clearance} "
-                f"pen {self.pen_min_px}..{self.pen_max_px}px")
+                f"pen {self.pen_min_px}..{self.pen_max_px}px  "
+                f"clutter masked {px} px ({100.0 * px / area:.1f}%)")
 
 
 def scan(files, lo, hi, cal, fracs):
@@ -306,6 +356,8 @@ def scan(files, lo, hi, cal, fracs):
         level = np.median(img)          # this frame's own page brightness
         for f in fracs:
             dark = img < level * f
+            if cal.static is not None:
+                dark = dark & ~cal.static
             pen = morph(morph(dark, cal.erode, "e"), cal.dilate, "d")
             ink = dark & ~morph(pen, cal.clearance, "d")
             nib_y = np.nan
@@ -524,6 +576,8 @@ def drawing_window(files, cal, step=4, span=12, pad=2):
     for i in range(1, len(files) + 1, step):
         img = load(files[i - 1], cal.roi)
         dark = img < np.median(img) * 0.5
+        if cal.static is not None:
+            dark = dark & ~cal.static
         pen = morph(morph(dark, cal.erode, "e"), cal.dilate, "d")
         # The same leftmost-sliver rule [scan] uses, so the window is found on
         # the very feature the measurement is later made from. A rule that
@@ -571,11 +625,14 @@ def main():
     ap.add_argument("--from", dest="lo", type=int, default=None)
     ap.add_argument("--to", dest="hi", type=int, default=None)
     ap.add_argument("--roi", help="y0,y1,x0,x1 — pin the page instead of finding it")
+    ap.add_argument("--keep-clutter", action="store_true",
+                    help="do not mask things that are dark from the first frame")
     a = ap.parse_args()
 
     fs = frames(a.frames_dir)
     roi = tuple(int(v) for v in a.roi.split(",")) if a.roi else find_page(fs)
-    cal = Calib(roi, stroke_width(fs, roi))
+    static = None if a.keep_clutter else static_mask(fs, roi)
+    cal = Calib(roi, stroke_width(fs, roi, static), static)
     print(f"calibrated: {cal}")
 
     lo, hi = drawing_window(fs, cal)
