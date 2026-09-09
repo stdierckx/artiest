@@ -964,7 +964,8 @@ private fun readout(
         "${surface.predictor?.availability ?: "-"}   " +
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
-        "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed   " +
+        "${surface.predictSuppressedIndirect} indirect\n" +
         "brush    ${if (surface.pen.erase) "ERASING" else "painting"}   " +
         "${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
         "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +

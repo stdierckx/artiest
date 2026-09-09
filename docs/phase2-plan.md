@@ -1249,6 +1249,61 @@ judgement is specifically whether it does. Judged on the tablet with
 the pen by the person who will use it, in the user's own words, recorded in the
 plan the way W1's and W16's verdicts were.
 
+### W9–W13 — what the rest of the phase actually did
+
+**W9.** The dab record widened from three floats to five — x, y, radius, aspect,
+rotation — and all eight goldens are byte-identical, because they serialize the
+first three and a round dab has an aspect of exactly 1 and a rotation of exactly
+0. Tilt is fed to its filter per sample rather than interpolated along the
+spline: it is low-passed with a 40 ms constant against samples 3 ms apart, so
+widening the resampler would cost two arrays on the hottest path in the engine
+to interpolate a value that moves by a thousandth of a radian between knots.
+The speculative tail lays no shaped dabs at all — scatter is random per dab, so
+a predicted dab and the real one replacing it would land in different places.
+
+**W10.** Two presets, and the third slot stays deleted. The pen is asserted to
+be *exactly* the default brush, which is what keeps it on the direct path: the
+phase adds a pencil without taxing the tool it was not supposed to touch. The
+toolbar widened from 20 slots to 24 to fit them, which is the second time
+`ToolbarLayout`'s headroom argument has been cashed and is now recorded beside
+the first.
+
+**W11.** The eraser is a blend mode, not a white brush — the layer is
+alpha-carrying by design, so painting the paper's colour fills transparent
+pixels with opaque white and the export shows it. It beads exactly as a
+translucent brush does, in reverse (eight dabs at 30% take out 94%), so it goes
+through the scratch buffer too: measured, the direct path leaves 27 of 255 and
+the buffered path 178. Two ways in, `or`-ed: a toolbar toggle and a momentary
+barrel button, decided once from the first sample of the stroke, because a
+button released mid-stroke must not turn the second half of an erase into ink.
+
+**W12.** Line-based key/value, `Float.toString` for the nl-BE reason, decoding
+that never throws, and unknown lines skipped so a preset written by a later
+build still loads. Persisted, so the format is used rather than merely defined.
+
+**W13 — the answer is no, and the reason is structural.** The entry condition
+("only now that the wet stroke is re-renderable") is met, and the re-test says
+prediction and the indirect path are incompatible as built. Phase 1's
+prediction relies on the front buffer accumulating: a wrong guess is overdrawn
+in the same colour by the real ink and only the overshoot survives. On the
+indirect path a speculative dab lands on the *scratch*, which is not a frame
+buffer but the stroke itself — composited once at pen-up — so a guess written
+there is permanent, and it cannot be removed afterwards because the dabs are
+translucent and have already composited with their neighbours.
+
+So prediction yields, and it is the right one to yield: it is an optimisation
+and the scratch buffer is a correctness fix. Measured on the device, with
+`Predict ON` throughout:
+
+| brush | predicted dabs | gate allowed | suppressed as indirect |
+|---|---|---|---|
+| opaque pen | 5563, lead mean 62.66 doc px | 199 | **0** |
+| translucent | 5563 (no new ones) | 199 | **224** |
+
+Also worth recording from that readout: `SystemMotionEventPredictor` reports
+`platform: no` on this device, so every prediction number Phase 1 and Phase 2
+have measured is the fallback implementation, not the vendor one.
+
 ### W15 — reconcile, including against this document
 
 Same shape as W17: re-film, re-run W0's tool, and annotate `analysis.html` *and*

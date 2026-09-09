@@ -1280,6 +1280,28 @@ class InkSurfaceView(
          * transient, and it is why the toggle defaults off.
          */
         private fun drawPredictedTail() {
+            // W13, and the answer is no for these brushes.
+            //
+            // The front buffer accumulates, which is what makes it fast, and
+            // Phase 1's prediction relied on that: a wrong guess is overdrawn
+            // in the same colour by the real ink and only the overshoot
+            // survives. The indirect path breaks the arrangement in a way that
+            // cannot be patched around it. Speculative dabs would land on the
+            // *scratch*, which is not a frame buffer but the stroke itself, and
+            // the stroke is composited once at pen-up — so a guess written
+            // there is permanent, and a wrong one is baked into the committed
+            // pixels rather than overdrawn a frame later.
+            //
+            // Removing it again is not possible either: the dabs are
+            // translucent and have already composited with their neighbours, so
+            // there is nothing to subtract. The honest answer is that these two
+            // features are incompatible as built, and prediction is the one
+            // that yields — it is an optimisation, and the scratch buffer is a
+            // correctness fix.
+            if (indirectNeeded()) {
+                predictSuppressedIndirect++
+                return
+            }
             if (!gate.allows) {
                 gateSuppressed++
                 return
@@ -1492,6 +1514,10 @@ class InkSurfaceView(
             return pen.spacingFor(radius)
         }
     }
+
+    /** Frames where prediction was skipped because the brush is indirect. See [drawPredictedTail]. */
+    var predictSuppressedIndirect: Long = 0L
+        private set
 
     /** Speculative dabs drawn since the view was created. Diagnostics. */
     var predictedDabs: Long = 0L
