@@ -1,6 +1,7 @@
 package be.thalos.artiest.canvas
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -16,6 +17,7 @@ import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.input.PenSample
@@ -25,6 +27,7 @@ import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.input.TwoFingerDoubleTap
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
+import be.thalos.artiest.ink.ScratchLayer
 import be.thalos.artiest.ink.StampCache
 import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
@@ -311,7 +314,34 @@ class InkSurfaceView(
             // last moment the region exists in its pre-stroke state. Taken
             // after the rasterise it would record the stroke as its own undo.
             document.snapshotBeforeStroke(stroke.bounds)
-            document.layer.write { rasterizer.drawDry(it, stroke) }
+            if (!indirectNeeded()) {
+                document.layer.write { rasterizer.drawDry(it, stroke) }
+                return
+            }
+            // W6's indirect path. The dabs land on the scratch, which starts
+            // empty, so the stroke's own overlaps composite against nothing;
+            // the single composite at the end is what carries the opacity.
+            // The wet pass has usually already accumulated this stroke. Reuse
+            // it when it has: re-laying every dab would double the paint on a
+            // translucent brush, which is the very bug the buffer exists to
+            // prevent, wearing a different hat.
+            if (scratch.isOpen && scratchEpoch == strokeEpoch &&
+                scratch.ensureCovers(stroke.bounds)
+            ) {
+                document.layer.write { scratch.compositeInto(it, pen.opacity) }
+                return
+            }
+            scratch.begin(stroke.bounds)
+            val sc = scratch.canvasInDocSpace()
+            if (sc == null) {
+                // The buffer could not be opened. Falling back to the direct
+                // path draws a beaded stroke, which is wrong but visible;
+                // dropping the stroke silently is wrong and invisible.
+                document.layer.write { rasterizer.drawDry(it, stroke) }
+                return
+            }
+            rasterizer.drawDry(sc, stroke, flowOverride = pen.flow)
+            document.layer.write { scratch.compositeInto(it, pen.opacity) }
         }
 
         override fun onClear() {
@@ -389,6 +419,120 @@ class InkSurfaceView(
     val stampCount: Int get() = stamps.masks.size
     val stampBytes: Long get() = stamps.masks.byteCount
 
+    /**
+     * W6's scratch buffer. See [ScratchLayer]; used only when the brush is
+     * translucent, because for a fully opaque nib the direct path produces
+     * identical pixels for less work.
+     */
+    private val scratch = ScratchLayer(
+        maxWidth = document.widthPx + 2 * ScratchLayer.PAD,
+        maxHeight = document.heightPx + 2 * ScratchLayer.PAD,
+    )
+
+    /** Bitmap format for the scratch buffer. The F16 question, switchable on device. */
+    var scratchF16: Boolean = false
+        set(value) {
+            field = value
+            scratch.release()
+            scratch.config =
+                if (value) Bitmap.Config.RGBA_F16 else Bitmap.Config.ARGB_8888
+        }
+
+    /** Scratch allocations and growths, for the instruments. */
+    val scratchAllocations: Long get() = scratch.allocations
+    val scratchGrowths: Long get() = scratch.growths
+    val scratchExtent: String get() = "${scratch.width}x${scratch.height}"
+
+    /**
+     * Whether this stroke has to go through the scratch buffer.
+     *
+     * Opaque nibs do not: overlapping opaque dabs composite to the same colour
+     * as one dab, so the direct path is not an approximation for them, it is
+     * the same picture for less work. That is the whole of Phase 1's defence
+     * for shipping without a scratch buffer, and it stays true.
+     *
+     * Hardness counts because a soft edge *is* a translucent rim, which is the
+     * beading case wearing a different hat.
+     */
+    private fun indirectNeeded(): Boolean =
+        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f
+
+    /**
+     * Bumped on the UI thread whenever a stroke starts or is abandoned, and
+     * read on the render thread to tell one stroke's wet accumulation from the
+     * next's.
+     *
+     * Needed because an abandoned stroke never reaches the commit sink, so
+     * nothing closes the scratch: without this the ink from a stroke cancelled
+     * by a palm would still be sitting on the buffer when the next stroke
+     * opened, and would composite into the layer as part of it. `isOpen` alone
+     * cannot see that, because from the buffer's point of view nothing
+     * happened.
+     */
+    @Volatile
+    private var strokeEpoch: Int = 0
+
+    /** The epoch the scratch currently holds. Render thread only. */
+    private var scratchEpoch: Int = -1
+
+    /** Reused by [drawWetIndirect]; render thread only, so one array is enough. */
+    private val wetRect = FloatArray(4)
+
+    /**
+     * The wet pass for a translucent brush: accumulate, then repaint the
+     * region from scratch.
+     *
+     * **Why the front buffer cannot simply be drawn on for these brushes.** It
+     * accumulates — that is what makes it fast — so blitting a scratch that has
+     * itself grown darker means compositing the stroke over an older copy of
+     * the same stroke, which beads exactly as drawing the dabs directly would.
+     * The only correct answer is to *replace* the affected pixels, and to
+     * replace them we have to be able to reproduce what is underneath: the
+     * desk, the paper, the committed layer, and then the stroke so far.
+     *
+     * That is affordable because the region is small. The clip is the batch's
+     * own bounds — a few hundred document pixels across at most, since a batch
+     * is one frame's worth of dabs — so the layer blit inside it is a small
+     * copy and not a page repaint. Phase 1's W2 measured the full-redraw loop
+     * and it passed with headroom; this is a fraction of that per batch.
+     *
+     * This is also what "the wet stroke is re-renderable" means in W13's entry
+     * condition: with this path, the pixels under the pen are a function of the
+     * stroke so far rather than a history of what has been drawn on them.
+     */
+    private fun drawWetIndirect(canvas: Canvas, docToView: Matrix, batch: DabBatch) {
+        if (batch.size == 0) return
+        rasterizer.boundsOf(batch, wetRect)
+        val bounds = Bounds.of(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
+        if (!scratch.isOpen || scratchEpoch != strokeEpoch) {
+            scratch.begin(bounds)
+            scratchEpoch = strokeEpoch
+        } else {
+            scratch.ensureCovers(bounds)
+        }
+        val sc = scratch.canvasInDocSpace() ?: return
+        rasterizer.drawInto(sc, batch, pen.flow)
+
+        val save = canvas.save()
+        canvas.concat(docToView)
+        canvas.clipRect(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
+        canvas.clipRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
+        paperPaint.color = document.paperColor
+        canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
+        document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+        scratch.peekBitmap()?.let {
+            wetPaint.alpha = (pen.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+            canvas.drawBitmap(it, scratch.originX.toFloat(), scratch.originY.toFloat(), wetPaint)
+        }
+        canvas.restoreToCount(save)
+    }
+
+    /** The scratch's composite paint for the wet pass. See [drawWetIndirect]. */
+    private val wetPaint = Paint().apply {
+        isFilterBitmap = false
+        isAntiAlias = false
+    }
+
     /** Rebuilt from [transform] when it changes; never published. */
     private val dryMatrix = Matrix()
     private var dryMatrixSource: CanvasTransform? = null
@@ -438,7 +582,12 @@ class InkSurfaceView(
             param: DabBatch,
         ) {
             val m = frozenDocToView
-            if (m != null) rasterizer.drawWet(canvas, m, param)
+            if (m == null) return
+            if (!indirectNeeded()) {
+                rasterizer.drawWet(canvas, m, param)
+                return
+            }
+            drawWetIndirect(canvas, m, param)
             batches.markDrawn(param.sequence)
         }
 
@@ -505,6 +654,19 @@ class InkSurfaceView(
             paperPaint.color = document.paperColor
             canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
             document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+            // A stroke still in flight lives on the scratch, not in the layer,
+            // so a redraw that ignored it would blank the wet ink for a frame
+            // every time the transform changed. Pinching mid-stroke is not a
+            // gesture anyone makes on purpose, but the same redraw is what
+            // `redrawDry` schedules after a zoom button.
+            if (scratch.isOpen) {
+                scratch.peekBitmap()?.let {
+                    wetPaint.alpha = (pen.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+                    canvas.drawBitmap(
+                        it, scratch.originX.toFloat(), scratch.originY.toFloat(), wetPaint,
+                    )
+                }
+            }
             canvas.restoreToCount(save)
         }
     }
@@ -759,6 +921,11 @@ class InkSurfaceView(
         renderer?.release(true)
         renderer = null
         frozenDocToView = null
+        // The scratch can be several megabytes at RGBA_F16 and is native
+        // memory the GC does not account for; a view torn down mid-stroke
+        // would otherwise hold it until the next allocation happens to reuse
+        // the field.
+        scratch.release()
     }
 
     /**
@@ -809,6 +976,7 @@ class InkSurfaceView(
      * pointer id that never lifts.
      */
     fun abandonStroke() {
+        strokeEpoch++
         router.abandon()
     }
 
@@ -970,6 +1138,7 @@ class InkSurfaceView(
                 tailSmoothing = Stabilizer(pen.stabilization)
             }
             frozen = transform
+            strokeEpoch++
             builder.begin(inkColorArgb)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)

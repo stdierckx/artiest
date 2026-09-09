@@ -1191,6 +1191,33 @@ F16 is correct for the pencil and affordable because the scratch buffer is
 stroke-bounds-sized, not document-sized. If it is not affordable, 8-bit with a
 dithered flow accumulator is the fallback, and the pencil bar gets harder.
 
+**Settled: `ARGB_8888`, and the prediction was half right.** Both arms ship
+behind a `8888`/`F16` toggle so they can be run in one session. Measured with a
+translucent brush at 0.3 opacity and 0.3 flow, zigzag stress:
+
+| | ARGB_8888 | RGBA_F16 |
+|---|---|---|
+| first pair, before the growth fix | 0.627 ms | **4.484 ms** |
+| first pair, after it | 0.629 ms | 0.910 ms |
+| three warm pairs | 3.897 / 4.248 / 2.870 | 4.234 / 3.986 / 3.386 |
+
+F16 *is* affordable, once the buffer stops reallocating — the 4.484 ms was 36
+growths of a 25 MiB buffer inside one stroke, not the format. What does not
+survive is the reason for paying for it. The quantisation argument says 8 bits
+of alpha have a 1/255 floor that a 3%-flow pencil spends its first dabs inside;
+measured, four dabs at 3% reach **29 of 255 in `ARGB_8888` and 31 in
+`RGBA_F16`**. That is a 1% difference for double the memory. So 8-bit wins on
+cost, the dithered accumulator the fallback called for is not needed, and the
+pencil bar does not get harder.
+
+**Two defects the device found that no test would have.** The buffer grew by
+rounding up to a 128 px grain, which is linear in the stroke's extent: a zigzag
+across the page reallocated and copied 26 times in one stroke. Doubling makes it
+five. And without a ceiling, doubling an `RGBA_F16` buffer past 2048x2048 asks
+for 134 MiB and the process is killed — which it was, once. The scratch is now
+capped at the document's own extent, which is both correct and impossible to
+clip a real stroke with, since a stroke cannot be larger than its page.
+
 ### W8 — texture, and the bar
 
 Grain sampled at canvas position, multiplied into dab alpha, with strength and a

@@ -14,16 +14,26 @@ package be.thalos.artiest.engine.brush
  * [ResponseCurve] instead of two floats and a `when` — which is what lets W9
  * attach tilt to the same parameter without a second code path.
  *
- * **The tripwire, carried over from `Brush` and not yet discharged.**
- * Phase 1 has no scratch buffer, and that is defensible for exactly one brush
- * configuration: fully opaque. Overlapping dabs from an opaque nib composite to
- * the same colour as one dab, so the dark beads a scratch buffer exists to
- * prevent cannot occur. The moment [opacity] becomes a slider, or a translucent
- * brush ships, or a second blend mode appears, the eight dabs laid per nib
- * diameter each composite separately and a slow curve turns into a string of
- * dark beads. **Do not ship any of those three before the scratch buffer
- * exists.** W6 builds it and W7 is where this paragraph gets rewritten to say
- * what replaced it — rewritten, not deleted, so the reasoning survives the fix.
+ * **The tripwire, paid at W7 rather than deleted.** It read, from Phase 1 until
+ * W6: *Phase 1 has no scratch buffer, and that is defensible for exactly one
+ * brush configuration — fully opaque. Overlapping dabs from an opaque nib
+ * composite to the same colour as one dab, so the dark beads a scratch buffer
+ * exists to prevent cannot occur. The moment opacity becomes a slider, or a
+ * translucent brush ships, or a second blend mode appears, the eight dabs laid
+ * per nib diameter each composite separately and a slow curve turns into a
+ * string of dark beads. Do not ship any of those three before the scratch
+ * buffer exists.*
+ *
+ * It was right, and `ScratchLayerTest` now measures what it was protecting
+ * against: five overlapping dabs at 30% reach 218 of 255 drawn directly, and
+ * exactly 77 — one dab's worth — through the buffer. So the condition is
+ * discharged rather than waived. [opacity] and [flow] are sliders from W7, and
+ * what enforces the old warning now is a rule in
+ * `InkSurfaceView.indirectNeeded`: any brush with an opacity, flow or hardness
+ * below 1 goes through the scratch buffer, and only a fully opaque nib takes
+ * the direct path. **The rule to keep is that one, not the ban** — a new brush
+ * parameter that makes dabs translucent has to answer to `indirectNeeded`, or
+ * the beads come back for it alone.
  *
  * Mutable, non-`data`, and reads no globals, for the reason `Brush` gave: a
  * toolbar slider writes a field on this instance and the next stroke picks it
@@ -95,20 +105,32 @@ class Brush {
     var spacing: Float = 0.125f
 
     /**
-     * Nib edge hardness, 0..1. Still no reader in W2 — Phase 1 paints with
-     * `ANTI_ALIAS_FLAG` and nothing else. W4's mask generators are the first
-     * thing to read it, and a soft edge is a translucent rim, so it is subject
-     * to the tripwire above.
+     * Nib edge hardness, 0..1. Read by W4's mask generator, which is the only
+     * thing that can express it — `drawCircle` has one edge and it is hard.
+     *
+     * A soft edge is a translucent rim, so a value below 1 puts the stroke on
+     * the indirect path for the same reason [flow] does.
      */
     var hardness: Float = 1f
 
-    /** See the tripwire. Fixed at 1 until W6. Not a slider. */
+    /**
+     * The ceiling the whole stroke composites at, 0..1. A W7 slider.
+     *
+     * Applied **once**, to the finished stroke, which is what makes it a
+     * ceiling: however often the stroke crosses itself it cannot come out
+     * darker than this. That is the property the scratch buffer buys, and the
+     * reason opacity and [flow] are two controls rather than one.
+     */
     var opacity: Float = 1f
 
     /**
-     * Paint laid per dab, as opposed to the stroke's total [opacity]. Fixed at
-     * 1 until W7, and subject to the same tripwire for a sharper reason: flow
-     * below 1 is *by definition* translucent dabs overlapping.
+     * Paint laid per dab, 0..1. A W7 slider.
+     *
+     * Applied to each dab as it is laid, so it *does* build up along a stroke —
+     * up to [opacity] and no further. Low flow under a high ceiling is what
+     * graphite is: each pass leaves a little and repeated passes darken toward
+     * a limit instead of straight to black. Collapsing the two into one slider
+     * is the shortcut that makes a pencil impossible.
      */
     var flow: Float = 1f
 

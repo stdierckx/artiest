@@ -34,8 +34,11 @@ class ToolbarCodecTest {
 
     @Test
     fun `an id this build has never heard of is dropped and the rest is kept`() {
-        // Written by a build that has W7's flow slider. This one does not.
-        val bar = assertNotNull(ToolbarCodec.decode("v1|16|0=colour,4=flow,13=stats"))
+        // Written by a build that has a tool this one does not. It used to say
+        // "flow", which W7 then shipped -- so the example had to become
+        // something no build has, which is the risk of naming a real future
+        // feature in a test about unknown names.
+        val bar = assertNotNull(ToolbarCodec.decode("v1|16|0=colour,4=perspective_grid,13=stats"))
         assertEquals(ToolItem.COLOUR, bar.covering(0)?.item)
         assertNull(bar.covering(4))
         assertEquals(ToolItem.STATS, bar.covering(13)?.item)

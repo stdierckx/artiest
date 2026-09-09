@@ -64,6 +64,21 @@ enum class ToolItem(
     SIZE("size", "Size", "Size", 4, ToolGroup.DRAW),
     SMOOTHING("smoothing", "Stabilisation", "Smooth", 4, ToolGroup.DRAW),
 
+    /**
+     * W7. The tripwire is paid: these two exist because the scratch buffer
+     * does, and they are what make the reference's median 0.27 alpha
+     * reachable at all.
+     *
+     * Two sliders and not one, because they are genuinely different things.
+     * [FLOW] is paint per dab and builds up along a stroke; [OPACITY] is the
+     * ceiling the whole stroke composites at and cannot be exceeded however
+     * often the stroke crosses itself. Collapsing them into one control is the
+     * shortcut that makes a pencil impossible: graphite is low flow under a
+     * high ceiling.
+     */
+    OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW),
+    FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW),
+
     ZOOM_IN("zoom_in", "Zoom in", "+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "\u2212", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

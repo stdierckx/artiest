@@ -291,6 +291,13 @@ private fun CanvasScreen(
     var sizeMax by remember { mutableFloatStateOf(DEFAULT_SIZE_MAX) }
     var smoothing by remember { mutableFloatStateOf(DEFAULT_SMOOTHING) }
 
+    // W7. Both default to 1, which is Phase 1's opaque nib exactly, so nothing
+    // changes until a slider is moved -- and the indirect path stays off until
+    // one is, because for an opaque nib it would be the same picture for more
+    // work.
+    var opacity by remember { mutableFloatStateOf(1f) }
+    var flow by remember { mutableFloatStateOf(1f) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -310,11 +317,16 @@ private fun CanvasScreen(
 
     // Applied on every change and once when the view arrives, because the view
     // is built by the AndroidView factory after the first composition.
-    LaunchedEffect(surface, ink, sizeMax, smoothing) {
+    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
         v.pen.sizeMax = sizeMax
         v.pen.stabilization = smoothing
+        // These two are what turn the indirect path on. Both at 1 is Phase 1's
+        // opaque nib and takes the direct path; anything less routes the stroke
+        // through the scratch buffer, which is the whole of W6.
+        v.pen.opacity = opacity
+        v.pen.flow = flow
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -397,6 +409,10 @@ private fun CanvasScreen(
                     onSizeMax = { sizeMax = it },
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
+                    opacity = opacity,
+                    onOpacity = { opacity = it },
+                    flow = flow,
+                    onFlow = { flow = it },
                     exporting = exporting,
                     canUndo = canUndo,
                     canRedo = canRedo,
@@ -486,6 +502,18 @@ private fun CanvasScreen(
                         v.stampMode = !v.stampMode
                         generation++
                     },
+                    onF16 = {
+                        val v = surface ?: return@DebugRow
+                        v.scratchF16 = !v.scratchF16
+                        generation++
+                    },
+                    onWet = {
+                        val v = surface ?: return@DebugRow
+                        val on = v.pen.opacity < 1f
+                        v.pen.opacity = if (on) 1f else WET_TEST_ALPHA
+                        v.pen.flow = if (on) 1f else WET_TEST_ALPHA
+                        generation++
+                    },
                     onStress = { pressure, path ->
                         val v = surface ?: return@DebugRow
                         val s = stress ?: StrokeStress(v).also { stress = it }
@@ -522,6 +550,10 @@ private fun ToolSlot(
     onSizeMax: (Float) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
+    opacity: Float,
+    onOpacity: (Float) -> Unit,
+    flow: Float,
+    onFlow: (Float) -> Unit,
     exporting: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -546,6 +578,12 @@ private fun ToolSlot(
 
         ToolItem.SMOOTHING ->
             LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
+
+        ToolItem.OPACITY ->
+            LabelledSlider("opac", opacity, MIN_ALPHA, 1f, 2, onOpacity)
+
+        ToolItem.FLOW ->
+            LabelledSlider("flow", flow, MIN_ALPHA, 1f, 2, onFlow)
 
         ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
         ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
@@ -676,6 +714,8 @@ private fun DebugRow(
     onReject: () -> Unit,
     onPredict: () -> Unit,
     onStamp: () -> Unit,
+    onF16: () -> Unit,
+    onWet: () -> Unit,
     onStress: (Float?, StrokeStress.Path) -> Unit,
 ) {
     Row(
@@ -726,6 +766,18 @@ private fun DebugRow(
         // settings or the comparison is of two sessions.
         TextButton(onClick = onStamp) {
             Text(if (surface?.stampMode == true) "Stamp ON" else "Stamp off")
+        }
+        // W6's format question, switchable on the device for the same reason
+        // the stamp is: both arms have to run in one session.
+        TextButton(onClick = onF16) {
+            Text(if (surface?.scratchF16 == true) "F16" else "8888")
+        }
+        // The indirect path only engages for a translucent brush, so measuring
+        // it needs one. Written straight onto the pen rather than through the
+        // sliders because the point is to A/B the two scratch formats at a
+        // fixed brush, and a slider drag is not a repeatable setting.
+        TextButton(onClick = onWet) {
+            Text(if ((surface?.pen?.opacity ?: 1f) < 1f) "Wet ON" else "Wet off")
         }
         // Two runs, not one. See StrokeStress.start's pressure parameter: the
         // sweep is the worst case and the firm press is what most of a real
@@ -814,6 +866,9 @@ private fun readout(
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
+        "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +
+        "${surface.scratchGrowths} grown\n" +
         "stamp    ${if (surface.stampMode) "ON" else "off"}   " +
         "${surface.stampCount} masks   ${surface.stampBytes / 1024} KiB   " +
         "${surface.stampUploads} uploaded   " +
@@ -990,6 +1045,25 @@ private const val DEFAULT_SIZE_MAX = 24f
 
 /** `Brush.stabilization`'s default. The plan's number, on the plan's slider. */
 private const val DEFAULT_SMOOTHING = 0.15f
+
+/**
+ * The floor on the opacity and flow sliders.
+ *
+ * Not zero. A brush at zero paints nothing, and a slider whose bottom end makes
+ * the app look broken is a support question rather than a feature. 0.02 is
+ * still far below the reference's median 0.27 alpha, so nothing expressive is
+ * lost by refusing the one value that cannot draw.
+ */
+private const val MIN_ALPHA = 0.02f
+
+/**
+ * The opacity and flow the `Wet` instrument button sets.
+ *
+ * 0.3, near the reference's median 0.27 alpha, so the measurement is of the
+ * brush the phase is actually trying to build rather than of an arbitrary
+ * translucency.
+ */
+private const val WET_TEST_ALPHA = 0.3f
 
 /**
  * One press of the zoom buttons. A quarter is large enough that a press is

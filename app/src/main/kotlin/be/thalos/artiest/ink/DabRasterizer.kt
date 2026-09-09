@@ -115,6 +115,46 @@ class DabRasterizer(
     }
 
     /**
+     * A batch of dabs into an already-document-space canvas, at [flow].
+     *
+     * The scratch buffer's own canvas is document space, so no matrix and no
+     * clip: the buffer is exactly the stroke's region and anything outside it
+     * has nowhere to land.
+     */
+    fun drawInto(canvas: Canvas, batch: DabBatch, flow: Float) {
+        val n = batch.size
+        if (n == 0) return
+        paint.color = batch.colorArgb
+        paint.isAntiAlias = batch.antiAlias
+        if (flow < 1f) paint.alpha = (flow.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        var i = 0
+        while (i < n) {
+            dab(canvas, batch.x(i), batch.y(i), batch.radius(i))
+            i++
+        }
+    }
+
+    /** The document-space rectangle a batch's dabs cover, rim included. */
+    fun boundsOf(batch: DabBatch, out: FloatArray) {
+        var l = Float.MAX_VALUE
+        var t = Float.MAX_VALUE
+        var r = -Float.MAX_VALUE
+        var b = -Float.MAX_VALUE
+        var i = 0
+        while (i < batch.size) {
+            val x = batch.x(i)
+            val y = batch.y(i)
+            val rad = batch.radius(i) + 1f
+            if (x - rad < l) l = x - rad
+            if (y - rad < t) t = y - rad
+            if (x + rad > r) r = x + rad
+            if (y + rad > b) b = y + rad
+            i++
+        }
+        out[0] = l; out[1] = t; out[2] = r; out[3] = b
+    }
+
+    /**
      * Dry ink: a finished stroke into the layer bitmap.
      *
      * No matrix, and that is not an omission. The layer *is* document space —
@@ -127,9 +167,15 @@ class DabRasterizer(
      * Index loop rather than a range or an iterator: this runs once per dab per
      * commit, on the render thread, inside `layerLock`.
      */
-    fun drawDry(canvas: Canvas, stroke: Stroke) {
+    fun drawDry(canvas: Canvas, stroke: Stroke, flowOverride: Float = 1f) {
         paint.color = stroke.colorArgb
         paint.isAntiAlias = stroke.antiAlias
+        // Flow is per-dab paint and belongs on the dab; opacity is per-stroke
+        // and belongs on the composite. Applying flow here and opacity there is
+        // what makes the two independent rather than one slider spelled twice.
+        if (flowOverride < 1f) {
+            paint.alpha = (flowOverride.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        }
         val n = stroke.dabCount
         var i = 0
         while (i < n) {
