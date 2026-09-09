@@ -43,6 +43,40 @@
 # setting is left alone: it is undone by the next screen blank anyway.
 set -u
 
+# The tablet is not the only thing plugged in. The phone that shoots the film is
+# usually on the same hub, and with two devices attached every bare `adb shell`
+# fails with "more than one device" -- which this script reported as "no device:
+# check the cable", sending you to look at the one thing that was fine. Pick the
+# drawing tablet by model, and let ANDROID_SERIAL override.
+DEVICE_MODEL=${DEVICE_MODEL:-DTHA116}
+pick_device() {
+    if [ -n "${ANDROID_SERIAL:-}" ]; then
+        echo "$ANDROID_SERIAL"; return 0
+    fi
+    local serials found=""
+    serials=$(adb devices | awk '$2 == "device" { print $1 }')
+    for s in $serials; do
+        if [ "$(adb -s "$s" shell getprop ro.product.model 2>/dev/null | tr -d '\r')" = "$DEVICE_MODEL" ]; then
+            found="$s"; break
+        fi
+    done
+    if [ -z "$found" ]; then
+        # Exactly one device and it is not the tablet: still better to use it
+        # than to refuse, but say which.
+        local n; n=$(echo "$serials" | grep -c .)
+        if [ "$n" = "1" ]; then found=$serials; fi
+    fi
+    echo "$found"
+}
+
+SERIAL=$(pick_device)
+if [ -z "$SERIAL" ]; then
+    echo "no $DEVICE_MODEL found. Attached:" >&2
+    adb devices -l >&2
+    exit 1
+fi
+adb() { command adb -s "$SERIAL" "$@"; }
+
 TARGET_HZ=${TARGET_HZ:-90}
 NUDGE_HZ=60.0
 TIMEOUT=10
@@ -60,9 +94,10 @@ if [ "${1:-}" = "--release" ]; then
 fi
 
 if ! adb shell true >/dev/null 2>&1; then
-    echo "no device: check the cable and 'adb devices'" >&2
+    echo "$SERIAL is attached but not responding to 'adb shell'" >&2
     exit 1
 fi
+echo "using $SERIAL"
 
 # A blank screen undoes everything below, so stop it blanking first.
 adb shell svc power stayon true >/dev/null

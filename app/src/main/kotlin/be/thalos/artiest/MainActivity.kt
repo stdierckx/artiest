@@ -3,7 +3,10 @@ package be.thalos.artiest
 import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -113,8 +116,9 @@ class MainActivity : ComponentActivity() {
                     CanvasScreen(
                         document = doc,
                         report = report,
-                        refreshHzNow = { activityDisplay()?.refreshRate ?: 0f },
+                        refreshHzNow = { panelHz() },
                         onRefreshPolicy = ::applyRefreshPolicy,
+                        onForceNinety = { done -> holdAndCheck(90f, done) },
                         onView = { view = it },
                     )
                 }
@@ -161,6 +165,57 @@ class MainActivity : ComponentActivity() {
         }
         val chosen = RefreshPolicy.chooseModeId(modes, display.mode.modeId, policy)
         window.attributes = window.attributes.apply { preferredDisplayModeId = chosen }
+    }
+
+    /**
+     * The rate the panel is physically holding.
+     *
+     * Deliberately `mode.refreshRate` and not `display.refreshRate`, which is
+     * the *render* rate and carries any frame-rate override the system has put
+     * on this app. Those differ: with the panel at 90 and the app idle, the
+     * override reads 45, and a readout saying 45 while photons arrive every
+     * 11.1 ms would send someone off to fix a frame drop that is not happening.
+     * The film needs to know when photons land, so the mode is the honest
+     * number here.
+     */
+    private fun panelHz(): Float = activityDisplay()?.mode?.refreshRate ?: 0f
+
+    /**
+     * Hold the panel where it is and say what rate that actually is.
+     *
+     * This deliberately does **not** set the rate, because an app on this
+     * device cannot — [PanelRefresh] carries the evidence, including the two
+     * permissions that were granted and still refused. Pretending otherwise
+     * would be the same failure as the old `max` button, which reported nothing
+     * and left everyone believing 90 Hz for a day.
+     *
+     * What it does instead is the two things that are the app's to do. It pins
+     * the screen awake, because the system cap is recomputed as 60 on every
+     * screen-on, so a rate set from a PC lasts exactly until the tablet next
+     * blanks — the failure that is invisible precisely while it matters. And it
+     * reports the rate the panel is holding, which is the check worth running
+     * immediately before a take.
+     */
+    private fun holdAndCheck(targetHz: Float, done: (String) -> Unit) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        applyRefreshPolicy(RefreshPolicy.HIGHEST)
+
+        // The compositor may change mode a few frames from now, so the answer
+        // is not available on this call stack.
+        val handler = Handler(Looper.getMainLooper())
+        var tries = 0
+        lateinit var check: Runnable
+        check = Runnable {
+            val now = panelHz()
+            when {
+                PanelRefresh.settled(now, targetHz) ->
+                    done("${r(now, 1)} Hz, screen held on - ok to film")
+                ++tries < VERIFY_TRIES -> handler.postDelayed(check, VERIFY_STEP_MS)
+                else ->
+                    done("${r(now, 1)} Hz - run tools/panel-90hz.sh from the PC")
+            }
+        }
+        handler.postDelayed(check, VERIFY_STEP_MS)
     }
 
     /**
@@ -212,6 +267,7 @@ private fun CanvasScreen(
     report: DeviceReport,
     refreshHzNow: () -> Float,
     onRefreshPolicy: (RefreshPolicy) -> Unit,
+    onForceNinety: ((String) -> Unit) -> Unit,
     onView: (InkSurfaceView) -> Unit,
 ) {
     var generation by remember { mutableIntStateOf(0) }
@@ -224,6 +280,7 @@ private fun CanvasScreen(
     var exporting by remember { mutableStateOf(false) }
     var stats by remember { mutableStateOf(false) }
     var policy by remember { mutableStateOf(RefreshPolicy.HIGHEST) }
+    var panelStatus by remember { mutableStateOf("") }
 
     // The brush settings live here as Compose state and are pushed into the
     // pen, not read back out of it. `RoundPen`'s fields are plain vars on the
@@ -388,6 +445,11 @@ private fun CanvasScreen(
                     surface = surface,
                     policy = policy,
                     onPolicy = { policy = it; onRefreshPolicy(it); generation++ },
+                    panelStatus = panelStatus,
+                    onForceNinety = {
+                        panelStatus = "checking..."
+                        onForceNinety { msg -> panelStatus = msg; generation++ }
+                    },
                     pinchRunning = pinch?.running == true,
                     rejectRunning = reject?.running == true,
                     stressRunning = stress?.running == true,
@@ -599,6 +661,8 @@ private fun DebugRow(
     surface: InkSurfaceView?,
     policy: RefreshPolicy,
     onPolicy: (RefreshPolicy) -> Unit,
+    panelStatus: String,
+    onForceNinety: () -> Unit,
     pinchRunning: Boolean,
     rejectRunning: Boolean,
     stressRunning: Boolean,
@@ -633,6 +697,17 @@ private fun DebugRow(
                     },
                 )
             }
+        }
+        // Separate from the three above on purpose. Those three are the app's
+        // *request*, which is all W16's 60-against-90 control needs and all an
+        // app can normally do. This one also lifts the system cap that made
+        // `max` look broken, and it is the only control here that reports
+        // whether the panel actually moved.
+        TextButton(onClick = onForceNinety) {
+            Text("90 Hz", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+        }
+        if (panelStatus.isNotEmpty()) {
+            Text(panelStatus, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
         TextButton(enabled = surface != null && !pinchRunning, onClick = onPinch) { Text("Pinch") }
         TextButton(enabled = surface != null && !pinchRunning, onClick = onDoubleTap) { Text("Tap2") }
@@ -779,6 +854,10 @@ private fun latencyLine(s: InputStats): String {
  * moment passes between the two reads. Anything larger is two clocks.
  */
 private const val MAX_CLOCK_SKEW_NANOS = 1_000_000L
+
+/** How long to wait for the compositor to actually change mode, and how often. */
+private const val VERIFY_TRIES = 12
+private const val VERIFY_STEP_MS = 250L
 
 /**
  * W15's two lines: what the device is, and whether the refresh request took.

@@ -31,3 +31,7 @@ local.properties
 
 # Claude Code worktrees (transient, one per parallel session)
 .claude/worktrees/
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc

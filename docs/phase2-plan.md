@@ -965,7 +965,33 @@ non-zero if the panel is not there**. It is self-tested in both directions —
 break it with a screen cycle, fix it with the script. The pre-film step is now
 running that script, not reading a number off the app.
 
-**No app change follows from this.** The temptation was to go fix the Hz
+**Then an app change was tried anyway, and it failed for a reason worth
+keeping.** Asked for a button that just sets 90 Hz, the obvious route is for the
+app to write `peak_refresh_rate` itself. It cannot. `WRITE_SETTINGS` is not
+enough — that key is not in `Settings.System.PUBLIC_SETTINGS`, so
+`SettingsProvider` refuses with
+`warnOrThrowForUndesiredSecureSettingsMutationForTargetSdk`. Granting
+`WRITE_SECURE_SETTINGS` over adb does not help either: it was granted on the
+device and the write still threw, because that check exempts only the system,
+shell and root UIDs and consults no permission at all. Wacom has also stripped
+the refresh control out of the Settings app, so there is no on-device route of
+any kind. `tools/panel-90hz.sh` is not a workaround for a missing feature; it is
+the only mechanism that exists.
+
+The button stayed, doing the two things that *are* the app's to do: it pins the
+screen awake, since the cap is recomputed as 60 on every screen-on and a rate
+set from a PC lasts only until the tablet next blanks, and it reports the rate
+the panel is actually holding — `90.0 Hz, screen held on - ok to film` or
+`60.0 Hz - run tools/panel-90hz.sh from the PC`. Both states are verified on the
+device. It reports `mode.refreshRate` and not `display.refreshRate`, because the
+latter carries the app's frame-rate override and reads 45 while the panel holds
+90, which would have sent someone off to fix a frame drop that was not happening.
+
+The script also had a bug that only appeared once the camera phone was plugged
+in beside the tablet: two devices attached made every bare `adb shell` fail, and
+the script blamed the cable. It now picks the tablet by model.
+
+**No app change fixed the rate.** The temptation was to go fix the Hz
 toggle; the evidence says the toggle already does the only thing an app is
 permitted to do, and the readout showing `req 90 / now 60` was the honest
 report of a genuine disagreement. What was wrong was the protocol around it,
