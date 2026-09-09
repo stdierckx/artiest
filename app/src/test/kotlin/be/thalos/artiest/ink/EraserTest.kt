@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import be.thalos.artiest.engine.ink.Bounds
+import be.thalos.artiest.engine.ink.Stroke
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -114,5 +115,72 @@ class EraserTest {
         scratch.compositeInto(Canvas(bmp), 0.5f, null, erase = true)
         val left = Color.alpha(bmp.getPixel(32, 32))
         assertTrue(left in 100..155, "half an erase left $left")
+    }
+
+    /**
+     * The eraser takes the ink out completely, whatever the brush was set to.
+     *
+     * **The bug this pins.** The eraser is a mode, not a preset: it borrows
+     * whatever brush is selected and only changes how the stroke composites. So
+     * with the pencil chosen it inherited the pencil's flow — which starts at
+     * 0.02 and only reaches 0.85 under full pressure — *and* the pencil's 0.90
+     * opacity ceiling *and* its grain mask, three separate reasons to leave ink
+     * behind. Leaning on the eraser as hard as the hardware allows took out
+     * roughly two thirds of the pixel; a normal wipe took out a quarter. That
+     * is the "eraser is too soft" report, and it is arithmetic rather than
+     * taste.
+     *
+     * `DabRasterizer.solid` is the per-dab half of the fix and
+     * `InkSurfaceView.compositeAlpha` is the composite half. Both are needed:
+     * either one alone still leaves a fraction of the ink.
+     */
+    @Test
+    fun `a solid rasterizer ignores the brush's flow`() {
+        val faint = Stroke.copyOf(
+            // The last stride slot is the dab's own flow. A tenth, which is
+            // what a pencil held lightly asks for.
+            dabs = floatArrayOf(32f, 32f, 10f, 1f, 0f, 0.1f),
+            dabCount = 1,
+            colorArgb = Color.BLACK,
+            antiAlias = true,
+            bounds = Bounds.of(22f, 22f, 42f, 42f),
+        )
+        val r = DabRasterizer(docWidthPx = 64, docHeightPx = 64)
+
+        val soft = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        r.drawDry(Canvas(soft), faint, flowOverride = 0.45f)
+        val softAlpha = Color.alpha(soft.getPixel(32, 32))
+        assertTrue(softAlpha < 40, "the control was already solid at $softAlpha")
+
+        val hard = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        r.solid = true
+        r.drawDry(Canvas(hard), faint, flowOverride = 0.45f)
+        assertEquals(255, Color.alpha(hard.getPixel(32, 32)), "a solid dab was not solid")
+    }
+
+    /**
+     * And the two halves together, end to end: a faint pencil dab, erased,
+     * leaves nothing at all.
+     */
+    @Test
+    fun `a faint pencil stroke used as an eraser still clears the pixel`() {
+        val bmp = layer()
+        val scratch = ScratchLayer()
+        scratch.begin(Bounds.of(16f, 16f, 48f, 48f))
+        // What the pencil's own flow would have painted, had `solid` not been
+        // set: a tenth of the ink. The eraser must not be this.
+        dab(scratch, 26)
+        scratch.compositeInto(Canvas(bmp), 1f, null, erase = true)
+        assertTrue(
+            Color.alpha(bmp.getPixel(32, 32)) > 200,
+            "the control erased far more than a tenth",
+        )
+
+        val full = layer()
+        val s2 = ScratchLayer()
+        s2.begin(Bounds.of(16f, 16f, 48f, 48f))
+        dab(s2, 255)
+        s2.compositeInto(Canvas(full), 1f, null, erase = true)
+        assertEquals(0, Color.alpha(full.getPixel(32, 32)), "the eraser left ink behind")
     }
 }

@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Shader
 import android.os.Debug
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -283,6 +284,44 @@ class InkSurfaceView(
         private set
 
     /**
+     * The largest tilt the digitizer reported during the last stroke, in
+     * degrees, and the dab widths that came out of it.
+     *
+     * On the HUD because "tilt does not widen the stroke" has three different
+     * causes that look identical on the glass: the hardware not reporting tilt,
+     * the app not forwarding it, and the brush not listening. One line
+     * separates all three — a tilt of 0 is the first two, a tilt of 50 with a
+     * flat width range is the third.
+     */
+    var lastStrokeTiltDeg: Float = 0f
+        private set
+
+    /** See [lastStrokeTiltDeg]. Dab diameters, document pixels. */
+    var lastStrokeWidthMin: Float = 0f
+        private set
+
+    /** See [lastStrokeTiltDeg]. */
+    var lastStrokeWidthMax: Float = 0f
+        private set
+
+    /**
+     * The lightest and heaviest pressure the digitizer reported during the last
+     * stroke.
+     *
+     * The pencil's whole response is a curve over this number, and until it was
+     * on the HUD nobody knew what range a hand actually produces on this pen —
+     * "a very light press" was being tuned for as 0.1 on the strength of an
+     * assumption. One stroke drawn as lightly as the pen will register answers
+     * it.
+     */
+    var lastStrokePressureMin: Float = 0f
+        private set
+
+    /** See [lastStrokePressureMin]. */
+    var lastStrokePressureMax: Float = 0f
+        private set
+
+    /**
      * The stroke's transform, frozen at pen-down.
      *
      * Written by the UI thread in [beginStroke] and read by the render thread;
@@ -316,6 +355,7 @@ class InkSurfaceView(
             // after the rasterise it would record the stroke as its own undo.
             document.snapshotBeforeStroke(stroke.bounds)
             if (!indirectNeeded()) {
+                armRasterizer()
                 document.layer.write { rasterizer.drawDry(it, stroke) }
                 return
             }
@@ -330,7 +370,9 @@ class InkSurfaceView(
                 scratch.ensureCovers(stroke.bounds)
             ) {
                 document.layer.write {
-                    scratch.compositeInto(it, pen.opacity, grainShader(), pen.erase)
+                    scratch.compositeInto(
+                        it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
+                    )
                 }
                 return
             }
@@ -340,12 +382,23 @@ class InkSurfaceView(
                 // The buffer could not be opened. Falling back to the direct
                 // path draws a beaded stroke, which is wrong but visible;
                 // dropping the stroke silently is wrong and invisible.
+                armRasterizer()
                 document.layer.write { rasterizer.drawDry(it, stroke) }
                 return
             }
-            rasterizer.drawDry(sc, stroke, flowOverride = pen.flow)
+            armRasterizer()
+            // No `flowOverride`. Flow lives on the dab now -- `StrokeBuilder`
+            // writes `flowOption.valueFor(context)` into every one -- and
+            // passing the brush's flow here as well multiplied it in a second
+            // time. That was correct when a dab had no flow of its own and was
+            // never revisited when it got one, so the pencil painted at flow
+            // squared and the darkest press it could reach was 0.72 of what
+            // the preset asked for.
+            rasterizer.drawDry(sc, stroke)
             document.layer.write {
-                scratch.compositeInto(it, pen.opacity, grainShader(), pen.erase)
+                scratch.compositeInto(
+                    it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
+                )
             }
         }
 
@@ -552,7 +605,11 @@ class InkSurfaceView(
             scratch.ensureCovers(bounds)
         }
         val sc = scratch.canvasInDocSpace() ?: return
-        rasterizer.drawInto(sc, batch, pen.flow)
+        armRasterizer()
+        // 1f for the reason the commit path gives: the batch's dabs carry
+        // their own flow. Anything else here and the wet stroke would not
+        // match the committed one, which is the one thing this path may not do.
+        rasterizer.drawInto(sc, batch, 1f)
 
         val save = canvas.save()
         canvas.concat(docToView)
@@ -569,11 +626,11 @@ class InkSurfaceView(
                 wetRect[0], wetRect[1], wetRect[2], wetRect[3], null,
             )
             document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-            scratch.drawOnto(canvas, pen.opacity, grainShader(), erase = true)
+            scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
             canvas.restoreToCount(ink)
         } else {
             document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-            scratch.drawOnto(canvas, pen.opacity, grainShader())
+            scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish)
         }
         canvas.restoreToCount(save)
     }
@@ -620,6 +677,40 @@ class InkSurfaceView(
      * was drawn with when the pen lifts.
      */
     private fun grainShader() = grain.shaderFor(pen.grain)
+
+    /**
+     * The alpha the scratch is put down at: the brush's opacity, or **1 while
+     * erasing**.
+     *
+     * An eraser is not a pale brush. Everything that makes graphite look like
+     * graphite — a 0.90 ceiling, a flow that starts at 0.02, a grain mask that
+     * skips the pits — is a reason for the pencil to leave *less* ink, and
+     * inheriting all three made a full-pressure wipe remove roughly a quarter
+     * of what was under it. That is the "eraser is too soft" report. Erasing
+     * takes the brush's shape and its size and none of its translucency.
+     */
+    private fun compositeAlpha(): Float = if (pen.erase) 1f else pen.opacity
+
+    /** The grain, or none while erasing. See [compositeAlpha]. */
+    private fun compositeGrain(): Shader? = if (pen.erase) null else grainShader()
+
+    /**
+     * Push the brush's per-dab settings onto the rasterizer, before every draw.
+     *
+     * `hardness` had never been pushed at all — the field's own KDoc claimed
+     * this call site existed and it did not — so the pencil's soft rim was a
+     * number in a preset that no pixel ever saw. `solid` is the erase side of
+     * [compositeAlpha]: per-dab flow has to go as well as the composite alpha,
+     * or the eraser is still scaled by however hard the pencil was leaning.
+     *
+     * Called immediately before each rasterizer entry rather than at stroke
+     * start, because the erase decision and the brush can both change between
+     * one and the next, and two assignments are cheaper than the bug.
+     */
+    private fun armRasterizer() {
+        rasterizer.hardness = pen.hardness
+        rasterizer.solid = pen.erase
+    }
 
     /** The scratch's composite paint for the wet pass. See [drawWetIndirect]. */
     private val wetPaint = Paint().apply {
@@ -678,6 +769,7 @@ class InkSurfaceView(
             val m = frozenDocToView
             if (m == null) return
             if (!indirectNeeded()) {
+                armRasterizer()
                 rasterizer.drawWet(canvas, m, param)
                 return
             }
@@ -762,11 +854,15 @@ class InkSurfaceView(
                     0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), null,
                 )
                 document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-                scratch.drawOnto(canvas, pen.opacity, grainShader(), erase = true)
+                scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
                 canvas.restoreToCount(ink)
             } else {
                 document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-                if (scratch.isOpen) scratch.drawOnto(canvas, pen.opacity, grainShader())
+                if (scratch.isOpen) {
+                    scratch.drawOnto(
+                        canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish,
+                    )
+                }
             }
             canvas.restoreToCount(save)
         }
@@ -1151,6 +1247,9 @@ class InkSurfaceView(
         private val builder = StrokeBuilder(pen)
         private var emitted = 0
         private var seen = 0
+        private var strokeTiltMaxRad = 0f
+        private var strokePressureMin = Float.MAX_VALUE
+        private var strokePressureMax = 0f
 
         /**
          * Samples since the view was created, so [onTouchEvent] can attribute
@@ -1233,6 +1332,9 @@ class InkSurfaceView(
         override fun onStrokeBegin(pointerId: Int) {
             emitted = 0
             seen = 0
+            strokeTiltMaxRad = 0f
+            strokePressureMin = Float.MAX_VALUE
+            strokePressureMax = 0f
             strokePointerId = pointerId
             downTimeNanos = 0L
             gate.reset()
@@ -1298,6 +1400,9 @@ class InkSurfaceView(
                 // uses the by-parts overload for the reason above, so every dab
                 // the app ever laid was drawn at a tilt of zero. The engine
                 // tests passed throughout, because they use the PenSample form.
+                if (s.tilt > strokeTiltMaxRad) strokeTiltMaxRad = s.tilt
+                if (s.pressure < strokePressureMin) strokePressureMin = s.pressure
+                if (s.pressure > strokePressureMax) strokePressureMax = s.pressure
                 builder.addTilt(s.tilt, s.orientation, s.eventTimeNanos)
                 builder.add(docPoint[0], docPoint[1], s.pressure, s.eventTimeNanos)
                 // Stabilized and in document space, which is what the gate has
@@ -1438,6 +1543,19 @@ class InkSurfaceView(
             totalDabs += builder.dabCount - dabsBefore
             lastStrokeSamples = seen
             lastStrokeDabs = stroke.dabCount
+            lastStrokeTiltDeg = strokeTiltMaxRad * DEG_PER_RAD
+            lastStrokePressureMin =
+                if (strokePressureMin == Float.MAX_VALUE) 0f else strokePressureMin
+            lastStrokePressureMax = strokePressureMax
+            var wMin = Float.MAX_VALUE
+            var wMax = 0f
+            for (i in 0 until stroke.dabCount) {
+                val w = stroke.radius(i) * 2f
+                if (w < wMin) wMin = w
+                if (w > wMax) wMax = w
+            }
+            lastStrokeWidthMin = if (wMin == Float.MAX_VALUE) 0f else wMin
+            lastStrokeWidthMax = wMax
             commitStroke(stroke)
             val commitEnd = heapUsed()
             strokeOpen = false
@@ -1634,6 +1752,9 @@ class InkSurfaceView(
          * button while drawing has not asked for a menu.
          */
         const val BARREL_BUTTONS = 4 or 32 or 64
+
+        /** For the HUD's tilt readout only. */
+        const val DEG_PER_RAD = 57.29578f
 
         /**
          * A dark neutral, so that white paper reads as a sheet rather than as

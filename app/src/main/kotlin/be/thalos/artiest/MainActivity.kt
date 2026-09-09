@@ -73,6 +73,7 @@ import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.IconToolButton
 import be.thalos.artiest.ui.ToolIcons
 import be.thalos.artiest.ui.ToolSlider
+import be.thalos.artiest.ui.warmColourWheel
 import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
@@ -123,6 +124,12 @@ class MainActivity : ComponentActivity() {
         document = doc
 
         applyRefreshPolicy(RefreshPolicy.HIGHEST)
+
+        // A megabyte of atan2 that the colour panel would otherwise build
+        // while the user is waiting for it to appear. Off the main thread and
+        // fire-and-forget: if it has not finished by the first press, the panel
+        // builds its own and this one is discarded.
+        warmColourWheel()
 
         setContent {
             // The chrome's own scheme, not the platform's. See ArtiestTheme for
@@ -283,6 +290,11 @@ private val STRESS_MODES = listOf(
     // that puts the pen down more than once, and the only one that could have
     // caught the scratch buffer ratcheting between strokes.
     Triple("Figure", null, StrokeStress.Path.FIGURE),
+    // The reference sheet, redrawn: four upright strokes at rising pressure
+    // and five laid further and further over. Not a timing run -- it is there
+    // so a screenshot can be measured against the page the user drew in
+    // another app, with the same script, instead of judged by eye.
+    Triple("Sheet", null, StrokeStress.Path.SHEET),
 )
 
 @Composable
@@ -368,6 +380,27 @@ private fun CanvasScreen(
     LaunchedEffect(surface) {
         val v = surface ?: return@LaunchedEffect
         val stored = brushStore.load()
+        // A brush saved against an older tuning of the preset is deliberately
+        // not restored. See BrushPreset.TUNING: the saved scalars would win
+        // over every retuned number and the tool would read exactly as it did
+        // before the retune, which is what happened when the pencil was
+        // re-solved against the reference sheet and the tablet showed nothing.
+        // Not even the size slider survives it, and that is specific to this
+        // bump rather than a rule: the slider used to set the width of the
+        // pencil's *point* and now sets the width of the mark it makes laid
+        // over, which is four to five times bigger. Carrying the old number
+        // across would hand the user a pencil a quarter of the size they had.
+        if (brushStore.storedTuning() != BrushPreset.TUNING) {
+            preset.applyTo(v.pen)
+            v.pen.erase = false
+            brushStore.save(v.pen, preset)
+            sizeMax = v.pen.sizeMax
+            smoothing = v.pen.stabilization
+            opacity = v.pen.opacity
+            flow = v.pen.flow
+            grain = v.pen.grain.strength
+            return@LaunchedEffect
+        }
         BrushCodec.decode(BrushCodec.encode(stored))?.let { b ->
             // Qualified, every one of them: `sizeMax`, `opacity`, `flow` and
             // `grain` are all names of Compose state in this scope, and a local
@@ -997,6 +1030,10 @@ private fun readout(
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed   " +
         "${surface.predictSuppressedIndirect} indirect\n" +
+        "press    ${r(surface.lastStrokePressureMin, 3)}..${r(surface.lastStrokePressureMax, 3)} " +
+        "last stroke\n" +
+        "tilt     ${r(surface.lastStrokeTiltDeg, 1)} deg max last stroke   " +
+        "dab ${r(surface.lastStrokeWidthMin, 1)}..${r(surface.lastStrokeWidthMax, 1)} doc px\n" +
         "brush    ${if (surface.pen.erase) "ERASING" else "painting"}   " +
         "${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
         "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +

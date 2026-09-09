@@ -150,6 +150,24 @@ class Brush {
     var grain: GrainSpec = GrainSpec()
 
     /**
+     * How far a heavy press flattens the paper's tooth, 0..1.
+     *
+     * Lean on a pencil and the graphite stops sitting on the ridges and starts
+     * filling the pits: the mark gets darker *and* smoother, and the tooth
+     * stops showing through. [grain] alone cannot express that — it multiplies
+     * the whole stroke by the same field whatever the pressure was, so a hard
+     * press comes out as an exactly-as-mottled version of a light one, only
+     * bigger.
+     *
+     * The app applies it as a second composite of the stroke against its own
+     * alpha, which is `alpha squared` and therefore negligible where the ink is
+     * thin and nearly the whole mark where it is thick. 0 leaves the grain
+     * alone at every pressure, which is what the pen wants and what every brush
+     * without a grain wants.
+     */
+    var burnish: Float = 0f
+
+    /**
      * The dab's minor axis over its major. W9.
      *
      * Both ends are 1 by default and no sensor is attached, so every dab the
@@ -381,6 +399,7 @@ class Brush {
         it.onsetPressure = onsetPressure
         it.isotropicSpacing = isotropicSpacing
         it.grain = grain
+        it.burnish = burnish
         it.erase = erase
         copyOption(aspect, it.aspect)
         copyOption(rotation, it.rotation)

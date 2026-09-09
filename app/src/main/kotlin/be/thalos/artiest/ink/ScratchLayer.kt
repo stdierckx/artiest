@@ -301,8 +301,14 @@ class ScratchLayer(
      * [dst] must be in document space — the layer's own canvas is, because one
      * layer pixel is one document pixel.
      */
-    fun compositeInto(dst: Canvas, alpha: Float, grain: Shader? = null, erase: Boolean = false) {
-        drawOnto(dst, alpha, grain, erase)
+    fun compositeInto(
+        dst: Canvas,
+        alpha: Float,
+        grain: Shader? = null,
+        erase: Boolean = false,
+        burnish: Float = 0f,
+    ) {
+        drawOnto(dst, alpha, grain, erase, burnish)
         isOpen = false
     }
 
@@ -310,7 +316,20 @@ class ScratchLayer(
      * Paint the buffer onto [dst] without closing it. The wet pass, which has
      * to show the stroke so far on every frame and must not consume it.
      */
-    fun drawOnto(dst: Canvas, alpha: Float, grain: Shader? = null, erase: Boolean = false) {
+    fun drawOnto(
+        dst: Canvas,
+        alpha: Float,
+        grain: Shader? = null,
+        erase: Boolean = false,
+        /**
+         * How much of the stroke to lay down a second time *unmasked*, scaled
+         * by its own alpha. See `Brush.burnish`: leaning on a pencil fills the
+         * paper's pits, so the tooth has to stop showing through where the ink
+         * is thick. Ignored without a [grain], where there is no tooth to fill,
+         * and while erasing, which is already solid.
+         */
+        burnish: Float = 0f,
+    ) {
         val bmp = bitmap ?: return
         val a = (alpha.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
         // DST_OUT subtracts the source's alpha from the destination's, which is
@@ -355,6 +374,28 @@ class ScratchLayer(
         )
         compositePaint.shader = null
         compositePaint.xfermode = null
+        if (burnish > 0f && !erase) drawBurnish(dst, a, burnish)
+    }
+
+    /**
+     * The stroke again, against itself, over the grained pass.
+     *
+     * `ComposeShader(self, self, DST_IN)` is the buffer's alpha squared, which
+     * is the whole point: at a coverage of 0.2 it contributes 0.04 and the
+     * grain still owns the mark, at 0.95 it contributes 0.9 and fills in
+     * everything the tooth was holding back. One extra `drawRect` over the used
+     * rectangle, and no extra state -- the two shaders are the same object.
+     */
+    private fun drawBurnish(dst: Canvas, alpha: Int, burnish: Float) {
+        val self = selfShader ?: return
+        compositePaint.shader = ComposeShader(self, self, PorterDuff.Mode.DST_IN)
+        compositePaint.alpha = (alpha * burnish.coerceIn(0f, 1f) + 0.5f).toInt()
+        dst.drawRect(
+            originX.toFloat(), originY.toFloat(),
+            (originX + usedWidth).toFloat(), (originY + usedHeight).toFloat(),
+            compositePaint,
+        )
+        compositePaint.shader = null
     }
 
     private val eraseMode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)

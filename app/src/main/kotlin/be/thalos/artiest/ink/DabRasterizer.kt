@@ -60,6 +60,19 @@ class DabRasterizer(
      */
     var hardness: Float = 1f
 
+    /**
+     * Paint every dab at the ink's full alpha, ignoring flow.
+     *
+     * Set while erasing. An eraser is not a brush made of white paint: it takes
+     * ink out, and how much it takes out has nothing to do with how much
+     * graphite the pencil in the other hand lays down. Without this the eraser
+     * inherited the pencil's flow — 0.02 to 0.85 on pressure, then again
+     * through a 0.90 composite and a grain mask — so a full-pressure wipe
+     * removed at best two thirds of the ink and usually far less. That is the
+     * "eraser is too soft" report, and it is arithmetic rather than taste.
+     */
+    var solid: Boolean = false
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         // Subpixel dab placement. Dabs are spaced an eighth of a diameter
@@ -231,14 +244,17 @@ class DabRasterizer(
         // so a translucent ink stays translucent. Applied for every dab because
         // pressure varies within a stroke -- graphite gets darker where you
         // lean on it, and a per-stroke alpha cannot express that.
-        val f = strokeFlow * dabFlow
+        val f = if (solid) 1f else strokeFlow * dabFlow
         paint.alpha =
             if (f >= 1f) baseAlpha else (baseAlpha * f.coerceIn(0f, 1f) + 0.5f).toInt()
         val cache = stamps
         // An elliptical dab has no circle path. drawCircle cannot express it at
         // all, so a shaped brush forces the stamp regardless of [mode] rather
         // than silently drawing round dabs and looking like a broken preset.
-        val shaped = aspect < 1f
+        // Hardness counts as shaped for exactly the reason aspect does:
+        // `drawCircle` has no soft rim, so a CIRCLE-mode pencil at hardness
+        // 0.72 drew a hard-edged dab and the setting did nothing visible.
+        val shaped = aspect < 1f || hardness < 1f
         if ((mode == Mode.CIRCLE && !shaped) || cache == null) {
             canvas.drawCircle(x, y, radius, paint)
             return

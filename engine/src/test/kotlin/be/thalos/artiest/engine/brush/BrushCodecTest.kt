@@ -162,4 +162,85 @@ class BrushCodecTest {
         x.aspect.drive(Sensor.SPEED)
         assertTrue(y.aspect.inputCount < x.aspect.inputCount)
     }
+
+    /**
+     * **The bug that made "tilt does not widen the stroke" survive its own
+     * fix.**
+     *
+     * The preset drives `size` from TILT and `flow` from PRESSURE, and the
+     * format wrote neither: `size` was two numbers and `flow` was one, and the
+     * sensors behind them were dropped on the way to disk. So the pencil worked
+     * for as long as the app stayed open and came back after a restart as a
+     * brush with a tilt-shaped nib, no tilt-driven width and no pressure-driven
+     * darkness — which is exactly what was reported, twice, against two
+     * different builds that both had the fix in them.
+     *
+     * Round-tripping the count is not enough here: a format that wrote the
+     * sensor and lost the curve would pass that and still give a straight-line
+     * response where the preset asked for `p^1.6`. So the response itself is
+     * compared, at both ends and in the middle.
+     */
+    @Test
+    fun `a saved pencil keeps its tilt-to-width and pressure-to-darkness`() {
+        val before = BrushPreset.PENCIL.create()
+        val after = assertNotNull(BrushCodec.decode(BrushCodec.encode(before)))
+        for ((name, pair) in mapOf(
+            "size" to (before.size to after.size),
+            "flow" to (before.flowOption to after.flowOption),
+        )) {
+            val (from, to) = pair
+            assertEquals(from.inputCount, to.inputCount, "$name lost its sensors")
+            assertEquals(from.combine, to.combine, "$name lost its combine")
+            for (i in 0 until from.inputCount) {
+                assertEquals(from.sensorAt(i), to.sensorAt(i), "$name sensor $i")
+                assertEquals(from.curveAt(i), to.curveAt(i), "$name curve $i")
+            }
+        }
+        for (tilt in listOf(0f, 0.5f, 1f)) {
+            for (p in listOf(0f, 0.35f, 1f)) {
+                val c = DabContext().also {
+                    it.pressure = p
+                    it.tiltRad = tilt * Sensor.TILT_MAX_RAD
+                }
+                assertEquals(before.sizeFor(c), after.sizeFor(c), 1e-5f, "width at p=$p tilt=$tilt")
+                assertEquals(
+                    before.flowOption.valueFor(c), after.flowOption.valueFor(c), 1e-5f,
+                    "flow at p=$p tilt=$tilt",
+                )
+            }
+        }
+    }
+
+    /**
+     * The other half of the same defence: a file written by the build that had
+     * no `sizeOpt` line at all.
+     *
+     * That is what was actually in the user's preferences, and it decodes
+     * without complaint into a brush that has no tilt wiring. `applyToShapeOnly`
+     * is what puts it back, and this pins that it does — without touching the
+     * two numbers the toolbar's sliders own.
+     */
+    @Test
+    fun `an older save gets its wiring back without losing the sliders`() {
+        val old = assertNotNull(
+            BrushCodec.decode(
+                "artiest-brush 1\nsize 1.5 18.0\nopacity 0.9\nflow 0.6\n",
+            ),
+        )
+        assertEquals(0, old.size.inputCount, "the premise: an old file has no size wiring")
+        BrushPreset.PENCIL.applyToShapeOnly(old)
+        assertTrue(old.size.inputCount > 0, "the pencil's tilt did not come back")
+        assertTrue(old.flowOption.inputCount > 0, "the pencil's pressure did not come back")
+        assertEquals(18f, old.sizeMax, "the size slider was overwritten by the preset")
+        assertEquals(0.6f, old.flow, "the flow slider was overwritten by the preset")
+    }
+
+    /** And a brush that already has its own wiring is left entirely alone. */
+    @Test
+    fun `applyToShapeOnly does not stack a second copy of the wiring`() {
+        val brush = BrushPreset.PENCIL.create()
+        val inputs = brush.size.inputCount
+        BrushPreset.PENCIL.applyToShapeOnly(brush)
+        assertEquals(inputs, brush.size.inputCount)
+    }
 }

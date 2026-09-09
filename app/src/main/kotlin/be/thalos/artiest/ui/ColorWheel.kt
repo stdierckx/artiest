@@ -31,7 +31,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -49,6 +48,69 @@ import be.thalos.artiest.engine.color.Hsv
  * bounds the one-off cost at a quarter of the pixels.
  */
 private const val MAX_RASTER_PX = 512
+
+/**
+ * The wheel's pixels, built once per process instead of once per opening.
+ *
+ * **Why this had to change.** The panel is a `Popup`, so it leaves the
+ * composition when it closes and every `remember` inside it goes with it. The
+ * raster is a quarter of a million `atan2`, `sqrt` and `Hsv.pack` calls plus a
+ * megabyte of `Bitmap`, and it was being paid **every time the colour button
+ * was pressed**, synchronously, on the thread that is trying to show the panel.
+ * That is the delay: not the drawing of the wheel, the building of it.
+ *
+ * One size and no key, rather than a map keyed on the measured width. The disc
+ * is drawn scaled to whatever box it lands in and always was — a hue ramp has
+ * no edge for the upscale to soften — so rasterising at the cap and letting
+ * `drawImage` resize it costs one bilinear fetch per pixel and removes the one
+ * way a cache like this goes wrong, which is holding an entry nobody asks for
+ * twice.
+ *
+ * [warm] exists because a cache still charges someone for the first miss, and
+ * the first miss is the first time the user opens the panel — the one moment
+ * this is meant to fix. Called at startup off the main thread, the entry is
+ * there before anything asks.
+ */
+private object DiscRaster {
+
+    @Volatile
+    private var cached: ImageBitmap? = null
+
+    private val lock = Any()
+
+    fun get(): ImageBitmap {
+        cached?.let { return it }
+        // Synchronized so a warm-up in flight and a panel opening cannot both
+        // pay for it. The loser of the race waits for the winner's bitmap
+        // rather than building a second one.
+        synchronized(lock) {
+            cached?.let { return it }
+            val started = System.nanoTime()
+            val built = discBitmap(MAX_RASTER_PX)
+            android.util.Log.i(
+                "artiest",
+                "colour wheel raster ${MAX_RASTER_PX}px in " +
+                    "${(System.nanoTime() - started) / 1_000_000f} ms",
+            )
+            cached = built
+            return built
+        }
+    }
+
+    fun warm() {
+        if (cached != null) return
+        Thread({ get() }, "wheel-raster").also { it.isDaemon = true }.start()
+    }
+}
+
+/**
+ * Build the colour wheel's pixels now, off the main thread, so the first press
+ * of the colour button does not have to.
+ *
+ * Safe to call more than once and safe to call never — the panel builds its own
+ * if this has not run.
+ */
+fun warmColourWheel() = DiscRaster.warm()
 
 /** Tall enough to hit with a thumb without the bar competing with the wheel. */
 private val VALUE_BAR_HEIGHT = 28.dp
@@ -144,16 +206,11 @@ fun ColorWheel(
  */
 @Composable
 private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
-    val density = LocalDensity.current
     BoxWithConstraints(modifier.aspectRatio(1f)) {
-        val sidePx = with(density) { maxWidth.roundToPx() }
-        val rasterPx = sidePx.coerceIn(1, MAX_RASTER_PX)
-
-        // Synchronous, on the composition thread, and kept until the wheel
-        // changes size. Roughly a quarter of a million calls to Hsv.pack once
-        // per size — cheaper than one frame of the drag it saves, and a wheel
-        // that fades in a frame late reads as a bug.
-        val wheel = remember(rasterPx) { discBitmap(rasterPx) }
+        // From the process-wide cache, which is almost always already warm --
+        // see [DiscRaster]. Building it here, per opening, is what made the
+        // panel slow to appear.
+        val wheel = DiscRaster.get()
 
         Canvas(
             Modifier

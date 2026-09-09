@@ -6,6 +6,7 @@ import be.thalos.artiest.engine.brush.TiltFilter
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.pow
 import kotlin.math.sin
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.Stabilizer
@@ -353,14 +354,66 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         dabs[o + 2] = radius
         dabs[o + 3] = aspect
         dabs[o + 4] = rotation
-        dabs[o + 5] = flow
+        // **Flow is the stroke's coverage, not the dab's alpha**, and the two
+        // are a long way apart. Dabs are laid an eighth of a diameter along the
+        // path, so about eight of them paint any pixel on the spine of the
+        // stroke and its alpha comes out at `1 - (1 - dabAlpha)^8`. Written
+        // straight through, a flow of 0.2 arrived as a coverage of 0.83 and
+        // anything above about 0.3 arrived as solid black — which is why the
+        // pencil had almost no usable range between "faint" and "saturated",
+        // and why tilt's paling was invisible at the top of the pressure range.
+        //
+        // Inverting the overlap here makes `flow` mean what an artist means by
+        // it: how dark one pass is. It also makes that meaning independent of
+        // the spacing and of the dab size, so changing either stops silently
+        // changing how dark the tool draws.
+        val spacing = pen.spacingFor(radius, radius * aspect)
+        dabs[o + 5] = dabAlphaFor(flow, alongTravel(radius, aspect), spacing)
         dabCount++
         // The bounds take the *major* radius whatever the aspect, because an
         // ellipse fits inside the circle of its major axis at every rotation.
         // Using the minor axis would leave the undo snapshot short of the ink
         // wherever the dab was turned across the stroke.
         accumulator.add(px, py, radius)
-        return pen.spacingFor(radius, radius * aspect)
+        return spacing
+    }
+
+    /**
+     * How far the dab reaches along the direction of travel, as a full extent.
+     *
+     * The minor axis, and not an average of the two: `isotropicSpacing = false`
+     * spaces by the minor axis precisely because the flat of a tilted lead
+     * lies *across* the line it is drawing, so the minor axis is the one
+     * pointing where the pen is going. Isotropic spacing takes the geometric
+     * mean, and so does this, for the same reason — the two have to agree or
+     * the overlap count is wrong in whichever direction the spacing is right.
+     */
+    private fun alongTravel(radius: Float, aspect: Float): Float {
+        val minor = radius * aspect
+        return if (pen.isotropicSpacing) 2f * kotlin.math.sqrt(radius * minor) else 2f * minor
+    }
+
+    /**
+     * The alpha one dab must carry for a whole pass to arrive at [flow].
+     *
+     * `n` dabs at alpha `a` composite to `1 - (1 - a)^n`, so the dab that gives
+     * a coverage of `flow` is `1 - (1 - flow)^(1/n)`, and `n` is how many dabs
+     * fall on one pixel: the dab's extent along the path divided by the
+     * spacing.
+     *
+     * Two guards, both reachable. `n` below 1 happens whenever `spacingFor`
+     * hits its half-pixel floor on a tiny dab — there the dabs no longer
+     * overlap at all and the dab's own alpha *is* the coverage. And a flow of 1
+     * has to stay exactly 1: `1 - 0^(1/n)` is 1 arithmetically but the pen
+     * takes this path too, and its dab goldens compare floats exactly.
+     */
+    private fun dabAlphaFor(flow: Float, extent: Float, spacing: Float): Float {
+        if (flow >= 1f) return 1f
+        if (!(flow > 0f)) return 0f
+        if (!(spacing > 0f)) return flow
+        val n = extent / spacing
+        if (!(n > 1f)) return flow
+        return 1f - (1f - flow).pow(1f / n)
     }
 
     /**

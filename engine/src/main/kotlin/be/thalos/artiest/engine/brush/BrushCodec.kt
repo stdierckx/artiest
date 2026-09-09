@@ -36,6 +36,11 @@ object BrushCodec {
         b.append("isotropic ").append(if (brush.isotropicSpacing) 1 else 0).append('\n')
         b.append("hardness ").append(brush.hardness).append('\n')
         b.append("opacity ").append(brush.opacity).append('\n')
+        // Two lines because they are two parameters: `flow` is the ceiling a
+        // slider owns and `flowMin` is the floor a preset owns. The floor had
+        // no line at all, so a saved pencil came back with a floor of zero and
+        // the lightest touch left nothing rather than a faint mark.
+        b.append("flowMin ").append(brush.flowOption.min).append('\n')
         b.append("flow ").append(brush.flow).append('\n')
         b.append("stabilization ").append(brush.stabilization).append('\n')
         b.append("antialias ").append(if (brush.antiAlias) 1 else 0).append('\n')
@@ -46,6 +51,19 @@ object BrushCodec {
         b.append("grain ").append(g.scaleDocPx).append(' ').append(g.strength).append(' ')
             .append(g.cutoffLow).append(' ').append(g.cutoffHigh).append(' ').append(g.seed)
             .append('\n')
+        // The two options whose *numbers* are already above, under `size` and
+        // `flow`, so only their wiring is written here. Without these lines a
+        // saved pencil reloaded as a brush whose tilt drove nothing and whose
+        // pressure drove nothing -- visibly, a fat pen -- and the tilt
+        // complaint survived a fix that was already in the preset.
+        //
+        // Wiring only, and not a second copy of min and max, because one
+        // parameter is one line: `BrushCodecTest` asserts that changing `flow`
+        // moves exactly one line of the file, and a format where it moves two
+        // is a format where a diff stops being readable.
+        b.append("burnish ").append(brush.burnish).append('\n')
+        appendWiring(b, "sizeOpt", brush.size)
+        appendWiring(b, "flowOpt", brush.flowOption)
         appendOption(b, "aspect", brush.aspect)
         appendOption(b, "rotation", brush.rotation)
         appendOption(b, "scatter", brush.scatter)
@@ -65,7 +83,10 @@ object BrushCodec {
         // Options are cleared once up front rather than per line: a file that
         // names `aspect.drive` twice means two sensors, and clearing on the
         // first would silently keep only the last.
-        for (o in listOf(brush.aspect, brush.rotation, brush.scatter, brush.sizeJitter)) {
+        for (o in listOf(
+            brush.size, brush.flowOption,
+            brush.aspect, brush.rotation, brush.scatter, brush.sizeJitter,
+        )) {
             o.clearInputs()
         }
         for (i in 1 until lines.size) {
@@ -89,6 +110,8 @@ object BrushCodec {
             "hardness" -> f(p, 1)?.let { brush.hardness = it }
             "opacity" -> f(p, 1)?.let { brush.opacity = it }
             "flow" -> f(p, 1)?.let { brush.flow = it }
+            "flowMin" -> f(p, 1)?.let { brush.flowOption.min = it }
+            "burnish" -> f(p, 1)?.let { brush.burnish = it }
             "stabilization" -> f(p, 1)?.let { brush.stabilization = it }
             "antialias" -> brush.antiAlias = p.getOrNull(1) != "0"
             "erase" -> brush.erase = p.getOrNull(1) == "1"
@@ -115,11 +138,19 @@ object BrushCodec {
     private fun optionLine(brush: Brush, p: List<String>) {
         val name = p[0].substringBefore('.')
         val option = when (name) {
+            "sizeOpt" -> brush.size
+            "flowOpt" -> brush.flowOption
             "aspect" -> brush.aspect
             "rotation" -> brush.rotation
             "scatter" -> brush.scatter
             "sizeJitter" -> brush.sizeJitter
             else -> return
+        }
+        if (p[0].endsWith(".combine")) {
+            CurveOption.Combine.entries.firstOrNull { it.name == p.getOrNull(1) }?.let {
+                option.combine = it
+            }
+            return
         }
         if (p[0].endsWith(".drive")) {
             if (p.size < 2) return
@@ -137,9 +168,19 @@ object BrushCodec {
         }
     }
 
+    /** [appendOption] without the min/max line. See [encode]. */
+    private fun appendWiring(b: StringBuilder, name: String, o: CurveOption) {
+        b.append(name).append(".combine ").append(o.combine.name).append('\n')
+        appendDrives(b, name, o)
+    }
+
     private fun appendOption(b: StringBuilder, name: String, o: CurveOption) {
         b.append(name).append(' ').append(o.min).append(' ').append(o.max).append(' ')
             .append(o.combine.name).append('\n')
+        appendDrives(b, name, o)
+    }
+
+    private fun appendDrives(b: StringBuilder, name: String, o: CurveOption) {
         for (i in 0 until o.inputCount) {
             b.append(name).append(".drive ").append(o.sensorAt(i).name).append(' ')
                 .append(curveToText(o.curveAt(i))).append('\n')

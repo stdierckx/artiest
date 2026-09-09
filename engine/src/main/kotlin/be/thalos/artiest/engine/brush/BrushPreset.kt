@@ -33,7 +33,7 @@ enum class BrushPreset(val label: String) {
     /**
      * The pencil. This is the phase.
      *
-     * Six things at once, and each is doing a specific job that the others
+     * Seven things at once, and each is doing a specific job that the others
      * cannot:
      *
      * - **Elliptical from tilt.** Held upright the nib is round; laid over it
@@ -44,15 +44,19 @@ enum class BrushPreset(val label: String) {
      * - **Turned by orientation**, so the flat follows the barrel rather than
      *   the direction of travel. A pencil rolled between the fingers changes
      *   its mark without moving.
-     * - **Low flow under a high ceiling.** 0.35 flow at 0.85 opacity: each pass
-     *   leaves a little and repeated passes darken toward a limit instead of
-     *   straight to black. That is what makes hatching build.
+     * - **Pressure sets the darkness, tilt takes it away again.** Flow runs
+     *   0.02 to 0.85 on pressure under a 0.90 ceiling, and tilt multiplies it
+     *   down to 0.42 of that: the same graphite spread over a wider mark. The
+     *   four numbers come off a measured reference sheet — see [applyTo].
+     * - **Tilt widens the mark**, by 2.7x over an upright heavy stroke, while
+     *   pressure moves the width by only 1.9x. That split is the reference's,
+     *   not a guess.
      * - **Grain.** Opacity alone makes a uniformly fainter stroke, which reads
      *   as ink at low alpha. Graphite catches on the paper's tooth and skips
      *   the pits.
      * - **Scatter**, a pixel and a half, so a hatching stroke does not read as
      *   a ruled line.
-     * - **Softer edge** at 0.85 rather than 1, because a pencil's mark has no
+     * - **Softer edge** at 0.72 rather than 1, because a pencil's mark has no
      *   crisp boundary.
      *
      * Bigger than the pen at 32 doc px, and smoothed less at 0.10: sketching
@@ -62,16 +66,66 @@ enum class BrushPreset(val label: String) {
         override fun applyTo(brush: Brush) {
             reset(brush)
             brush.sizeMin = 1.5f
-            brush.sizeMax = 32f
-            brush.hardness = 0.85f
-            // Less opaque than a pen, and it builds. A stroke tops out at 0.72
-            // however often it crosses itself, and each pass lays between 0.10
-            // and 0.45 depending on how hard you lean -- so going over the same
-            // place darkens it toward the ceiling instead of straight to black.
-            brush.opacity = 0.72f
-            brush.flowOption.min = 0.10f
-            brush.flowOption.max = 0.45f
-            brush.flowOption.drive(Sensor.PRESSURE, ResponseCurve.power(1.4f))
+            // 48 document pixels, which is 3.5 mm across the flat on this
+            // tablet at a fitted page -- the width the side of a sharpened
+            // 4 mm cone actually leaves. The slider sets the *widest* mark the
+            // pencil can make, the one it makes laid over; the point is a fifth
+            // of that, which is where a pencil's point is.
+            brush.sizeMax = 48f
+            // Soft, and it had never taken effect: `DabRasterizer.hardness`
+            // was never assigned from the brush, so every pencil dab up to
+            // here was stamped with a hard rim however low this was set.
+            brush.hardness = 0.72f
+            // **Flow is coverage now.** `StrokeBuilder.emit` inverts the dab
+            // overlap, so these numbers are how dark one pass is rather than
+            // how much alpha one dab carries -- see `dabAlphaFor`. Before that
+            // inversion a flow of 0.3 arrived on the paper as 0.94 and the
+            // whole top two thirds of the pressure range was one flat black,
+            // which is the "dynamic range is too small" report.
+            //
+            // The floor is zero. A very light press has to leave a mark you
+            // can only just see, because that is what the first lines of a
+            // drawing are: composition, measurement, reference. A tool that
+            // cannot draw them cannot start a drawing.
+            brush.opacity = 0.97f
+            brush.flowOption.combine = CurveOption.Combine.MULTIPLY
+            brush.flowOption.min = 0f
+            brush.flowOption.max = 0.95f
+            // Steep, and authored point by point rather than fitted to a power
+            // law, because the shape matters most exactly where a power law is
+            // least controllable: the bottom fifth, which is the whole of the
+            // light end an artist works in.
+            brush.flowOption.drive(
+                Sensor.PRESSURE,
+                // Solved backwards from measured pixels, not authored by
+                // feel: `PencilResponseTest` draws the stroke and reads the
+                // coverage off it, and these eight points are what that
+                // measurement needs in order to land on 0.02 of coverage at a
+                // feather touch, 0.15 at a normal sketching press, and 0.86
+                // leant on. The curve looks nearly straight and that is the
+                // finding -- graphite deposits about linearly with load, and
+                // every power law tried here bent it somewhere it should not.
+                ResponseCurve.of(
+                    0f to 0.02f,
+                    0.10f to 0.10f,
+                    0.20f to 0.15f,
+                    0.35f to 0.26f,
+                    0.50f to 0.43f,
+                    0.70f to 0.69f,
+                    0.85f to 0.86f,
+                    1f to 1f,
+                ),
+            )
+            // Laid over, the same graphite covers four to five times the
+            // paper, so one pass is that much paler. Not the full geometric
+            // ratio: some of the width a tilted pencil gains is the soft
+            // shoulder of the cone rather than the flat, and paling by five
+            // makes the tilted stroke disappear where the reference sheet
+            // still clearly shows one.
+            brush.flowOption.drive(
+                Sensor.TILT,
+                ResponseCurve.of(0f to 1f, 1f to 0.40f),
+            )
             brush.stabilization = 0.10f
             // Tuned against a screenshot rather than guessed, and the first
             // guess was wrong in a specific way: strength 0.55 over a 0.34..0.72
@@ -95,7 +149,12 @@ enum class BrushPreset(val label: String) {
                 cutoffHigh = 0.86f,
                 seed = 11,
             )
-            // **Tilt widens the mark, and that is the half that was missing.**
+            // Leaning on a pencil crushes the tooth and fills the pits, so a
+            // hard press is darker *and* smoother than a light one scaled up.
+            // See [Brush.burnish]; 0.75 rather than 1 so the tooth is damped
+            // at the top of the range rather than erased.
+            brush.burnish = 0.75f
+            // **Tilt widens the mark, and pressure barely does.**
             // An ellipse whose minor axis shrinks with tilt gets *narrower*
             // laid over, which is the opposite of a pencil: laying one down
             // puts the side of the lead on the paper and makes a broader mark.
@@ -103,9 +162,20 @@ enum class BrushPreset(val label: String) {
             // MAXIMUM rather than MULTIPLY -- a pencil on its side leaves a
             // broad mark however lightly it is held, and multiplying would
             // make a light tilted stroke vanish.
+            //
+            // The numbers are the cone's. A sharpened pencil is a cone about
+            // 4 mm long; on its point it marks well under a millimetre, on its
+            // side it marks the length of the cone. That is a factor of four to
+            // five, which is what these fractions of the slider come to: 0.06
+            // at rest, 0.18 leant on, 1.0 flat. A reference sheet drawn in
+            // another program measured 2.7, and the cone is the better
+            // authority -- that sheet is evidence about that program's brush.
             brush.size.combine = CurveOption.Combine.MAXIMUM
-            brush.size.drive(Sensor.PRESSURE, ResponseCurve.CUBIC)
-            brush.size.drive(Sensor.TILT, ResponseCurve.power(1.3f))
+            brush.size.drive(
+                Sensor.PRESSURE,
+                ResponseCurve.of(0f to 0.035f, 0.25f to 0.06f, 0.6f to 0.12f, 1f to 0.18f),
+            )
+            brush.size.drive(Sensor.TILT, ResponseCurve.power(1.2f))
             brush.aspect.min = 1f
             brush.aspect.max = 0.30f
             brush.aspect.drive(Sensor.TILT)
@@ -151,10 +221,67 @@ enum class BrushPreset(val label: String) {
             to.combine = from.combine
             for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
         }
+        // Size and flow get the wiring back but keep their numbers, and the
+        // difference matters: `sizeMax` and `flow` are what two sliders on the
+        // toolbar hold, so copying the preset's values over them would undo the
+        // user's last drag every time the app started.
+        for ((from, to) in listOf(
+            fresh.size to brush.size,
+            fresh.flowOption to brush.flowOption,
+        )) {
+            if (to.inputCount > 0) continue
+            if (from.inputCount == 0) continue
+            to.combine = from.combine
+            for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
+        }
+    }
+
+    companion object {
+
+        /**
+         * Bumped whenever a preset's numbers change, so a saved brush can tell
+         * that it was tuned against an older idea of the tool.
+         *
+         * **Why this is needed at all.** The app restores the brush the user
+         * last held, which is right: a moved slider is a decision and it should
+         * survive a restart. But it means a retuned preset is invisible to
+         * everyone who has ever drawn with the app — the saved scalars win, the
+         * new numbers are never loaded, and the tool reads exactly as it did
+         * before. That happened here: the pencil was re-solved against a
+         * measured reference sheet and the device showed no change whatever,
+         * because the tablet had a brush saved from the build before.
+         *
+         * The cost is one-directional and worth stating: when this number
+         * moves, the sliders a user has dragged go back to the preset's, except
+         * the two `BrushStore` keeps by hand. That is a worse outcome than
+         * keeping everything and a much better one than shipping a change
+         * nobody can see.
+         *
+         * 1. Phase 2's pencil as first written.
+         * 2. Re-solved against the user's reference sheet: tilt widens *and*
+         *    pales, pressure carries the darkness, the soft edge is connected.
+         * 3. Flow became coverage rather than dab alpha, which is what gave the
+         *    pencil a real range; tilt widens by the cone's four to five rather
+         *    than the sheet's 2.7; a hard press burnishes the tooth flat. The
+         *    size slider changed meaning with it — it is now the width of the
+         *    mark laid *over*, not on the point — so this bump does not carry
+         *    the old value across.
+         */
+        const val TUNING: Int = 3
     }
 
     protected fun reset(brush: Brush) {
         val d = Brush()
+        // `size` and `flowOption` are cleared here too, and they were not
+        // before. Switching pencil to pen left the pencil's tilt-to-size and
+        // pressure-to-flow wiring attached to a brush whose whole claim is that
+        // it has none, so the pen came back with a tilt-sensitive width and
+        // never went back on the fast direct path.
+        brush.size.clearInputs()
+        brush.size.combine = d.size.combine
+        brush.flowOption.clearInputs()
+        brush.flowOption.combine = d.flowOption.combine
+        brush.flowOption.min = d.flowOption.min
         brush.sizeMin = d.sizeMin
         brush.sizeMax = d.sizeMax
         brush.sizeCurve = d.sizeCurve
@@ -168,6 +295,7 @@ enum class BrushPreset(val label: String) {
         brush.onsetPressure = d.onsetPressure
         brush.isotropicSpacing = d.isotropicSpacing
         brush.grain = d.grain
+        brush.burnish = d.burnish
         for (o in listOf(brush.aspect, brush.rotation, brush.scatter, brush.sizeJitter)) {
             o.clearInputs()
         }

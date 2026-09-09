@@ -47,7 +47,16 @@ class StrokeStress(private val view: InkSurfaceView) {
          * between them. See [figureStrokes].
          */
         FIGURE,
+
+        /**
+         * The reference sheet, redrawn by the app so it can be measured
+         * against the original. See [sheetStrokes].
+         */
+        SHEET,
     }
+
+    /** True for the paths that are several strokes rather than one. */
+    private val multiStroke: Boolean get() = path == Path.FIGURE || path == Path.SHEET
 
     var running: Boolean = false
         private set
@@ -155,6 +164,10 @@ class StrokeStress(private val view: InkSurfaceView) {
             // because the point of this run is how many pen-downs there are.
             this.totalSamples = maxOf(24, samples / figure.size)
         }
+        if (path == Path.SHEET) {
+            figure = sheetStrokes()
+            this.totalSamples = maxOf(120, samples / figure.size)
+        }
         sampleIndex = 0
         view.stats.reset()
         startNanos = System.nanoTime()
@@ -191,6 +204,28 @@ class StrokeStress(private val view: InkSurfaceView) {
 
     private var figure: Array<Array<FloatArray>> = emptyArray()
 
+    /**
+     * The reference sheet, as strokes this app can draw.
+     *
+     * The user drew a page in another program and handed it over so the two
+     * could be compared: four upright lines at rising pressure on the left,
+     * then a band of lines made with the pen laid further and further over on
+     * the right. `GraphiteReferenceTest` holds the numbers measured off it;
+     * this is the other half, which is drawing the same page here and measuring
+     * it the same way. Nine parallel diagonals across the lower two thirds of
+     * the page, evenly spaced, so one horizontal scanline crosses all nine and
+     * the widths and darknesses come out of a single row of pixels.
+     *
+     * Pressure and tilt per stroke are in [SHEET_PRESSURE] and [SHEET_TILT],
+     * and the split is the point: the first four vary pressure at no tilt, the
+     * last five vary tilt at one pressure. Varying both at once would give a
+     * sheet where neither effect could be read off.
+     */
+    private fun sheetStrokes(): Array<Array<FloatArray>> = Array(SHEET_PRESSURE.size) { i ->
+        val x = 0.10f + 0.10f * i
+        arrayOf(floatArrayOf(x, 0.92f), floatArrayOf(x + 0.06f, 0.55f))
+    }
+
     private fun beginFigureStroke() {
         strokeStartNanos = System.nanoTime()
         sampleIndex = 0
@@ -222,14 +257,14 @@ class StrokeStress(private val view: InkSurfaceView) {
 
         if (sampleIndex >= totalSamples) {
             dispatch(MotionEvent.ACTION_UP, frameTimeNanos, 1)
-            if (path == Path.FIGURE && figureStroke < figure.size - 1) {
+            if (multiStroke && figureStroke < figure.size - 1) {
                 strokeMillis.add((System.nanoTime() - strokeStartNanos) / 1e6f)
                 figureStroke++
                 beginFigureStroke()
                 choreographer.postFrameCallback(frame)
                 return
             }
-            if (path == Path.FIGURE) {
+            if (multiStroke) {
                 strokeMillis.add((System.nanoTime() - strokeStartNanos) / 1e6f)
             }
             running = false
@@ -290,7 +325,7 @@ class StrokeStress(private val view: InkSurfaceView) {
         val cy = view.document.heightPx * 0.5f
         val xDoc: Float
         val yDoc: Float
-        if (path == Path.FIGURE) {
+        if (multiStroke) {
             val leg = figure[figureStroke]
             val a = leg[0]
             val b = leg[1]
@@ -319,7 +354,12 @@ class StrokeStress(private val view: InkSurfaceView) {
         c.y = viewPoint[1]
         // Pressure sweeps the full range and back, so Brush's curve, the
         // onset ramp and the spacing that follows from radius are all covered.
-        c.pressure = constantPressure ?: (0.05f + 0.95f * (0.5f - 0.5f * cos(t * TWO_PI * 2f)))
+        // The sheet holds pressure and tilt flat for the length of each
+        // stroke, because it is a measurement and not a stress run: a width
+        // read off one scanline is only a width if the stroke is the same all
+        // the way down.
+        c.pressure = if (path == Path.SHEET) SHEET_PRESSURE[figureStroke]
+            else constantPressure ?: (0.05f + 0.95f * (0.5f - 0.5f * cos(t * TWO_PI * 2f)))
         c.size = 1f
         // Tilt and orientation, added at W15 because their absence hid a
         // problem completely. Every stress run before this fed a tilt of
@@ -331,8 +371,16 @@ class StrokeStress(private val view: InkSurfaceView) {
         // The pen tilts and rolls as it travels, at rates a wrist actually
         // manages: the tilt sweeps most of its range twice over the run and the
         // barrel turns through a full circle.
-        c.setAxisValue(MotionEvent.AXIS_TILT, 0.55f + 0.45f * sin(t * TWO_PI * 2f))
-        c.setAxisValue(MotionEvent.AXIS_ORIENTATION, (t * 2f - 1f) * PI_F)
+        if (path == Path.SHEET) {
+            c.setAxisValue(MotionEvent.AXIS_TILT, SHEET_TILT[figureStroke] * TILT_MAX_RAD)
+            // Square to the stroke, so the flat of the lead lies across the
+            // line it is drawing -- which is the posture the reference's tilted
+            // band was drawn in, and the one that makes the mark widest.
+            c.setAxisValue(MotionEvent.AXIS_ORIENTATION, 0f)
+        } else {
+            c.setAxisValue(MotionEvent.AXIS_TILT, 0.55f + 0.45f * sin(t * TWO_PI * 2f))
+            c.setAxisValue(MotionEvent.AXIS_ORIENTATION, (t * 2f - 1f) * PI_F)
+        }
     }
 
     companion object {
@@ -347,5 +395,20 @@ class StrokeStress(private val view: InkSurfaceView) {
         private const val TWO_PI = (2.0 * Math.PI).toFloat()
 
         private const val PI_F = Math.PI.toFloat()
+
+        /** See [Path.SHEET]. Four upright strokes, then five laid over. */
+        private val SHEET_PRESSURE = floatArrayOf(
+            0.25f, 0.50f, 0.75f, 1.00f,
+            0.70f, 0.70f, 0.70f, 0.70f, 0.70f,
+        )
+
+        /** See [Path.SHEET], as a fraction of the sensor's 63 degree range. */
+        private val SHEET_TILT = floatArrayOf(
+            0f, 0f, 0f, 0f,
+            0.20f, 0.40f, 0.60f, 0.80f, 1.00f,
+        )
+
+        /** [Sensor.TILT_MAX_DEG] in radians, for the axis values above. */
+        private val TILT_MAX_RAD = (63.0 * Math.PI / 180.0).toFloat()
     }
 }

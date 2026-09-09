@@ -27,6 +27,16 @@ class BrushStore(context: Context) {
     fun load(): Brush = BrushCodec.decode(prefs.getString(KEY_BRUSH, null))
         ?: BrushPreset.PEN.create()
 
+    /**
+     * The [BrushPreset.TUNING] the stored brush was saved under, or 0 for a
+     * brush from before this was recorded.
+     *
+     * Read by the restore path to decide between "load what was saved" and
+     * "the tool has been re-tuned since, take the new numbers". See
+     * [BrushPreset.TUNING] for why that decision has to exist.
+     */
+    fun storedTuning(): Int = prefs.getInt(KEY_TUNING, 0)
+
     /** The stored preset, or [BrushPreset.PEN]. */
     fun loadPreset(): BrushPreset {
         val name = prefs.getString(KEY_PRESET, null) ?: return BrushPreset.PEN
@@ -37,6 +47,7 @@ class BrushStore(context: Context) {
         prefs.edit()
             .putString(KEY_BRUSH, BrushCodec.encode(brush))
             .putString(KEY_PRESET, preset.name)
+            .putInt(KEY_TUNING, BrushPreset.TUNING)
             .apply()
     }
 
@@ -44,5 +55,6 @@ class BrushStore(context: Context) {
         const val FILE = "chrome"
         const val KEY_BRUSH = "brush.current"
         const val KEY_PRESET = "brush.preset"
+        const val KEY_TUNING = "brush.tuning"
     }
 }
