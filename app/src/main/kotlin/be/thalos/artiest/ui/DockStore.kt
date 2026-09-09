@@ -152,6 +152,7 @@ class DockStore(context: Context) {
          */
         private val NEW_ITEMS: List<Pair<ToolItem, Dock>> = listOf(
             ToolItem.LAYERS to Dock.RIGHT,
+            ToolItem.MARKER to Dock.LEFT,
             ToolItem.ERASER_SIZE to Dock.BOTTOM,
         )
 

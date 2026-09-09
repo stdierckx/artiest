@@ -49,6 +49,7 @@ object ToolIcons {
     fun of(item: ToolItem): ImageVector? = when (item) {
         ToolItem.PEN -> pen
         ToolItem.PENCIL -> pencil
+        ToolItem.MARKER -> marker
         ToolItem.ERASER -> eraser
         ToolItem.ERASER_SIZE -> eraser
         ToolItem.LAYERS -> layers
@@ -106,6 +107,36 @@ object ToolIcons {
                 moveTo(4.8f, 13.2f)
                 lineTo(10.8f, 19.2f)
                 lineTo(2.4f, 21.6f)
+                close()
+            }
+        }
+    }
+
+    /**
+     * A marker, **standing up**: a fat square barrel over a solid nib with one
+     * corner cut off.
+     *
+     * Upright and not diagonal, which is the only thing that made it work. The
+     * pen, the pencil and the eraser are all diagonal objects tapering to a
+     * point, and two attempts at a diagonal marker produced first a fatter pen
+     * and then something indistinguishable from the eraser — at 21dp the eye
+     * reads the silhouette and nothing else. A vertical rectangle is a
+     * silhouette none of the others has.
+     *
+     * The cut corner is the chisel, and it is the same shape as the mark this
+     * tool actually makes.
+     */
+    val marker: ImageVector by lazy {
+        icon("marker") {
+            stroke {
+                rect(7.6f, 2.8f, 16.4f, 14.4f)
+            }
+            fill {
+                moveTo(7.6f, 15.6f)
+                lineTo(16.4f, 15.6f)
+                lineTo(16.4f, 18.2f)
+                lineTo(11.4f, 21.4f)
+                lineTo(7.6f, 21.4f)
                 close()
             }
         }

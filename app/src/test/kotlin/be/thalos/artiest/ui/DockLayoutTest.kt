@@ -163,7 +163,7 @@ class DockLayoutTest {
         // drops rather than complains — so the counts are asserted here or
         // nowhere.
         val starter = DockLayout.STARTER
-        assertEquals(16, starter.all().size)
+        assertEquals(17, starter.all().size)
         assertEquals(starter.all().size, starter.all().map { it.item }.toSet().size)
 
         // The grouping is the feature, so it is pinned rather than left to
@@ -195,7 +195,7 @@ class DockLayoutTest {
         // is drawn as a narrow gap, and that gap is the only thing saying that
         // the eraser and the colour are two ideas rather than a run of four.
         val left = DockLayout.STARTER.bar(Dock.LEFT)
-        assertNull(left.covering(3), "between the tools and the colour")
+        assertNull(left.covering(4), "between the tools and the colour")
         val top = DockLayout.STARTER.bar(Dock.TOP)
         assertNull(top.covering(2), "between what you did and what leaves the app")
     }

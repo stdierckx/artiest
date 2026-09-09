@@ -132,12 +132,20 @@ enum class ToolItem(
     GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW, ToolKind.SLIDER),
 
     /**
-     * W10's two tools. The user's original catalogue asked for "pen, marker,
-     * pencil"; the marker is deliberately absent — see [BrushPreset] for why
-     * one tilted pencil does what a second tool was invented to do.
+     * W10's two tools, and the third that joined them later. The original
+     * catalogue asked for "pen, marker, pencil"; the marker was held back until
+     * it was wanted for its own sake, which is the rule [BrushPreset] states
+     * and the reason it is here now rather than then.
      */
     PEN("pen", "Pen", "Pen", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
     PENCIL("pencil", "Pencil", "Pencil", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+
+    /**
+     * The third tool, and the one the original catalogue asked for and did not
+     * get. See [BrushPreset.MARKER] for what makes it a tool rather than a wide
+     * pencil.
+     */
+    MARKER("marker", "Marker", "Marker", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
      * W11. A toggle, not a third tool: it changes how the brush in the hand

@@ -80,8 +80,39 @@ class BrushPresetTest {
         assertEquals(a.toString(), b.toString())
     }
 
+    /**
+     * The list is short on purpose and grows only when a tool is asked for by
+     * name — see [BrushPreset]'s header. The marker was refused twice on the
+     * grounds that a tilted pencil already did the job, and arrived when it was
+     * wanted for its own sake; this is the line that has to be edited
+     * deliberately for a fourth.
+     */
     @Test
-    fun `there are two presets and neither is a marker`() {
-        assertEquals(listOf("Pen", "Pencil"), BrushPreset.entries.map { it.label })
+    fun `the preset list is exactly the tools that were asked for`() {
+        assertEquals(listOf("Pen", "Pencil", "Marker"), BrushPreset.entries.map { it.label })
+    }
+
+    /**
+     * What makes the marker a different tool rather than a wide pencil, in the
+     * three numbers that carry it.
+     *
+     * A constant aspect with no sensor is the wedge; a flow floor at 0.94 is
+     * the flat pass; a grain strength of zero is ink rather than graphite. Any
+     * one of them drifting turns this back into the fat pencil the preset list
+     * spent two drafts refusing.
+     */
+    @Test
+    fun `the marker is a wedge that lays flat colour and has no tooth`() {
+        val m = BrushPreset.MARKER.create()
+        assertEquals(0, m.aspect.inputCount, "the wedge follows a sensor")
+        assertEquals(m.aspect.min, m.aspect.max, "the wedge changes shape")
+        assertTrue(m.aspect.max < 0.5f, "the nib is not a wedge at ${m.aspect.max}")
+        assertTrue(m.flowOption.min > 0.9f, "one pass is not flat: floor ${m.flowOption.min}")
+        assertTrue(m.opacity < 0.85f, "overlapping strokes will not show at ${m.opacity}")
+        assertEquals(0f, m.grain.strength, "a marker floods the tooth")
+        assertEquals(0f, m.burnish)
+        // The barrel turns the wedge, and nothing else does.
+        assertEquals(1, m.rotation.inputCount)
+        assertEquals(Sensor.ORIENTATION, m.rotation.sensorAt(0))
     }
 }

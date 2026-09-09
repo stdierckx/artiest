@@ -924,6 +924,13 @@ private fun ToolSlot(
             selected = preset == BrushPreset.PENCIL,
         )
 
+        ToolItem.MARKER -> IconToolButton(
+            icon = ToolIcons.marker,
+            label = item.label,
+            onClick = { onPreset(BrushPreset.MARKER) },
+            selected = preset == BrushPreset.MARKER,
+        )
+
         ToolItem.ERASER -> IconToolButton(
             icon = ToolIcons.eraser,
             label = item.label,

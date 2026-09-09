@@ -1,17 +1,20 @@
 package be.thalos.artiest.engine.brush
 
 /**
- * The tools the app ships with. Two, and the third slot is deleted rather than
- * filled.
+ * The tools the app ships with. Three, and the third one earned its place.
  *
- * **Why two and not three.** The plan's first draft specced a marker, its
- * second a broad chisel shader, and both were the same mistake: inventing a
- * second tool to do what one tilted pencil already does. The reference this
- * phase is measured against is a page of figure studies made with one pencil at
- * two attitudes, so the use case is sketching and hatching, and a preset list
- * longer than the toolset is a plan describing itself rather than the drawing.
- * The marker is an open question, not a backlog item; it comes back only if it
- * is wanted for its own sake.
+ * **Why the marker was refused, and why it is here now.** The plan's first
+ * draft specced a marker and its second a broad chisel shader, and both were
+ * the same mistake: inventing a second tool to do what one tilted pencil
+ * already does. The reference the pencil was measured against is a page of
+ * figure studies made with one pencil at two attitudes, so nothing in the
+ * evidence asked for a second tool, and this file said the marker would come
+ * back only if it was wanted for its own sake. It was asked for by name.
+ *
+ * That is the standard the list is held to, and [MARKER] meets it on its own
+ * terms rather than by being wider: a wedge nib turned by the barrel, one flat
+ * pass that darkens where strokes cross, and no paper tooth at all. None of
+ * those is something the pencil can be talked into doing.
  */
 enum class BrushPreset(val label: String) {
 
@@ -186,6 +189,91 @@ enum class BrushPreset(val label: String) {
             brush.scatter.max = 1.5f
             // Spacing by the minor axis, so laying the pencil over lays more
             // dabs rather than leaving gaps across the flat.
+            brush.isotropicSpacing = false
+        }
+    },
+
+    /**
+     * A felt marker with a chisel nib.
+     *
+     * The third tool, and the reason the second one's KDoc says a marker
+     * "comes back only if it is wanted for its own sake": it was wanted. What
+     * makes it a different tool rather than a fat pencil is four things, and
+     * none of them is size.
+     *
+     * - **The nib is a wedge, always.** A chisel marker's tip is a flattened
+     *   block of felt, so the mark is elliptical whatever the pen is doing —
+     *   [aspect] is a constant here rather than a sensor. Turn the barrel and
+     *   the wedge turns with it, so a stroke drawn along the nib's long axis is
+     *   a hairline and the same stroke across it is the full width. That is the
+     *   whole expressive range of a chisel marker, and it comes from
+     *   [Sensor.ORIENTATION] alone.
+     * - **One pass is flat, two passes are darker.** The defining property, and
+     *   the exact opposite of the pencil's. Flow is near 1 and constant, so the
+     *   ink does not build up *along* a stroke — no darker patch where the hand
+     *   slowed down — and the whole stroke composites once at [opacity] 0.72.
+     *   Cross it with a second stroke and the two multiply out to 0.92, which
+     *   is why marker drawings have that stack of visible overlaps. Both halves
+     *   need the scratch buffer, which is what `opacity < 1` turns on.
+     * - **Pressure barely does anything**, because a felt nib is firm. It
+     *   splays a little under load — the size runs 0.55 to 0.80 of the range,
+     *   about a fifth wider leant on — and it does not get darker at all. A
+     *   marker whose darkness followed pressure is a brush pen, which is a
+     *   different tool again.
+     * - **No grain and no scatter.** Marker ink floods the tooth instead of
+     *   sitting on it. The grain field and the burnish that make graphite look
+     *   like graphite are both off, and their absence is what makes this read
+     *   as ink rather than as a very wide pencil.
+     *
+     * The edge is soft at 0.88 but nowhere near the pencil's 0.72: felt bleeds
+     * a fraction of a millimetre into the paper and then stops.
+     *
+     * 84 doc px is about 6.2 mm across the long axis of the wedge and 2 mm
+     * across the short one at a fitted page, which is a broad marker.
+     */
+    MARKER("Marker") {
+        override fun applyTo(brush: Brush) {
+            reset(brush)
+            // Not 1.5. A marker has no point: the lightest touch that registers
+            // at all still puts the whole nib on the paper, so the floor is a
+            // nib and not a dot. This is also what stops the taper at the start
+            // of a stroke, which a felt tip does not have.
+            brush.sizeMin = 24f
+            brush.sizeMax = 84f
+            brush.hardness = 0.88f
+            // The number that makes it a marker. One pass is 72% covered, two
+            // crossing passes are 1 - 0.28^2 = 92%, three are 98%. Push it to 1
+            // and overlapping strokes become invisible, which is the single
+            // most recognisable thing about drawing with markers.
+            brush.opacity = 0.72f
+            brush.flowOption.combine = CurveOption.Combine.MULTIPLY
+            brush.flowOption.min = 0.94f
+            brush.flowOption.max = 1f
+            // Nearly flat on purpose. The tiny lift with pressure is the felt
+            // pressing more ink out, and it is small enough that a stroke drawn
+            // with a varying hand still reads as one even tone.
+            brush.flowOption.drive(
+                Sensor.PRESSURE,
+                ResponseCurve.of(0f to 0.94f, 0.4f to 0.98f, 1f to 1f),
+            )
+            // More than the pencil. A marker is used for committed lines —
+            // outlines, blocking in, lettering — and the hand's tremor that a
+            // sketching pencil wants to keep is exactly what spoils one.
+            brush.stabilization = 0.28f
+            brush.burnish = 0f
+            brush.size.combine = CurveOption.Combine.MAXIMUM
+            brush.size.drive(
+                Sensor.PRESSURE,
+                ResponseCurve.of(0f to 0.55f, 0.5f to 0.68f, 1f to 0.80f),
+            )
+            // A wedge, not a cone: constant, and turned by the barrel rather
+            // than by tilt. See the class doc above for why this is the whole
+            // tool.
+            brush.aspect.min = 0.30f
+            brush.aspect.max = 0.30f
+            brush.rotation.min = 0f
+            brush.rotation.max = MaskSpec.PI_F
+            brush.rotation.drive(Sensor.ORIENTATION)
             brush.isotropicSpacing = false
         }
     },
