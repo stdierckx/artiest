@@ -8,11 +8,13 @@
 > refutation. See **Stop conditions**, which is the part of this document most
 > likely to matter.
 >
-> **Revised 2026-09-09.** Open questions 1 and 2 are answered — the repo is
-> private and the graphite reference is named — and measuring that reference
-> moved W6 and W7 ahead of W8 as the phase's primary mechanism. A new fact
-> arrived with them: the app is intended to be sold, which tightened the licence
-> rule rather than relaxing it.
+> **Revised 2026-09-09**, twice in one day, and the second revision corrected
+> the first. Open questions 1 and 2 are answered: the repo is **public and free**
+> (briefly private-and-for-sale, then reconsidered), and the graphite reference
+> is named. Measuring that reference moved W6 and W7 ahead of W8 as the primary
+> mechanism. Then the user corrected the reading of it — **the page is one pencil
+> tilted, not two brushes** — which made tilt load-bearing, so tilt was probed on
+> the hardware before planning around it. It works. See **The bar, measured**.
 
 ## The decision
 
@@ -122,24 +124,34 @@ Phase 2's open question 2 asked for a graphite reference to be named before W8,
 so that "reads as graphite" would be falsifiable. **It is answered:**
 `docs/reference/graphite-target.png` — a page of figure studies drawn by the user
 in Wacom Canvas on this tablet, 1336x2096, exported with the background removed.
-Committed here because the repo is private; it would not have been committed
-otherwise, since it is the user's own artwork.
+Committed with the user's explicit agreement, who called it "just a sketch"
+when told that making the repo public would publish it.
 
 Naming it turned out to be worth more than a target. **Measuring it changes the
 plan's priorities**, and this section is the evidence.
 
 ### What the reference actually contains
 
-Two distinct marks, not one:
+**One brush, in two postures.** The first reading of this page found two marks
+and inferred two presets — a hatching pencil and a broad chisel shader. **That
+was wrong, and the user corrected it:** the whole page is one pencil, and the
+wide bands are the *same* pencil tilted over, so the side of the lead meets more
+paper. The two marks are two postures of one tool.
 
-1. **A narrow contour and hatching pencil.** Strong pressure response — the same
-   brush produces near-black contours and ghost-grey construction lines. Its
-   edges are *ragged and granular* rather than cleanly antialiased, and there is
-   visible longitudinal streaking inside a single stroke, like graphite catching
-   on paper tooth. Strokes taper in and out.
-2. **A broad, very low-opacity shader with flat, chisel-like ends and hard
-   lateral edges.** It lays down bands whose overlaps visibly stack into tone.
-   This is not a round nib — it is an elliptical or flat dab.
+That correction is the single most consequential thing in this document, because
+it changes what the brush model must do rather than how many presets it ships:
+
+1. **Upright posture** — narrow, near-round dab, strong pressure response, from
+   near-black contours down to ghost-grey construction lines. Edges *ragged and
+   granular* rather than cleanly antialiased, with visible longitudinal streaking
+   inside a single stroke, like graphite catching on paper tooth. Strokes taper.
+2. **Laid-over posture** — a wide, very low-opacity band with flat ends and hard
+   lateral edges, whose overlaps stack into tone. Not a round nib: an ellipse,
+   widened and rotated by where the pen is pointing.
+
+**So the dab is an ellipse whose aspect ratio and angle come from tilt**, and the
+reference's coherence — the reason the page looks like one hand with one tool —
+is a property we would have destroyed by shipping it as two brushes.
 
 ### The numbers, and the one that reframes the phase
 
@@ -180,6 +192,69 @@ Two consequences. **Procedural noise is likely sufficient for W8**, which remove
 almost all of the asset-licensing risk described above — no image needs to be
 sourced at all. And the grain we are matching is *subtler* than a real graphite
 scan, which makes W8 easier than it was scoped, not harder.
+
+### Tilt, measured on the hardware
+
+The one-brush correction makes tilt load-bearing, so it was probed before
+planning around it — the same "ten-minute check" discipline that W3's debt
+taught. **The pen reports tilt, and it reports it well enough to drive a dab.**
+
+Kernel level, `/dev/input/event6`: `ABS_TILT_X` and `ABS_TILT_Y`, each
+`min=-9000 max=9000 resolution=5730` — centidegrees, +/-90 degrees, two
+independent axes, which Android folds into the `TILT` and `ORIENTATION` axes it
+declares. Declared is not populated, which `AXIS_DISTANCE` proved in Phase 0, so
+a live capture followed: 150 s of raw digitizer events over **10 deliberate
+strokes at different tilts**, one of them sweeping tilt continuously mid-stroke.
+`tools/tilt-probe.py` is the analysis and re-runs on any fresh capture.
+
+```
+ABS_TILT_X            -23.00 .. +16.00 deg      40 distinct values
+ABS_TILT_Y              0.00 .. +63.00 deg      58 distinct values
+declination, pen down   p5 9.98   p50 54.01   p95 63.09 deg   (n=1327)
+pressure                8 .. 4630 of 8191
+packet rate             240 Hz
+tilt update rate        ~39 Hz effective, quantised to 1 degree
+corr(declination, pressure)   -0.82
+```
+
+Four findings, three of which change the design:
+
+- **Tilt is real, continuous, and updates within a stroke.** One captured stroke
+  sweeps 13 to 63 degrees across its 311 packets. It is not latched at pen-down,
+  which is what would have made the whole mechanism unusable.
+- **The usable range tops out at 63 degrees, not 90.** 33% of pen-down samples
+  sit at exactly 63.00 on `ABS_TILT_Y`, with a pile-up beneath it (439 samples at
+  63, 154 at 61) — a ceiling, not a distribution. `ABS_TILT_X` shows no such
+  pile-up, so it is a limit on the axis being exercised rather than a global
+  clamp. Whether that is a driver clamp or simply the flattest a pen can
+  be held and still register was not determined and does not need to be:
+  **normalise the tilt curve to 0-63 degrees.** Normalising to the declared 90
+  would waste a third of the input range and make the flattest posture
+  unreachable.
+- **Tilt is six times coarser than position, in both rate and resolution.**
+  Position arrives at 240 Hz; tilt changes at about 39 Hz in 1-degree steps. A
+  dab shape driven straight off it will visibly step as the hand rolls.
+  **Tilt needs its own low-pass filter** — the same first-order form as
+  `Stabilizer`, applied to shape rather than position, and its lag is far less
+  costly than positional lag because a slightly stale dab *shape* is invisible
+  where a stale dab *position* is the thing W16 spent a phase measuring.
+- **Tilt and pressure are strongly anti-correlated in real use** (-0.82): laid
+  over is light, upright is firm. That is exactly the reference's two postures
+  showing up in the input stream, and it implies a rule.
+
+**The rule: tilt drives shape, pressure drives amount.** Tilt sets the dab's
+aspect ratio and angle; pressure sets its size and opacity. Letting both drive
+size would have them fight — upright wants "big" from pressure and "narrow" from
+tilt, laid-over the reverse — and the result reads as a brush with no character
+in either posture. Stated here because it is the kind of thing that is obvious
+once written and very easy to get wrong while tuning.
+
+**No Phase 1 code has to change to supply this.** `PenSample` already carries
+`tilt` and `orientation` as two of its ten fields, and
+`MotionEvents.collectSamples` already reads `AXIS_TILT` and
+`getHistoricalOrientation` for historical samples too. Phase 1 built the
+plumbing and never used it. W1's sensor set gains two members and nothing else
+moves.
 
 ### The acceptance test W10 now has
 
@@ -238,49 +313,46 @@ Still unknown, and honestly unknown:
 
 ## Prior art, and the rule that governs it
 
-**The rule first, and it got stricter rather than looser.** Phase 1's open
-question 3 is answered: **the repo is private** (verified 2026-09-09 — it already
-was, so the plan's premise was stale). And a second fact arrived with the answer:
-**the app is intended to be sold, for about €1.**
+**The rule, after two reversals in two days.** Phase 1 left this open. It was
+briefly answered "private, and to be sold for about EUR 1", which tightened the
+rule. The user then reconsidered — *"i didnt know it would be so much hassle.
+Let's make it public so everyone can enjoy. I dont need the money. I need a good
+drawing program."* — so the project is now **public and free**, and the rule
+relaxes to roughly where Phase 1 assumed it was.
 
-The intuition is that a private repo frees us to read GPL code. It does not, and
-the selling plan is why. GPL obligations trigger on **distribution**, not on
-publication of a repository. Shipping a paid app *is* distribution. If the app
-contained or derived from Krita's or GIMP's GPL-3.0 code, the whole app would
-have to be released under GPL-3.0 with source offered to every buyer — who could
-then redistribute it freely, for free. Private hosting changes nothing about
-that; it only means nobody can see the problem before shipping.
+What that changes:
 
-So the standing rule stands and tightens:
+- **The Play-listing overhead is gone.** Privacy policy, licences screen,
+  support address, a quality bar set by paying strangers — all of it was a
+  consequence of selling, and none of it applies now.
+- **The asset problem mostly dissolves.** A grain texture no longer has to
+  survive resale, which was the strict case. It still has to be redistributable,
+  so the preference order stands and for a better reason than licensing:
+  **generate the grain procedurally**, because the measurement below says the
+  reference's grain is stochastic and a generated one is likely closer than a
+  scanned tooth would be. Then the user's own photographs. Then CC0 with the
+  licence page saved beside the asset.
+- **GPL is now genuinely available, and is still not worth taking.** A free,
+  public app *can* be licensed GPL-3.0, which would make Krita's and GIMP's
+  source legitimately readable. It is not worth it: it binds the project
+  permanently, it binds anyone who ever contributes, and **we do not need their
+  code** — the prior-art section was written from architectural knowledge and the
+  plan it produced is complete. Trading a permanent constraint for something we
+  have already worked around is a bad trade.
+- **So: keep read-and-reimplement, and pick a permissive licence.** MIT or
+  Apache-2.0 for artiest itself. It matches "everyone can enjoy it", keeps every
+  future option open, and costs nothing we intended to use. **This is a
+  recommendation, not a decision** — see the open questions.
 
-- **Do not read Krita or GIMP source at all.** Reading and then reimplementing
-  creates a derivative-work question that is expensive to disprove and impossible
-  to disprove cheaply. Work from documentation, published architecture
-  descriptions, and the prior-art summary in this document — which was written
-  from architectural knowledge, not from a checkout.
-- **libmypaint is the one possible exception and needs a real check.** It is
-  believed to be permissively licensed (ISC), unlike the MyPaint *application*
-  and unlike MyPaint's brush packs, which are separate works with separate terms.
-  If that verifies, it is legitimately usable in a paid app with attribution —
-  and it is the only legal shortcut to a mature brush model. Verify properly
-  before relying on it; do not rely on this sentence.
-- **Every dependency is already clean.** Kotlin, AndroidX and
-  `androidx.graphics:graphics-core` are Apache-2.0: commercial use, no source
-  obligation, attribution in the app's licences screen.
+Every dependency was already clean and stays clean: Kotlin, AndroidX and
+`androidx.graphics:graphics-core` are Apache-2.0.
 
-**Assets are now the sharper risk than code.** A paper-grain image "found online"
-is very often not licensed for redistribution inside a paid app, and "free to
-download" is not "free to sell". In preference order: **(a) generate the grain
-procedurally** — zero licence surface, and the measurement below says this is
-probably sufficient; **(b) photograph your own paper** with the tablet — free,
-clean, authentic, and unambiguously yours; **(c) CC0 only**, with the source URL
-and a saved copy of the licence page committed alongside the asset. Never a
-"free for personal use" texture.
-
-Two smaller consequences of selling, recorded so they are not discovered late: a
-paid Play listing needs a privacy policy even for an app that collects nothing,
-and the app needs an open-source-licences screen for its Apache-2.0
-dependencies. Neither is Phase 2 work; both are cheap and easy to forget.
+**One thing the reversal does not undo.** The reference artwork was committed
+while the repo was private. Making the repo public publishes it, and git history
+means a later removal would not fully retract it. The user was told this
+explicitly and chose to keep it — recorded here because consent to publish
+someone's own work should be traceable to a sentence they actually said, not
+inferred from a general instruction about the code.
 
 What transfers, and the judgement on each:
 
@@ -416,12 +488,14 @@ New package: `engine/src/main/kotlin/be/thalos/artiest/engine/brush/`.
 
 ```
 Brush
-  mask:     MaskSpec        (shape, aspect ratio, angle, softness falloff)
+  mask:     MaskSpec        (shape, softness falloff)
+  aspect:   CurveOption     (dab ellipse ratio — driven by TILT)
+  angle:    CurveOption     (dab ellipse angle — driven by ORIENTATION)
   size:     CurveOption     (min, max, sensors, curve)
   opacity:  CurveOption
   flow:     CurveOption
   hardness: CurveOption
-  rotation: CurveOption     (fixed angle, or locked to stroke direction)
+  rotation: CurveOption     (extra spin: fixed, random, or stroke-direction)
   scatter:  CurveOption
   spacing:  SpacingSpec     (fraction of diameter, isotropic flag, min doc px)
   texture:  TextureSpec?    (grain, strength, cutoff)  — null for the pen
@@ -474,7 +548,7 @@ it is the direct consequence of the 36 ms finding.
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | 0 | Before-picture: dab-loop bench (JVM + device), fix `latency-from-video.py` to find the page and set its own thresholds, re-film the W16 zigzag | tools, `:app` | Med | — | 1.5 |
-| 1 | `Sensor`, `ResponseCurve`, `CurveOption` — pure JVM, with goldens | `:engine` | Low | — | 1.5 |
+| 1 | `Sensor`, `ResponseCurve`, `CurveOption` — pure JVM, with goldens. **Tilt and orientation are required sensors**, normalised 0-63 deg, with their own low-pass filter | `:engine` | Low | — | 2 |
 | 2 | `Brush` replaces `RoundPen`; `Brush.pen()` preset. **W7 goldens must not move** | `:engine` | Low | 1 | 1 |
 | 3 | Per-dab spacing recompute, spacing from the dab just laid, isotropic option. **Goldens move here, once, by a predicted amount** | `:engine` | Med | 2 | 1 |
 | 4 | `AlphaMask`, `MaskSpec`, procedural generators, `MaskCache` with quantised keys | `:engine` | Med | 2 | 2 |
@@ -482,8 +556,8 @@ it is the direct consequence of the 36 ms finding.
 | 6 | Indirect paint path + scratch buffer; `ARGB_8888` vs `RGBA_F16` decided by measurement. **The larger half of the graphite bar** | `:app` | **High** | 5 | 2 |
 | 7 | Opacity and flow as real sliders — **the tripwire is paid here**, and the reference's median 0.27 alpha becomes reachable | both | Low | 6 | 0.5 |
 | 8 | Canvas-space texture: grain, strength, cutoff. **The second half of the bar** — ragged edges and streak, which opacity alone cannot make | both | Med | 6 | 2 |
-| 9 | Scatter, per-dab size jitter, rotation — all through W1's machinery | `:engine` | Low | 4 | 1 |
-| 10 | Three presets — pen, pencil, marker — judged on device, by eye, by the person who will use it | both | Med | 8, 9 | 1.5 |
+| 9 | **Tilt-driven elliptical dab** — aspect from tilt, angle from orientation — plus scatter, size jitter and spin, all through W1's machinery | `:engine` | Med | 4 | 1.5 |
+| 10 | Two presets — pen and the tilt-aware pencil — judged on device, by eye, by the person who will use it | both | Med | 8, 9 | 1.5 |
 | 11 | Eraser: barrel-button mapping (4 / 32 / 64) + a real erase blend through the indirect path | both | Med | 6 | 1 |
 | 12 | Brush serialization and the on-disk format | `:engine` | Low | 2 | 1 |
 | 13 | Prediction, re-tested — only now that the wet stroke is re-renderable | both | Med | 6 | 0.5 |
@@ -602,13 +676,19 @@ felt-quality judgements worked because the bar was stated first.
 
 ### W10 — three presets, judged the way W16 was judged
 
-Pen (opaque, hard, direct path — Phase 1's brush, unchanged and still fast),
-pencil (textured, scattered, low flow, indirect, F16, strong pressure response),
-and — **changed from "marker" after measuring the reference** — a **broad chisel
-shader**: elliptical dab, hard lateral edges, flat ends, very low flow, whose
-whole purpose is that overlaps stack into tone. The reference contains exactly
-these two drawing marks and no marker, and it is a page of figure studies, which
-is the actual use case: sketching and hatching, not painting. Judged on the tablet with
+**Two presets and an eraser, down from three presets.** Pen (opaque, hard,
+direct path — Phase 1's brush, unchanged and still fast) and **the pencil**,
+which is the phase. The third slot is deleted rather than filled: the first draft
+specced a marker, the second a broad chisel shader, and both were the same
+mistake — inventing a second tool to do what one tilted pencil does. The
+reference is a page of figure studies made with one pencil, so the use case is
+sketching and hatching, and a preset list longer than the toolset is a plan
+describing itself rather than the drawing.
+
+The pencil is: elliptical dab whose ratio and angle follow tilt, size and opacity
+following pressure, textured, scattered, low flow, indirect path, F16 scratch. It
+has to cover both of the reference's postures without a mode switch, and W10's
+judgement is specifically whether it does. Judged on the tablet with
 the pen by the person who will use it, in the user's own words, recorded in the
 plan the way W1's and W16's verdicts were.
 
@@ -663,12 +743,16 @@ and it was the most valuable thing that happened.
 3. **W5 costs more than 2× W9's p50 per event with the cache warm.** Stop
    building features; W14's gate has opened and the next item is the engine, not
    the eighth brush parameter.
-4. **W7 lands and the alpha distribution is still bimodal.** Draw a page with
+4. **W9's tilt response steps visibly under a rolling hand.** The input is
+   1-degree quantised at ~39 Hz against 240 Hz position. If the shape filter does
+   not hide that, the elliptical dab is worse than no elliptical dab, and the
+   pencil should ship round until it is fixed rather than shipping jittery.
+5. **W7 lands and the alpha distribution is still bimodal.** Draw a page with
    the pencil preset and measure it against `docs/reference/graphite-target.png`.
    If the inked-pixel median is not in 0.20-0.35 and fully-opaque pixels are not
    under 0.01%, the indirect path is not accumulating the way the reference
    builds, and no amount of texture in W8 will rescue it. Fix W6 before W8.
-5. **W8 and W10 land and the pencil still reads as a grey pen.** This is the
+6. **W8 and W10 land and the pencil still reads as a grey pen.** This is the
    androidx.ink kill criterion from `analysis.html` §04, and it fires here. The
    response is to fall back to Ink for v1 — accepting its document model,
    rewriting export and undo around immutable strokes — rather than spending more
@@ -678,19 +762,20 @@ and it was the most valuable thing that happened.
 
 ## Open questions that need a human answer
 
-1. ~~**Does the repo stay public?**~~ **Answered 2026-09-09: private, and it
-   already was.** It does *not* unlock GPL source, because the app is also
-   intended to be sold — see the licence rule, which tightened rather than
-   relaxed. What it does unlock is committing the reference artwork.
+1. ~~**Does the repo stay public?**~~ **Answered 2026-09-09, twice.** Briefly
+   "private and sold for EUR 1"; then reconsidered to **public and free**, which
+   is where it now stands. See the licence rule for what each reversal changed.
+   What is still open is the narrower question it exposed: **which licence?**
+   Recommendation is MIT or Apache-2.0. GPL-3.0 is available and not worth its
+   permanence.
 2. ~~**What is the graphite reference?**~~ **Answered 2026-09-09:**
    `docs/reference/graphite-target.png`. Measuring it reordered W6-W8; see
    **The bar, measured**.
-3. **New, and it arrived with the answer to 1: the app is to be sold for about
-   €1.** That is a change of project constraints, not just of licensing, and it
-   deserves its own decision at some point — a paid app implies a Play listing, a
-   privacy policy, an open-source-licences screen, a support address, and a
-   quality bar set by strangers rather than by its author. None of it is Phase 2
-   work. All of it is cheaper to plan for now than to discover at submission.
+3. ~~**The app is to be sold for about €1.**~~ **Withdrawn the same day**, and
+   with it the Play-listing overhead. Kept in the record because the reasoning it
+   forced — that a private repo does not unlock GPL code, because distribution
+   rather than publication is what triggers it — stays true and would otherwise
+   have to be rediscovered.
 4. **Is 61 Hz still out of scope?** Phase 1's question 1 was never answered
    either. It matters more now: dab spacing, scatter randomness and flow build-up
    all interact with the sample rate, and tuning them at 90 Hz and 321.75 Hz
