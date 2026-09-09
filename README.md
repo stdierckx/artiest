@@ -9,6 +9,9 @@ else is designed around.
 
 Full architecture and the phased build plan: [`docs/analysis.html`](docs/analysis.html).
 
+What the interface is built on, and the docking system that has to be written
+here because nothing on Android ships one: [`docs/ui-plan.md`](docs/ui-plan.md).
+
 ## Status
 
 | Phase | State |
