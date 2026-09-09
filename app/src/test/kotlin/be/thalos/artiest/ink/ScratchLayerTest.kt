@@ -240,4 +240,99 @@ class ScratchLayerTest {
         // And still covers what was asked for, or the cap has become a clip.
         opaqueDab(scratch.canvasInDocSpace()!!, 285f, 285f, 3f)
     }
+
+    /**
+     * The bug that made the pencil unusable, as a test.
+     *
+     * `ensureCovers` used to union against the *bitmap's* extent rather than
+     * the ink's, so once the allocation was large every stroke demanded at
+     * least that much and any stroke reaching left or up doubled it again. The
+     * buffer ratcheted to the size of the page within a few strokes and stayed
+     * there, and from then on every stroke cleared and composited a full-page
+     * bitmap -- which is exactly what "the first dab is free, the third takes a
+     * second" looks like from the outside.
+     */
+    @Test
+    fun `a small stroke after a large one uses a small region`() {
+        val scratch = ScratchLayer()
+        scratch.begin(Bounds.of(0f, 0f, 900f, 900f))
+        scratch.compositeInto(Canvas(surface()), 1f)
+
+        scratch.begin(Bounds.of(10f, 10f, 30f, 30f))
+        assertTrue(scratch.width >= 900, "the allocation should be kept for reuse")
+        assertTrue(
+            scratch.usedWidth < 64 && scratch.usedHeight < 64,
+            "a 20 px stroke used ${scratch.usedWidth}x${scratch.usedHeight}",
+        )
+    }
+
+    @Test
+    fun `repeated strokes in one place do not ratchet the used region`() {
+        val scratch = ScratchLayer()
+        repeat(12) {
+            scratch.begin(Bounds.of(100f, 100f, 140f, 140f))
+            opaqueDab(scratch.canvasInDocSpace()!!, 120f, 120f, 8f)
+            scratch.compositeInto(Canvas(surface()), 1f)
+        }
+        assertTrue(scratch.usedWidth < 64, "used region grew to ${scratch.usedWidth}")
+    }
+
+    /**
+     * The second half of the same bug: when the allocation was big enough to
+     * reuse, `ensureCovers` cleared it and copied nothing back, because it only
+     * copied when a *new* bitmap had been made. The stroke so far was silently
+     * erased whenever the origin moved without a reallocation.
+     */
+    @Test
+    fun `growing within the existing allocation keeps the ink`() {
+        val out = surface()
+        val scratch = ScratchLayer()
+        // Make the allocation large, then start a small stroke inside it.
+        scratch.begin(Bounds.of(0f, 0f, 900f, 900f))
+        scratch.compositeInto(Canvas(surface()), 1f)
+
+        scratch.begin(Bounds.of(40f, 40f, 56f, 56f))
+        opaqueDab(scratch.canvasInDocSpace()!!, 48f, 48f, 6f)
+        // Reach up and left, which moves the origin but fits the allocation.
+        assertTrue(scratch.ensureCovers(Bounds.of(16f, 16f, 56f, 56f)))
+        opaqueDab(scratch.canvasInDocSpace()!!, 22f, 22f, 5f)
+        scratch.compositeInto(Canvas(out), 1f)
+
+        assertEquals(255, Color.alpha(out.getPixel(48, 48)), "the first dab was erased by the growth")
+        assertEquals(255, Color.alpha(out.getPixel(22, 22)), "the second dab did not land")
+    }
+
+    /**
+     * The crash this cost, as a test.
+     *
+     * The doubling was applied on every reallocation, including ones caused
+     * only by the origin moving — so a stroke that fitted comfortably still
+     * asked for twice the allocation, every commit. Combined with a page cap
+     * written as `coerceAtMost(maxOf(want, maxWidth))`, which is not a cap at
+     * all, the buffer went 128, 256, ... to 32768 and the process died on
+     * `OOM allocating Bitmap with dimensions 32768 x 32768`.
+     */
+    @Test
+    fun `repeated strokes cannot grow the allocation without bound`() {
+        val scratch = ScratchLayer(maxWidth = 512, maxHeight = 512)
+        repeat(30) { i ->
+            // Origin moves every time, which is what forced the reallocation.
+            val x = 10f + (i % 5) * 3f
+            scratch.begin(Bounds.of(x, x, x + 300f, x + 300f))
+            opaqueDab(scratch.canvasInDocSpace()!!, x + 20f, x + 20f, 6f)
+            scratch.ensureCovers(Bounds.of(x - 5f, x - 5f, x + 320f, x + 320f))
+            scratch.compositeInto(Canvas(surface()), 1f)
+        }
+        assertTrue(scratch.width <= 512, "allocation reached ${scratch.width}")
+        assertTrue(scratch.height <= 512, "allocation reached ${scratch.height}")
+    }
+
+    /** A stroke that runs off the page must not ask for a buffer bigger than the page. */
+    @Test
+    fun `a stroke off the edge is clamped to the page`() {
+        val scratch = ScratchLayer(maxWidth = 256, maxHeight = 256)
+        scratch.begin(Bounds.of(-5000f, -5000f, 5000f, 5000f))
+        assertTrue(scratch.usedWidth <= 256, "used ${scratch.usedWidth}")
+        assertTrue(scratch.width <= 256, "allocated ${scratch.width}")
+    }
 }

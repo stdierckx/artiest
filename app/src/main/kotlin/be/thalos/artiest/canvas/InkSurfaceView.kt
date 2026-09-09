@@ -452,7 +452,8 @@ class InkSurfaceView(
     /** Scratch allocations and growths, for the instruments. */
     val scratchAllocations: Long get() = scratch.allocations
     val scratchGrowths: Long get() = scratch.growths
-    val scratchExtent: String get() = "${scratch.width}x${scratch.height}"
+    val scratchExtent: String
+        get() = "${scratch.usedWidth}x${scratch.usedHeight} of ${scratch.width}x${scratch.height}"
 
     /**
      * Whether this stroke has to go through the scratch buffer.
@@ -514,6 +515,34 @@ class InkSurfaceView(
      */
     private fun drawWetIndirect(canvas: Canvas, docToView: Matrix, batch: DabBatch) {
         if (batch.size == 0) return
+        val t0 = System.nanoTime()
+        try {
+            drawWetIndirectTimed(canvas, docToView, batch)
+        } finally {
+            wetNanos += System.nanoTime() - t0
+            wetCalls++
+        }
+    }
+
+    /**
+     * How long the indirect wet pass is taking, per batch.
+     *
+     * Added because the input-side instruments could not see the problem at
+     * all: `onTouchEvent` measured 0.88 ms while the ink was arriving half a
+     * second after the pen. Everything this path does happens on the render
+     * thread, and until now nothing timed it — `submit` measures the handoff,
+     * not the work.
+     */
+    var wetNanos: Long = 0L
+        private set
+    var wetCalls: Long = 0L
+        private set
+
+    /** Mean milliseconds in the indirect wet pass, or 0 before it has run. */
+    val wetMeanMs: Float
+        get() = if (wetCalls == 0L) 0f else wetNanos / 1e6f / wetCalls
+
+    private fun drawWetIndirectTimed(canvas: Canvas, docToView: Matrix, batch: DabBatch) {
         rasterizer.boundsOf(batch, wetRect)
         val bounds = Bounds.of(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
         if (!scratch.isOpen || scratchEpoch != strokeEpoch) {

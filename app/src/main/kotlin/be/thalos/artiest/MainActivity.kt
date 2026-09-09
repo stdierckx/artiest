@@ -980,6 +980,7 @@ private fun readout(
         "grain    ${r(surface.pen.grain.strength, 2)} strength   " +
         "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
         "${surface.grainBuilds} built\n" +
+        "wetpass  ${r(surface.wetMeanMs, 3)} ms mean over ${surface.wetCalls} batches\n" +
         "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
         "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +
         "${surface.scratchGrowths} grown\n" +

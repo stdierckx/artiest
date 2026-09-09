@@ -231,6 +231,18 @@ class StrokeStress(private val view: InkSurfaceView) {
         // onset ramp and the spacing that follows from radius are all covered.
         c.pressure = constantPressure ?: (0.05f + 0.95f * (0.5f - 0.5f * cos(t * TWO_PI * 2f)))
         c.size = 1f
+        // Tilt and orientation, added at W15 because their absence hid a
+        // problem completely. Every stress run before this fed a tilt of
+        // exactly zero, so every dab came out round -- and a round dab takes
+        // the same path a pen takes. The pencil's defining input was the one
+        // input the instrument could not produce, so the instrument said the
+        // pencil was fast while the pen in a hand said it was unusable.
+        //
+        // The pen tilts and rolls as it travels, at rates a wrist actually
+        // manages: the tilt sweeps most of its range twice over the run and the
+        // barrel turns through a full circle.
+        c.setAxisValue(MotionEvent.AXIS_TILT, 0.55f + 0.45f * sin(t * TWO_PI * 2f))
+        c.setAxisValue(MotionEvent.AXIS_ORIENTATION, (t * 2f - 1f) * PI_F)
     }
 
     companion object {
@@ -243,5 +255,7 @@ class StrokeStress(private val view: InkSurfaceView) {
 
         private const val TURNS = 3.5f
         private const val TWO_PI = (2.0 * Math.PI).toFloat()
+
+        private const val PI_F = Math.PI.toFloat()
     }
 }

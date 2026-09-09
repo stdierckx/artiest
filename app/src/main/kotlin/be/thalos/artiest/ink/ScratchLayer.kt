@@ -73,6 +73,20 @@ class ScratchLayer(
     var originY: Int = 0
         private set
 
+    /**
+     * The part of the allocation this stroke actually uses.
+     *
+     * Separate from the bitmap's own size, and that separation is the fix: the
+     * allocation is reused and rounded up, so it is routinely much larger than
+     * the stroke on it. Everything that costs — the clear, the composite, the
+     * shader's rect — is measured by this and not by the bitmap.
+     */
+    var usedWidth: Int = 0
+        private set
+    var usedHeight: Int = 0
+        private set
+
+    /** The allocation's size. See [usedWidth] for what is actually painted. */
     val width: Int get() = bitmap?.width ?: 0
     val height: Int get() = bitmap?.height ?: 0
 
@@ -106,46 +120,163 @@ class ScratchLayer(
      * the render thread.
      */
     fun begin(bounds: Bounds, padPx: Int = PAD) {
-        val l = Math.floor(bounds.left.toDouble()).toInt() - padPx
-        val t = Math.floor(bounds.top.toDouble()).toInt() - padPx
-        val r = Math.ceil(bounds.right.toDouble()).toInt() + padPx
-        val b = Math.ceil(bounds.bottom.toDouble()).toInt() + padPx
-        originX = l
-        originY = t
-        ensureSize(r - l, b - t, copy = false)
-        canvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        originX = Math.floor(bounds.left.toDouble()).toInt() - padPx
+        originY = Math.floor(bounds.top.toDouble()).toInt() - padPx
+        usedWidth = Math.ceil(bounds.right.toDouble()).toInt() + padPx - originX
+        usedHeight = Math.ceil(bounds.bottom.toDouble()).toInt() + padPx - originY
+        if (usedWidth < 1) usedWidth = 1
+        if (usedHeight < 1) usedHeight = 1
+        usedWidth = usedWidth.coerceAtMost(maxWidth)
+        usedHeight = usedHeight.coerceAtMost(maxHeight)
+        ensureCapacity(usedWidth, usedHeight)
+        // Only the region this stroke will use, not the whole allocation. The
+        // buffer is reused between strokes and can be far larger than the
+        // stroke that is about to be drawn; clearing all of it made every
+        // stroke pay for the largest stroke of the session.
+        clearUsed()
         isOpen = true
     }
 
     /**
      * Grow to also cover [bounds], keeping what has been drawn.
      *
+     * **Unions against the *used* region, not against the bitmap.** Doing it
+     * the other way round was the bug that made the pencil unusable: the
+     * required extent became `originX + bitmap.width`, so once the allocation
+     * was large every stroke demanded at least that much, and any stroke
+     * reaching left or up of the origin doubled it again. The buffer ratcheted
+     * to the size of the page within a few strokes and stayed there, and from
+     * then on every stroke cleared and composited a full-page bitmap. That is
+     * why it got slower dab after dab, and why only the pencil suffered — the
+     * pen never touches this buffer.
+     *
      * Returns false when there is no open stroke, so a caller cannot silently
      * draw into a closed buffer.
      */
     fun ensureCovers(bounds: Bounds, padPx: Int = PAD): Boolean {
         if (!isOpen) return false
-        val bmp = bitmap ?: return false
+        if (bitmap == null) return false
         val l = minOf(originX, Math.floor(bounds.left.toDouble()).toInt() - padPx)
         val t = minOf(originY, Math.floor(bounds.top.toDouble()).toInt() - padPx)
-        val r = maxOf(originX + bmp.width, Math.ceil(bounds.right.toDouble()).toInt() + padPx)
-        val b = maxOf(originY + bmp.height, Math.ceil(bounds.bottom.toDouble()).toInt() + padPx)
-        if (l == originX && t == originY && r == originX + bmp.width && b == originY + bmp.height) {
+        val r = maxOf(originX + usedWidth, Math.ceil(bounds.right.toDouble()).toInt() + padPx)
+        val b = maxOf(originY + usedHeight, Math.ceil(bounds.bottom.toDouble()).toInt() + padPx)
+        if (l == originX && t == originY && r == originX + usedWidth && b == originY + usedHeight) {
             return true
         }
+        val old = bitmap
         val oldX = originX
         val oldY = originY
-        val old = bmp
+        val oldW = usedWidth
+        val oldH = usedHeight
+        val fitsWhereItIs = l == originX && t == originY &&
+            r - l <= (old?.width ?: 0) && b - t <= (old?.height ?: 0)
         originX = l
         originY = t
-        ensureSize(r - l, b - t, copy = false)
+        // Clamped to the page. A stroke's bounds are the extent it *painted*
+        // and are not clipped to the document, so a stroke that runs off the
+        // edge can ask for a region larger than the page — which the layer
+        // would discard anyway.
+        usedWidth = (r - l).coerceIn(1, maxWidth)
+        usedHeight = (b - t).coerceIn(1, maxHeight)
+        if (fitsWhereItIs) {
+            // The origin has not moved and the allocation already covers the
+            // new extent, so the pixels already drawn are exactly where they
+            // belong. Only the newly exposed strip has to be cleared.
+            clearBeyond(oldW, oldH)
+            return true
+        }
+        // A fresh allocation, always, when the origin moves. The ink has to be
+        // copied to a new offset, and a bitmap cannot be copied onto itself:
+        // clearing it first destroys the source, and not clearing it leaves the
+        // old copy behind. Reusing the allocation here erased the stroke so far
+        // every time the pen reached up or left.
+        // The doubling is computed here, while the old allocation is still in
+        // hand. See [ensureCapacity].
+        //
+        // **Doubling only when the request actually exceeds what is held.** The
+        // first version doubled on every reallocation, including the ones
+        // caused merely by the origin moving — so a stroke that fitted
+        // comfortably still asked for twice the allocation, every commit, and
+        // the buffer went 128, 256, ... to 32768 and killed the process with an
+        // OutOfMemoryError. Where the request fits, the allocation is kept at
+        // the size it already is.
+        val capNowW = old?.width ?: 0
+        val capNowH = old?.height ?: 0
+        val capW = if (usedWidth > capNowW) {
+            minOf(maxOf(usedWidth, capNowW * 2), maxWidth)
+        } else {
+            maxOf(usedWidth, capNowW)
+        }
+        val capH = if (usedHeight > capNowH) {
+            minOf(maxOf(usedHeight, capNowH * 2), maxHeight)
+        } else {
+            maxOf(usedHeight, capNowH)
+        }
+        bitmap = null
+        canvas = null
+        ensureCapacity(capW, capH)
         val c = canvas ?: return false
+        c.save()
+        c.setMatrix(null)
         c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-        if (old !== bitmap) {
-            c.drawBitmap(old, (oldX - originX).toFloat(), (oldY - originY).toFloat(), null)
+        c.restore()
+        if (old != null) {
+            // Copied back whatever happened, including when the allocation was
+            // reused: the origin has moved, so the ink is no longer where it
+            // was. The previous version only copied when a *new* bitmap had
+            // been made, which silently erased the stroke so far in every other
+            // case.
+            c.drawBitmap(
+                old,
+                android.graphics.Rect(0, 0, oldW, oldH),
+                android.graphics.Rect(
+                    oldX - originX, oldY - originY,
+                    oldX - originX + oldW, oldY - originY + oldH,
+                ),
+                null,
+            )
             growths++
         }
         return true
+    }
+
+    /**
+     * Clear the used region only.
+     *
+     * **Every clip here is inside a save/restore, and that is not style.**
+     * `Canvas.clipRect` intersects; it can only ever shrink the clip. A bare
+     * `clipRect` followed by a `clipRect` back to the full bitmap does not
+     * widen anything — the canvas stays narrowed for every dab that follows,
+     * and the stroke is silently cut off at the region the *first* clear
+     * happened to use. `Canvas.setMatrix(null)` resets the matrix and leaves
+     * the clip exactly where it was, so nothing downstream rescues it either.
+     */
+    private fun clearUsed() {
+        val c = canvas ?: return
+        c.save()
+        c.setMatrix(null)
+        c.clipRect(0, 0, usedWidth, usedHeight)
+        c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        c.restore()
+    }
+
+    /** Clear the strip newly exposed by a grow that kept its origin. See [clearUsed]. */
+    private fun clearBeyond(oldW: Int, oldH: Int) {
+        val c = canvas ?: return
+        if (usedWidth > oldW) {
+            c.save()
+            c.setMatrix(null)
+            c.clipRect(oldW, 0, usedWidth, usedHeight)
+            c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            c.restore()
+        }
+        if (usedHeight > oldH) {
+            c.save()
+            c.setMatrix(null)
+            c.clipRect(0, oldH, usedWidth, usedHeight)
+            c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+            c.restore()
+        }
     }
 
     /**
@@ -190,7 +321,18 @@ class ScratchLayer(
         if (grain == null) {
             compositePaint.shader = null
             compositePaint.alpha = a
-            dst.drawBitmap(bmp, originX.toFloat(), originY.toFloat(), compositePaint)
+            // The used region only. Blitting the whole allocation was the other
+            // half of the cost: the source rectangle is what Skia has to sample
+            // and, for a bitmap the CPU has just written, upload.
+            dst.drawBitmap(
+                bmp,
+                android.graphics.Rect(0, 0, usedWidth, usedHeight),
+                android.graphics.RectF(
+                    originX.toFloat(), originY.toFloat(),
+                    (originX + usedWidth).toFloat(), (originY + usedHeight).toFloat(),
+                ),
+                compositePaint,
+            )
             compositePaint.xfermode = null
             return
         }
@@ -208,7 +350,7 @@ class ScratchLayer(
         compositePaint.alpha = a
         dst.drawRect(
             originX.toFloat(), originY.toFloat(),
-            (originX + bmp.width).toFloat(), (originY + bmp.height).toFloat(),
+            (originX + usedWidth).toFloat(), (originY + usedHeight).toFloat(),
             compositePaint,
         )
         compositePaint.shader = null
@@ -236,9 +378,20 @@ class ScratchLayer(
     /** The buffer's own bitmap, for the composite blit and for tests. */
     fun peekBitmap(): Bitmap? = bitmap
 
-    private fun ensureSize(w: Int, h: Int, copy: Boolean) {
-        val want = maxOf(w, 1)
-        val hant = maxOf(h, 1)
+    /**
+     * [minW] and [minH] are the smallest acceptable allocation, already
+     * including any doubling the caller wants.
+     *
+     * The doubling is the caller's because [ensureCovers] releases the old
+     * bitmap before calling — it has to, since ink cannot be copied onto the
+     * bitmap it is being copied from — and a doubling computed from
+     * `bitmap?.width` after that release reads zero and silently degrades to
+     * linear growth. That is not hypothetical: it turned 5 reallocations into
+     * 15 the first time.
+     */
+    private fun ensureCapacity(minW: Int, minH: Int) {
+        val want = maxOf(minW, 1)
+        val hant = maxOf(minH, 1)
         val bmp = bitmap
         if (bmp != null && bmp.width >= want && bmp.height >= hant && bmp.config == config) {
             return
@@ -252,15 +405,17 @@ class ScratchLayer(
         // copied the whole buffer. Doubling turns that into about six. The
         // wasted pixels are the usual doubling overhead and are transparent,
         // so they cost memory and nothing else.
-        val bmpW = bmp?.width ?: 0
-        val bmpH = bmp?.height ?: 0
-        // Doubled, then capped: never smaller than what was asked for, never
-        // larger than the page. The order matters -- capping before taking the
-        // maximum would let the double win and defeat the cap.
-        val gw = maxOf(((want + GRAIN - 1) / GRAIN) * GRAIN, bmpW * 2)
-            .coerceAtMost(maxOf(want, maxWidth))
-        val gh = maxOf(((hant + GRAIN - 1) / GRAIN) * GRAIN, bmpH * 2)
-            .coerceAtMost(maxOf(hant, maxHeight))
+        // Rounded up to a grain, then capped at the page.
+        //
+        // The cap used to read `coerceAtMost(maxOf(want, maxWidth))`, so that a
+        // request larger than the page would not be clipped. That defeated the
+        // cap completely — the ceiling became whatever was asked for — and it
+        // is why a runaway doubling reached 32768 px instead of stopping at the
+        // page. Requests are clamped to the page by the callers instead, which
+        // is correct on its own terms: ink outside the document has nothing to
+        // composite onto.
+        val gw = (((want + GRAIN - 1) / GRAIN) * GRAIN).coerceAtMost(maxWidth)
+        val gh = (((hant + GRAIN - 1) / GRAIN) * GRAIN).coerceAtMost(maxHeight)
         val fresh = Bitmap.createBitmap(gw, gh, config)
         allocations++
         bitmap = fresh
