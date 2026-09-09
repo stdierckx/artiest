@@ -12,11 +12,17 @@ import be.thalos.artiest.engine.ink.Stroke
  * transitivity — [Layer] owns a `Bitmap` and cannot leave — not because
  * anything about a document needs a device.
  *
- * **One layer, not a stack.** Phase 3 adds the stack, and it adds it by
- * replacing this field, not by generalising it now: a `List<Layer>` of size one
- * with a compositor that composites nothing is machinery for a feature that has
- * not been designed yet, and the layer's own alpha-carrying invariant is
- * already the whole of what Phase 3 needs from Phase 1.
+ * **A stack of layers, and [layer] is whichever one the pen is on.** Phase 1
+ * shipped a single sheet and said the stack would arrive by replacing the
+ * field rather than by generalising it early; that is what has happened. The
+ * shape of the stack, the rule about which thread may change it and the
+ * ordering against strokes all live in [LayerStack] — this class keeps the
+ * queue, the history and the bookkeeping, and hands the stack the operations
+ * that reach it through the same queue a stroke does.
+ *
+ * [layer] stays, meaning "the sheet the pen draws on". Every caller that had it
+ * before wanted the active sheet and now says so; the ones that want *all* the
+ * sheets — the compositor and the exporter — walk [layers] instead.
  *
  * **[paperColor] lives here and is drawn by the renderer.** The render body
  * paints it with `drawColor` before blitting the layer over it, once per frame,
@@ -76,7 +82,18 @@ class Document(
      * opening a recycle-against-render race. Keep the layer out of the view's
      * lifecycle.
      */
-    val layer: Layer = Layer(widthPx, heightPx, enforceOffMainThread)
+    val layers: LayerStack = LayerStack(widthPx, heightPx, enforceOffMainThread)
+
+    /**
+     * The sheet the pen is on.
+     *
+     * A property over [layers] rather than a field, so that "the active layer"
+     * has exactly one answer and switching sheets cannot leave a stale
+     * reference behind. **Render thread**, like everything else about the
+     * stack's shape: the UI thread reads `layers.snapshot`, which carries no
+     * bitmaps.
+     */
+    val layer: Layer get() = layers.active.layer
 
     /**
      * Layer changes the render thread has not applied yet.
@@ -98,6 +115,9 @@ class Document(
      * note. Every entry point that touches it below says so in its own KDoc.
      */
     private val history = UndoHistory<PixelPatch>()
+
+    /** How many sheets the drawing has. Diagnostic; the panel reads the snapshot. */
+    val layerCount: Int get() = layers.snapshot.size
 
     /**
      * Whether the buttons should be live, published for the UI thread.
@@ -253,14 +273,16 @@ class Document(
      * undo press that appears to do nothing.
      */
     fun snapshotBeforeStroke(bounds: Bounds) {
-        val patch = PixelPatch.capture(layer, bounds, widthPx, heightPx) ?: return
+        val active = layers.active
+        val patch = PixelPatch.capture(active.id, active.layer, bounds, widthPx, heightPx) ?: return
         history.record(patch)
         publishHistory()
     }
 
     /** Snapshot the whole page, before a Clear. **Render thread.** */
     fun snapshotBeforeClear() {
-        val patch = PixelPatch.captureAll(layer, widthPx, heightPx) ?: return
+        val active = layers.active
+        val patch = PixelPatch.captureAll(active.id, active.layer, widthPx, heightPx) ?: return
         history.record(patch)
         publishHistory()
     }
@@ -293,8 +315,16 @@ class Document(
      * removed.
      */
     private val exchange: (PixelPatch) -> PixelPatch = { patch ->
-        val inverse = patch.recapture(layer) ?: patch
-        patch.restoreInto(layer)
+        // Against the stack and not against `layer`: a patch knows which sheet
+        // it came from, and undoing a stroke made on a sheet the pen has since
+        // left must put those pixels back where they were rather than onto
+        // whatever is under the pen now. A patch whose sheet has been deleted
+        // recaptures nothing and restores nothing, and is still consumed --
+        // pressing Undo past a deleted layer walks over it rather than stopping
+        // on it.
+        val inverse = patch.recapture(layers) ?: patch
+        patch.restoreInto(layers)
+        layers.touchAll()
         inverse
     }
 
@@ -312,6 +342,24 @@ class Document(
      * actually touches [layer].
      */
     fun drainCommits(sink: CommitQueue.Sink): Int = commits.drain(sink)
+
+    /**
+     * Queue a change to the layer stack. UI thread, from the layers panel.
+     *
+     * Queued for the reason [requestClear] is, and unconditional for the reason
+     * [requestUndo] is: the render thread is the authority on whether the sheet
+     * an operation names still exists, and refusing here on a stale snapshot
+     * would make a button dead for the first frame after a change.
+     */
+    fun requestLayers(op: LayerOp) {
+        commits.layers(op)
+    }
+
+    /** A fresh empty sheet, allocated by the UI thread. See [LayerStack]. */
+    fun newLayer(): Layer = layers.newLayer()
+
+    /** The next unused default sheet name. UI thread. */
+    fun suggestLayerName(): String = layers.suggestName()
 
     /** Drop queued commits without applying them. Teardown only. */
     fun abandonCommits() {
@@ -347,7 +395,7 @@ class Document(
         // history outliving the layer would be a pile of pixels nobody frees.
         history.clear()
         publishHistory()
-        layer.close()
+        layers.close()
     }
 
     companion object {

@@ -57,6 +57,10 @@ class CommitQueueTest {
         override fun onRedo() {
             log.append('R')
         }
+
+        override fun onLayers(op: LayerOp) {
+            log.append('L')
+        }
     }
 
     @Test
@@ -182,6 +186,7 @@ class CommitQueueTest {
             override fun onClear() = Unit
             override fun onUndo() = Unit
             override fun onRedo() = Unit
+            override fun onLayers(op: LayerOp) = Unit
         }
         val sent = ArrayList<Stroke>(total)
         repeat(total) { sent.add(stroke(it.toFloat())) }

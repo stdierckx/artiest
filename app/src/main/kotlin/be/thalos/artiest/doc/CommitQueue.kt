@@ -64,6 +64,22 @@ class CommitQueue {
 
         /** See [Undo]. */
         object Redo : Commit
+
+        /**
+         * Change the layer stack: add, delete, reorder, rename, opacity.
+         *
+         * In this queue and not on a method of `LayerStack`, for the reason
+         * [Clear] is here: "delete this layer" means *after everything I have
+         * drawn*, and a stroke the user finished a millisecond ago that the
+         * render thread has not stamped yet is part of what they drew. Applied
+         * straight from the UI thread it would land in front of that stroke,
+         * and the stroke would then be stamped into a sheet that was supposed
+         * to be gone — or worse, into whichever sheet had taken its place.
+         *
+         * It also puts every write to the stack on one thread, which is what
+         * lets `LayerStack` be an ordinary unsynchronized object.
+         */
+        class Layers(val op: LayerOp) : Commit
     }
 
     /**
@@ -79,6 +95,7 @@ class CommitQueue {
         fun onClear()
         fun onUndo()
         fun onRedo()
+        fun onLayers(op: LayerOp)
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
@@ -114,6 +131,11 @@ class CommitQueue {
         queue.add(Commit.Redo)
     }
 
+    /** UI thread, from the layers panel. See [Commit.Layers]. */
+    fun layers(op: LayerOp) {
+        queue.add(Commit.Layers(op))
+    }
+
     /**
      * Render thread. Applies every commit queued so far, in order, and returns
      * how many.
@@ -132,6 +154,7 @@ class CommitQueue {
                 Commit.Clear -> sink.onClear()
                 Commit.Undo -> sink.onUndo()
                 Commit.Redo -> sink.onRedo()
+                is Commit.Layers -> sink.onLayers(commit.op)
             }
             applied++
         }
@@ -144,6 +167,16 @@ class CommitQueue {
      * have drawn it. Not for Clear: see [clear].
      */
     fun abandon() {
-        queue.clear()
+        // A pending Add or Duplicate is holding a 27.19 MiB bitmap the UI
+        // thread allocated and then forgot about. Dropping the queue without
+        // releasing it leaks a full page per press that was in flight when the
+        // view went away -- which is exactly the moment a user is most likely
+        // to have pressed something.
+        while (true) {
+            val commit = queue.poll() ?: return
+            if (commit is Commit.Layers) {
+                (commit.op as? LayerOp.Carrying)?.layer?.close()
+            }
+        }
     }
 }

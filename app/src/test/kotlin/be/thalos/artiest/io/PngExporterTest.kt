@@ -13,6 +13,7 @@ import android.graphics.PorterDuff
 import android.net.Uri
 import android.provider.MediaStore
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.LayerOp
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.engine.ink.Bounds
@@ -199,6 +200,82 @@ class PngExporterTest {
         document.layer.read { canvas.drawBitmap(it, 0f, 0f, null) }
 
         assertContentEquals(pixels(longhand), pixels(exported))
+    }
+
+    // --- the stack ----------------------------------------------------------
+
+    /**
+     * The export is the picture on the screen, which since the stack arrived
+     * means every sheet and not the top one.
+     *
+     * Written as three sheets with three colours so that a compositor which
+     * copies each one with `SRC` — the shape the single-layer version had, and
+     * the natural thing to leave behind — produces an image made only of the
+     * last colour, which is exactly what this asserts against.
+     */
+    @Test
+    fun `every visible sheet reaches the PNG, bottom to top`() {
+        val document = document()
+        val paint = Paint().apply { isAntiAlias = false }
+
+        paint.color = Color.RED
+        document.layer.write { it.drawRect(0f, 0f, 40f, 24f, paint) }
+
+        document.layers.apply(LayerOp.Add(document.newLayer(), "middle"))
+        paint.color = Color.GREEN
+        document.layer.write { it.drawRect(0f, 0f, 20f, 24f, paint) }
+
+        document.layers.apply(LayerOp.Add(document.newLayer(), "top"))
+        paint.color = Color.BLUE
+        document.layer.write { it.drawRect(0f, 0f, 10f, 24f, paint) }
+
+        val bytes = captureNextInsert()
+        assertIs<ExportResult.Written>(exportOf(document))
+        val out = decode(bytes)
+
+        assertEquals(Color.BLUE, out.getPixel(5, 12), "the top sheet is missing")
+        assertEquals(Color.GREEN, out.getPixel(15, 12), "the middle sheet is missing")
+        assertEquals(Color.RED, out.getPixel(30, 12), "the bottom sheet is missing")
+    }
+
+    /** A hidden sheet is hidden in the file too, or the export is not the picture. */
+    @Test
+    fun `a hidden sheet is not exported`() {
+        val document = document()
+        val paint = Paint().apply { isAntiAlias = false; color = Color.RED }
+        document.layer.write { it.drawRect(0f, 0f, 40f, 24f, paint) }
+
+        document.layers.apply(LayerOp.Add(document.newLayer(), "top"))
+        paint.color = Color.BLUE
+        document.layer.write { it.drawRect(0f, 0f, 40f, 24f, paint) }
+        document.layers.apply(LayerOp.SetVisible(document.layers.activeId, false))
+
+        val bytes = captureNextInsert()
+        assertIs<ExportResult.Written>(exportOf(document))
+        assertEquals(Color.RED, decode(bytes).getPixel(20, 12), "a hidden sheet was exported")
+    }
+
+    /**
+     * A sheet at half opacity exports at half opacity. Half of blue over red
+     * on opaque white is the same arithmetic the screen does, so the assertion
+     * is on the mix rather than on either colour.
+     */
+    @Test
+    fun `a sheet's opacity reaches the file`() {
+        val document = document()
+        val paint = Paint().apply { isAntiAlias = false; color = Color.RED }
+        document.layer.write { it.drawRect(0f, 0f, 40f, 24f, paint) }
+
+        document.layers.apply(LayerOp.Add(document.newLayer(), "top"))
+        paint.color = Color.BLUE
+        document.layer.write { it.drawRect(0f, 0f, 40f, 24f, paint) }
+        document.layers.apply(LayerOp.SetOpacity(document.layers.activeId, 0.5f))
+
+        val bytes = captureNextInsert()
+        assertIs<ExportResult.Written>(exportOf(document))
+        val mixed = decode(bytes).getPixel(20, 12)
+        assertTrue(Color.red(mixed) in 100..155, "red came out at ${Color.red(mixed)}")
+        assertTrue(Color.blue(mixed) in 100..155, "blue came out at ${Color.blue(mixed)}")
     }
 
     @Test
@@ -410,6 +487,10 @@ class PngExporterTest {
             override fun onClear() {
                 document.snapshotBeforeClear()
                 document.layer.blank()
+            }
+
+            override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
+                document.layers.apply(op)
             }
 
             override fun onUndo() {

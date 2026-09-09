@@ -169,7 +169,41 @@ object PngExporter {
             // the line means rather than what it computes today: it is a copy,
             // and it stays a copy if the destination is ever reused.
             val copy = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
-            val read = document.layer.read { canvas.drawBitmap(it, 0f, 0f, copy) }
+            // Every sheet, bottom to top, at its own opacity, skipping the
+            // hidden ones -- the same picture the screen shows. Only the
+            // bottom-most visible sheet is copied with `SRC`; the ones above it
+            // composite over what is already there, which is what a stack
+            // means. Copying each one with `SRC` would export the top sheet
+            // alone, and on a drawing whose top sheet is nearly empty that is
+            // an export of a blank page.
+            val over = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
+            val stack = document.layers
+            var closed = false
+            var first = true
+            for (i in 0 until stack.size) {
+                val entry = stack.entryAt(i)
+                if (!entry.visible) continue
+                val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+                if (alpha <= 0) continue
+                val paint = if (first) copy else over
+                paint.alpha = alpha
+                // Each sheet under its own lock and never two at once. See
+                // `Layer`: the lock is a leaf, and a nested pair here would be
+                // a lock ordering nobody has designed -- for no gain, since the
+                // canvas is this thread's and the sheets are independent.
+                if (entry.layer.read { canvas.drawBitmap(it, 0f, 0f, paint) }) {
+                    first = false
+                } else {
+                    // The document was closed underneath the export. Not a
+                    // blank sheet: a torn-down one, which is the case the
+                    // LAYER_CLOSED result exists for.
+                    closed = true
+                }
+            }
+            // A document whose sheets are all hidden still exports. The paper
+            // goes down below and a blank page is a legitimate thing to save;
+            // what must not pass silently is a document that has gone away.
+            val read = !closed
             val copyNs = System.nanoTime() - copyStartNs
             if (!read) {
                 return@withContext ExportResult.Failed(

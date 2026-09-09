@@ -357,6 +357,7 @@ class InkSurfaceView(
             if (!indirectNeeded()) {
                 armRasterizer()
                 document.layer.write { rasterizer.drawDry(it, stroke) }
+                document.layers.touchActive()
                 return
             }
             // W6's indirect path. The dabs land on the scratch, which starts
@@ -374,6 +375,7 @@ class InkSurfaceView(
                         it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
                     )
                 }
+                document.layers.touchActive()
                 return
             }
             scratch.begin(stroke.bounds)
@@ -384,6 +386,7 @@ class InkSurfaceView(
                 // dropping the stroke silently is wrong and invisible.
                 armRasterizer()
                 document.layer.write { rasterizer.drawDry(it, stroke) }
+                document.layers.touchActive()
                 return
             }
             armRasterizer()
@@ -400,11 +403,13 @@ class InkSurfaceView(
                     it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
                 )
             }
+            document.layers.touchActive()
         }
 
         override fun onClear() {
             document.snapshotBeforeClear()
             document.layer.blank()
+            document.layers.touchActive()
         }
 
         override fun onUndo() {
@@ -413,6 +418,23 @@ class InkSurfaceView(
 
         override fun onRedo() {
             document.applyRedo()
+        }
+
+        /**
+         * A change to the stack, in its place in the queue. See
+         * `CommitQueue.Commit.Layers`.
+         *
+         * Every thumbnail is marked stale rather than only the one that moved,
+         * because most of these operations change what the *panel* shows about
+         * several sheets at once — a delete renumbers nothing but shifts every
+         * row, a reorder moves two, a duplicate inserts one — and the cost of
+         * being wrong here is a picture that does not match its label. The
+         * refresh is one sheet per frame and only while the panel is open, so
+         * marking eight costs at most eight frames of a panel that is being
+         * looked at.
+         */
+        override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
+            if (document.layers.apply(op)) document.layers.touchAll()
         }
     }
 
@@ -617,22 +639,75 @@ class InkSurfaceView(
         canvas.clipRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
         paperPaint.color = document.paperColor
         canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
-        if (pen.erase) {
-            // The ink has to be taken out of the *layer*, not out of the frame.
-            // Applied straight to the canvas, DST_OUT would cut a hole through
-            // the paper as well and the stroke would read as a window onto the
-            // desk. An offscreen layer scopes the subtraction to the ink.
-            val ink = canvas.saveLayer(
-                wetRect[0], wetRect[1], wetRect[2], wetRect[3], null,
-            )
-            document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-            scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
-            canvas.restoreToCount(ink)
-        } else {
-            document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-            scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish)
-        }
+        // The whole stack and not just the active sheet, clipped to the dirty
+        // rectangle two lines above. Painting only the active layer here would
+        // make every sheet above the pen disappear inside the wet stroke's
+        // rectangle for as long as the pen was down -- a moving hole in the
+        // drawing that closed again at pen-up.
+        compositeStack(canvas, wetRect[0], wetRect[1], wetRect[2], wetRect[3])
         canvas.restoreToCount(save)
+    }
+
+    /**
+     * Every sheet, bottom to top, with the wet stroke in its place on the
+     * active one. Document space; the caller has already concatenated the
+     * matrix and clipped.
+     *
+     * [l], [t], [r] and [b] bound the offscreen layer this needs when the
+     * active sheet is translucent or is being erased. They are the dirty
+     * rectangle on the front-buffered path and the whole page on the dry one:
+     * a `saveLayer` costs its own area, so handing it the page when a dab is
+     * being erased would allocate 7.1 Mpx per batch.
+     *
+     * **The wet stroke belongs *inside* the stack, not on top of it.** Ink
+     * going onto the third of five sheets must be hidden by the two above it
+     * while it is still wet, or the stroke jumps behind them at pen-up. That is
+     * also why erasing takes an offscreen layer: `DST_OUT` applied straight to
+     * the canvas would cut through the paper and every sheet already painted,
+     * and the stroke would read as a window onto the desk.
+     */
+    private fun compositeStack(canvas: Canvas, l: Float, t: Float, r: Float, b: Float) {
+        val stack = document.layers
+        val activeAt = stack.activePosition
+        val wet = scratch.isOpen
+        for (i in 0 until stack.size) {
+            val entry = stack.entryAt(i)
+            if (!entry.visible) continue
+            val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+            // A sheet at zero opacity is not merely invisible, it is a full-page
+            // blit that cannot change a pixel.
+            if (alpha <= 0) continue
+            if (i != activeAt || !wet) {
+                layerPaint.alpha = alpha
+                entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
+                continue
+            }
+            // An offscreen layer only when it buys something: it is what scopes
+            // the erase, and it is what makes a translucent sheet fade the
+            // stroke *with* the ink under it rather than over it. An opaque
+            // sheet taking ink stays on the cheap path it was on before there
+            // was a stack at all.
+            val grouped = pen.erase || alpha < 255
+            val save = if (grouped) canvas.saveLayerAlpha(l, t, r, b, alpha) else -1
+            layerPaint.alpha = if (grouped) 255 else alpha
+            entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
+            if (pen.erase) {
+                scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
+            } else {
+                scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish)
+            }
+            if (grouped) canvas.restoreToCount(save)
+        }
+    }
+
+    /**
+     * The stack's blit paint. Separate from [blitPaint] because its alpha is
+     * rewritten per sheet, and a shared `Paint` whose alpha is left at whatever
+     * the last layer wanted is the classic way to make one drawing fade another.
+     */
+    private val layerPaint = Paint().apply {
+        isFilterBitmap = true
+        isAntiAlias = false
     }
 
     /**
@@ -849,22 +924,21 @@ class InkSurfaceView(
             // through the paper as well and the wet stroke reads as a window
             // onto the desk. That is also why the layer blit is inside the
             // branch: it has to be the thing being subtracted from.
-            if (scratch.isOpen && pen.erase) {
-                val ink = canvas.saveLayer(
-                    0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), null,
-                )
-                document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-                scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
-                canvas.restoreToCount(ink)
-            } else {
-                document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-                if (scratch.isOpen) {
-                    scratch.drawOnto(
-                        canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish,
-                    )
-                }
-            }
+            compositeStack(
+                canvas, 0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(),
+            )
             canvas.restoreToCount(save)
+            // One stale thumbnail per frame, and only while the panel is open.
+            // Here rather than in the sink because it has to happen after the
+            // commits have landed -- a thumbnail built before the stroke was
+            // stamped is a picture of the drawing as it was a moment ago, which
+            // is exactly the complaint a thumbnail is supposed to answer.
+            // One more frame if there is another stale thumbnail behind it.
+            // `post` and not a direct call: `redrawDry` asks the library for a
+            // render, and asking for one from inside the render callback is a
+            // re-entrant call into the renderer. This is a UI-thread hop that
+            // happens at most eight times, only while the panel is open.
+            if (document.layers.refreshThumbnails()) post { redrawDry() }
         }
     }
 

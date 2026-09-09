@@ -162,6 +162,10 @@ class DocumentTest {
         override fun onRedo() {
             log.append('R')
         }
+
+        override fun onLayers(op: LayerOp) {
+            log.append('L')
+        }
     }
 
     @Test
