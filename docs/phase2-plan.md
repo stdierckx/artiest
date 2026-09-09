@@ -598,6 +598,114 @@ and an on-device run of the W16 zigzag trace, reporting dabs, per-dab cost, mask
 cache hit rate and per-event cost. W5's high risk rating is a statement about
 this bench — without it, "stamping is fast enough" is an opinion.
 
+### W0 — IN PROGRESS. What the before-picture found
+
+**The dab-loop bench is done and the corpus is now shared.** `StrokeCorpus` was
+lifted verbatim out of `DabGoldenTest` so the goldens and the bench read the same
+eight strokes — a bench with its own fixture would drift from the goldens
+silently and be evidence for nothing. The goldens did not move, which is what
+makes "verbatim" a checked claim rather than an intention.
+`./gradlew :engine:benchDabLoop`:
+
+```
+stroke      samples    dabs  dabs/smp     add us   ns/dab    B/smp
+straight         48     516     10.75      12.47     24.2      0.7
+arc              72     704      9.78      16.17     23.0      0.4
+onset            40     226      5.65       4.86     21.5      0.8
+flick            36     913     25.36      22.49     24.6      0.9
+taper            60     456      7.60      11.07     24.3      0.5
+dwell            52     530     10.19      10.96     20.7      0.6
+corner           44     794     18.05      18.85     23.7      0.7
+TOTAL           353    4140     11.73      96.92     23.4      0.7
+```
+
+**23.4 ns a dab and essentially no allocation.** Two things follow. The
+0.7 B/sample also explains W9's 54.6 B/event on the tablet: that is the
+`PenSample` allocation itself at ~56 bytes, so the dab loop adds nothing to it —
+a Phase 1 design claim that had never actually been separated out. And 230 dabs
+an event costs about 5 microseconds of engine arithmetic here; even allowing a
+large factor for the tablet's CPU, **the dab loop is not what fills the 0.31 ms
+per-event budget.** The risk in W5 is the rasterisation, not the maths, which is
+what W5's risk rating already said and now has a number behind it.
+
+**The bench is a `main`, not a test.** Counts are asserted by the goldens; times
+are only reported. A timing assertion in `:engine:test` fails on a loaded laptop,
+gets its tolerance widened until it cannot fail, and then reports nothing — W2's
+lesson in a new place.
+
+**The film tool turned out to have a worse problem than the framing bug it was
+opened for, and this is the important part of W0.** Run C's failure was blamed on
+an ROI tuned to one take. Fixing that turned up the real defect: **the answer
+depends on the ink threshold, and the tool never said so.** Swept across `DARK`
+on take 2's own clip, at the original hand-tuned window:
+
+```
+DARK   0.30   0.35   0.40   0.45   0.50   0.55   0.60   0.65   0.70
+med    44.2   49.2   44.3   44.6   45.2    --     --     --     --
+                                          negative and 115 ms readings,
+                                          mixed in with plausible ones
+```
+
+Two findings, and the second is worse than the first. **45.2 ms was one sample of
+a distribution**, quoted to a precision the method does not have; the stable band
+says 44-49 ms. And **outside that band the tool produced nonsense without
+failing** — an apex reading of -1.9 ms is ink arriving before the pen, which is
+impossible, and the median absorbed it into a number that still looked like an
+answer. That is the single most dangerous property an instrument can have, and it
+is what run C actually hit.
+
+So the tool no longer picks a threshold. It sweeps, rejects any pass failing a
+*physical* check — no negative latency, nothing beyond a dozen refreshes, at
+least three apexes, apexes agreeing to within about a refresh and a half — and
+reports the consensus of the survivors with their range.
+
+**On take 2, from the automatically found page, it reports 44.3 ms** (apexes
+45.5, 43.6, 45.1, 43.4), against the 45.2 published from a hand-tuned ROI. The
+page detection transfers — that part worked — and the two agree well inside the
+method's spread.
+
+**But only one of nine thresholds survived the gates**, so that 44.3 is a single
+pass rather than the consensus the design intends, and its printed range of
+44.3-44.3 overstates what it knows. A prototype using the original's unscaled
+tolerances accepted three thresholds and agreed at 44.1-44.5, so the cause is
+most likely the scaled `APEX_DROP_W` and settle tolerances being slightly wrong
+for this stroke width rather than anything deeper — but that is a hypothesis and
+is written here as one. **Tuning those against take 2 and run B, so that a
+healthy clip passes several thresholds, is the first thing to finish in W0.**
+
+Three further changes came out of it, one of them a regression this work
+introduced and caught:
+
+- **Per-frame thresholding is load-bearing.** Replacing it with one calibrated
+  level broke the tool badly: the phone auto-exposes, the page drifts several
+  grey levels as the hand crosses it, and a fixed level lets the pen leak into
+  the ink mask exactly at the apex. That put a three-frame spike into the
+  ink-top series — which `smooth5` cannot remove, being a median of five — and
+  the settle walk locked onto the spike and reported ink before pen. Caught only
+  because take 2 has a known answer to disagree with.
+- **The settle walk could stop a whole step above the plateau.** The last frames
+  of a climb read 238, 237, 236 and the tolerance is the same size as those
+  steps, so which frame it stopped on was decided by one pixel and moved the
+  answer by two frames. It now takes the flat run's own level and re-enters from
+  the first frame that reaches it.
+- **Morphology is separable** — bit-identical, six times faster — and each frame
+  is decoded once for the whole sweep rather than once per threshold.
+
+**What is not done, and is the next thing.** The analysis window is still passed
+by hand. The obvious automatic rule — the span over which the ink area grows —
+does not work, because during the run-up the pen and hand enter the page and are
+counted as ink; on take 2 it reports the ink at 97% of final area by frame 31,
+when the stroke is drawn between about 130 and 262. Feeding that window to the
+frame-rate calibration pinned its search at the lower bound and silently rescaled
+every reading by a third. **That failure is now a hard error rather than a wrong
+number**, which is the part worth having landed. The fix is probably to take the
+window from the *nib track* — the drawing period is where the nib oscillates —
+rather than from the ink area, and it is left rather than guessed at.
+
+**The re-film has not happened**, so W0 is not closed and the plan's stop
+condition 1 has not been tested against fresh footage. What has changed is that
+there is now an instrument worth pointing at it.
+
 ### W1–W2 — the dynamics model, and the refactor that must be invisible
 
 W1 is pure `:engine` and needs no device: a `Sensor` enum (pressure, speed, tilt

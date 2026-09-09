@@ -69,3 +69,13 @@ tasks.test {
         systemProperty("artiest.golden.write", it)
     }
 }
+
+// W0's dab-loop bench. A JavaExec rather than a test task on purpose: it
+// reports timings and asserts nothing, so it can never fail the build. See
+// DabLoopBench's header for why that split is deliberate rather than lazy.
+tasks.register<JavaExec>("benchDabLoop") {
+    group = "verification"
+    description = "Measure the dab loop's cost per sample and per dab (W0)."
+    mainClass.set("be.thalos.artiest.engine.ink.DabLoopBench")
+    classpath = sourceSets["test"].runtimeClasspath
+}
