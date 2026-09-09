@@ -38,6 +38,19 @@ class AlphaMask(
     val byteCount: Int get() = alpha.size
 
     /**
+     * A rasterizer's uploaded form of this mask, if it has one.
+     *
+     * `Any?` because `:engine` has no Android on its classpath and must not
+     * acquire one; the app stores a `Bitmap` here and casts it back. It lives
+     * on the mask rather than in a second map keyed the same way so that the
+     * two cannot disagree about lifetime — when [MaskCache] evicts a mask, the
+     * uploaded bitmap goes with it, with no second eviction policy to keep in
+     * step. Getting that wrong is a leak that only shows up after a long
+     * drawing session, which is the worst kind to look for.
+     */
+    var attachment: Any? = null
+
+    /**
      * Where the dab's centre sits inside the bitmap, in pixels from its
      * top-left. Always the exact middle: the mask is built with an odd or even
      * extent as the diameter demands and the centre is `width / 2f`, so a

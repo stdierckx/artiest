@@ -1148,6 +1148,35 @@ W5 replaces `drawCircle` with an `ALPHA_8` mask blit under a colour filter, and
 A/Bs it on device against the Phase 1 path at identical settings. Phase 1's W9
 budget — p50 0.119 ms an event — is the number to beat or to consciously spend.
 
+**Done, and the stamp costs nothing measurable.** Both paths stay in the build
+behind a `Stamp` toggle, so the control and the candidate are compared in one
+session at identical settings rather than across two builds. Zigzag stress,
+16.3 dabs an event, alternating:
+
+| run | circle p50 | stamp p50 |
+|---|---|---|
+| 1 | 1.907 ms | 1.812 ms |
+| 2 | 1.659 ms | 1.542 ms |
+| 3 | 1.542 ms | 1.600 ms |
+
+Indistinguishable, with the stamp marginally ahead on two of three. The cache
+reports one mask and a 100% hit rate throughout, which is what a
+constant-pressure stress should produce and is the check that the measurement is
+of the blit and not of the generator.
+
+**A warning about this measurement, because it nearly produced the opposite
+conclusion.** The very first run after a cold app start read 0.524 ms, and the
+first stamp run immediately after it read 2.154 — which looks exactly like "the
+stamp is four times slower" and was written down as such before the control was
+repeated. Re-running the control gave 2.144 ms. That 0.524 has not reproduced in
+any run since and remains unexplained; everything after it clusters at
+1.5–1.9 ms regardless of path. **One A/B pair is not an A/B**, and the only
+reason this was caught is that the control was run a second time.
+
+So the mask path is viable, which matters well beyond W5: hardness, texture and
+W9's elliptical dab are all things `drawCircle` cannot express at all. **W14's
+entry condition has not fired here either.**
+
 ### W6–W7 — the scratch buffer, and paying the tripwire
 
 `RoundPen`'s header carries the tripwire in the code where it can be seen:

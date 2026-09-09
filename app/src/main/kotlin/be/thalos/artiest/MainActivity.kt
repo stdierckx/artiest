@@ -481,6 +481,11 @@ private fun CanvasScreen(
                         v.predictor?.enabled = v.predictionEnabled
                         generation++
                     },
+                    onStamp = {
+                        val v = surface ?: return@DebugRow
+                        v.stampMode = !v.stampMode
+                        generation++
+                    },
                     onStress = { pressure, path ->
                         val v = surface ?: return@DebugRow
                         val s = stress ?: StrokeStress(v).also { stress = it }
@@ -670,6 +675,7 @@ private fun DebugRow(
     onDoubleTap: () -> Unit,
     onReject: () -> Unit,
     onPredict: () -> Unit,
+    onStamp: () -> Unit,
     onStress: (Float?, StrokeStress.Path) -> Unit,
 ) {
     Row(
@@ -714,6 +720,12 @@ private fun DebugRow(
         TextButton(enabled = surface != null && !rejectRunning, onClick = onReject) { Text("Reject") }
         TextButton(onClick = onPredict) {
             Text(if (surface?.predictionEnabled == true) "Predict ON" else "Predict off")
+        }
+        // W5's A/B, switchable on the device rather than across two builds:
+        // the control and the candidate have to be compared at identical
+        // settings or the comparison is of two sessions.
+        TextButton(onClick = onStamp) {
+            Text(if (surface?.stampMode == true) "Stamp ON" else "Stamp off")
         }
         // Two runs, not one. See StrokeStress.start's pressure parameter: the
         // sweep is the worst case and the firm press is what most of a real
@@ -802,6 +814,10 @@ private fun readout(
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "stamp    ${if (surface.stampMode) "ON" else "off"}   " +
+        "${surface.stampCount} masks   ${surface.stampBytes / 1024} KiB   " +
+        "${surface.stampUploads} uploaded   " +
+        "hit ${if (surface.stampHitRate.isNaN()) "-" else r((surface.stampHitRate * 100).toFloat(), 1) + "%"}\n" +
         "xform    scale ${r(surface.transform.scale, 3)}   " +
         "rot ${r(surface.transform.rotationRad, 3)} rad   " +
         "t ${r(surface.transform.txDoc, 1)},${r(surface.transform.tyDoc, 1)}   " +

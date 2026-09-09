@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import be.thalos.artiest.canvas.DabBatch
+import be.thalos.artiest.engine.brush.MaskSpec
 import be.thalos.artiest.engine.ink.Stroke
 
 /**
@@ -25,10 +26,48 @@ class DabRasterizer(
     /** The document's extent, in document pixels. See [drawWet]'s clip. */
     private val docWidthPx: Int,
     private val docHeightPx: Int,
+    /** Where stamped dabs come from. Null leaves [Mode.STAMP] unavailable. */
+    private val stamps: StampCache? = null,
 ) {
+
+    /**
+     * Which dab the two draw paths lay down.
+     *
+     * **Both paths stay in the build, on purpose.** W5's job is to A/B the
+     * stamp against Phase 1's circle on the device, and an A/B whose control
+     * has been deleted is a measurement of one thing. Phase 1's number to beat
+     * or to consciously spend is p50 0.119 ms an event.
+     */
+    enum class Mode {
+        /** `drawCircle`, which is `:spike`'s dab exactly. The control. */
+        CIRCLE,
+
+        /** An `ALPHA_8` mask blit coloured by the paint. The candidate. */
+        STAMP,
+    }
+
+    /** Defaults to the control, so nothing changes until something switches it. */
+    var mode: Mode = Mode.CIRCLE
+
+    /**
+     * Nib hardness for stamped dabs.
+     *
+     * Here rather than on `Stroke` because Phase 1's dab list is `(x, y,
+     * radius)` and the eight goldens are that serialization; widening it to
+     * carry a value that is fixed at 1 until W7 would move every golden file to
+     * record a constant. `InkSurfaceView` pushes the brush's value in at stroke
+     * start, which is the same discipline `Stroke.antiAlias` follows.
+     */
+    var hardness: Float = 1f
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
+        // Subpixel dab placement. Dabs are spaced an eighth of a diameter
+        // apart, so snapping each to the pixel grid puts a visible ripple along
+        // a slow diagonal -- the dabs land in a staircase instead of on the
+        // path. Filtering costs a bilinear fetch per pixel and buys the
+        // placement back.
+        isFilterBitmap = true
     }
 
     /**
@@ -69,7 +108,7 @@ class DabRasterizer(
         canvas.clipRect(0f, 0f, docWidthPx.toFloat(), docHeightPx.toFloat())
         var i = 0
         while (i < n) {
-            canvas.drawCircle(batch.x(i), batch.y(i), batch.radius(i), paint)
+            dab(canvas, batch.x(i), batch.y(i), batch.radius(i))
             i++
         }
         canvas.restoreToCount(save)
@@ -94,8 +133,34 @@ class DabRasterizer(
         val n = stroke.dabCount
         var i = 0
         while (i < n) {
-            canvas.drawCircle(stroke.x(i), stroke.y(i), stroke.radius(i), paint)
+            dab(canvas, stroke.x(i), stroke.y(i), stroke.radius(i))
             i++
         }
+    }
+
+    /**
+     * One dab, by whichever path [mode] selects.
+     *
+     * A zero or negative radius is skipped rather than drawn. `drawCircle`
+     * treats it as nothing, but `MaskSpec` refuses a non-positive diameter --
+     * correctly, since a mask with no extent is not a dab -- so without this
+     * the stamp path would throw where the circle path silently did nothing.
+     * Two rasterizers that disagree about degenerate input are not an A/B.
+     *
+     * The stamp is blitted at its natural size, not scaled to the exact
+     * requested radius. That is the tolerance idea working as intended: the
+     * mask is built at the bucket's diameter, within 3% of what was asked for,
+     * and scaling it back would cost a matrix per dab to undo the quantisation
+     * the cache exists to exploit.
+     */
+    private fun dab(canvas: Canvas, x: Float, y: Float, radius: Float) {
+        if (!(radius > 0f)) return
+        val cache = stamps
+        if (mode == Mode.CIRCLE || cache == null) {
+            canvas.drawCircle(x, y, radius, paint)
+            return
+        }
+        val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, 1f, 0f))
+        canvas.drawBitmap(cache.bitmapOf(mask), x - mask.hotspotX, y - mask.hotspotY, paint)
     }
 }

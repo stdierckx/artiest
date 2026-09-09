@@ -25,6 +25,7 @@ import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.input.TwoFingerDoubleTap
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
+import be.thalos.artiest.ink.StampCache
 import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
 import be.thalos.artiest.input.eventAgeNanos
@@ -353,7 +354,40 @@ class InkSurfaceView(
 
     // --- render thread only, below this line -------------------------------
 
-    private val rasterizer = DabRasterizer(document.widthPx, document.heightPx)
+    /**
+     * The stamp cache, owned here because the rasterizer it feeds is owned
+     * here and both are render-thread-only. See [StampCache].
+     */
+    private val stamps = StampCache()
+
+    private val rasterizer = DabRasterizer(document.widthPx, document.heightPx, stamps)
+
+    /**
+     * Which dab path the renderer uses. W5's A/B switch, surfaced so the two
+     * can be compared on the device at identical settings rather than across
+     * two builds.
+     *
+     * Written from the UI thread and read on the render thread. A plain `var`
+     * would be a data race that in practice resolves within a frame, which is
+     * the kind of race that works until it does not; `@Volatile` costs a
+     * fence on a field read once per batch, not once per dab.
+     */
+    @Volatile
+    var stampMode: Boolean = false
+        set(value) {
+            field = value
+            rasterizer.mode = if (value) DabRasterizer.Mode.STAMP else DabRasterizer.Mode.CIRCLE
+        }
+
+    /** How many masks the stamp path has uploaded, for the instruments. */
+    val stampUploads: Long get() = stamps.uploads
+
+    /** The stamp cache's hit rate, or NaN before it has been asked anything. */
+    val stampHitRate: Double get() = stamps.masks.hitRate
+
+    /** Masks currently held, and their bytes, for the instruments. */
+    val stampCount: Int get() = stamps.masks.size
+    val stampBytes: Long get() = stamps.masks.byteCount
 
     /** Rebuilt from [transform] when it changes; never published. */
     private val dryMatrix = Matrix()
