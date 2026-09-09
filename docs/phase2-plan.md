@@ -1107,6 +1107,43 @@ shows the hit rate collapsing on the ramp strokes in the golden corpus, the fix
 is a small ring of nearby sizes rather than a finer step, and if that does not
 work the item stops and W14's first entry condition has fired.
 
+**It fired, and it was the wrong alarm.** Measured on the corpus with a real
+cache:
+
+| stroke | dabs | cold hit | warm hit | masks | buckets crossed | gen ms |
+|---|---|---|---|---|---|---|
+| straight | 516 | 99.8% | 100% | 1 | 1 | 0.12 |
+| arc | 704 | 99.9% | 100% | 1 | 1 | 0.26 |
+| **onset** | 226 | **87.2%** | 100% | 29 | 29 | 0.35 |
+| flick | 913 | 99.9% | 100% | 1 | 1 | 0.19 |
+| **taper** | 456 | **80.5%** | 100% | 89 | 89 | 1.04 |
+| dwell | 530 | 99.8% | 100% | 1 | 1 | 0.09 |
+| corner | 794 | 99.9% | 100% | 1 | 1 | 0.14 |
+
+Both ramps come in under a 90% hit rate, which is the condition this section
+said should stop the item. It should not, and the reason is in the two columns
+the original stop condition did not have. **`masks` equals `buckets crossed`
+exactly, on every stroke.** The cache builds one mask per distinct size and not
+one more; there is no waste to recover. A stroke whose radius sweeps 0.77 to
+10.3 px passes through 89 tolerance buckets, and 89 is the fewest distinct dab
+bitmaps that stroke can be drawn with without stair-stepping. The 80.5% is not
+a cache failing, it is a short stroke sweeping a wide size range, and no
+eviction policy or key can improve it.
+
+What actually decides viability is what a miss *costs*, and taper's entire cold
+cost is **1.04 ms for the whole 456-dab stroke** — against a stroke that lasts
+seconds and a Phase 1 per-event budget of 0.119 ms. Warm, every stroke hits
+100%, which is the case that matters in real drawing where sizes recur
+constantly.
+
+So the stop condition is replaced rather than waived, and the replacement is
+asserted in `MaskCacheBenchTest`: masks built must not exceed buckets crossed
+(the cache is not wasteful), generation must stay under 20 ms a stroke (it is
+affordable), and a second pass must hit above 99.9% (it is actually a cache).
+The hit rate is still printed, because it is a useful number; it is no longer a
+threshold, because it measures the stroke and not the cache. **W14's first entry
+condition has not fired.**
+
 W5 replaces `drawCircle` with an `ALPHA_8` mask blit under a colour filter, and
 A/Bs it on device against the Phase 1 path at identical settings. Phase 1's W9
 budget — p50 0.119 ms an event — is the number to beat or to consciously spend.
