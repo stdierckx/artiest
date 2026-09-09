@@ -160,23 +160,35 @@ Read off:
 
 ### Latency tab — the A/B
 
-> **Unlock 90 Hz first, or you are measuring the wrong device.** The panel does
-> 90 Hz and `requestHighestRefreshRate()` asks for it correctly — you can see
-> the request land in `dumpsys display` under `AppRequestObserver`. The platform
-> refuses it anyway: Wacom's `/vendor/etc/displayconfig/display_id_0.xml` pins
-> `mDefaultPeakRefreshRate` to **61**, and `mAlwaysRespectAppRequest` is false,
-> so the framework's cap wins over the app's request. Lift it over adb:
+> **Unlock 90 Hz first, or you are measuring the wrong device.**
 >
 > ```bash
-> adb shell settings put system peak_refresh_rate 90.0
-> adb shell settings put system min_refresh_rate 90.0
+> tools/panel-90hz.sh            # before filming; exits non-zero if it failed
+> tools/panel-90hz.sh --release  # afterwards
 > ```
 >
-> Confirm with `adb shell dumpsys SurfaceFlinger | grep activeMode` — it should
-> read `90.00 Hz` — and check the Device tab's `refresh now`. To undo:
-> `adb shell settings delete system peak_refresh_rate` (likewise
-> `min_refresh_rate`). This is a device setting, not a project one, so it does
-> not survive a factory reset or transfer to another unit.
+> The panel does 90 Hz and the app asks for it correctly — the request lands,
+> and you can watch it survive in `dumpsys display` as
+> `PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE -> 90.0`. The platform refuses it
+> anyway: `mDefaultPeakRefreshRate` is **61** and `mAlwaysRespectAppRequest` is
+> false (both visible in `dumpsys display`), so a system vote the app cannot
+> reach caps the render range at 60 and wins.
+>
+> **Do not reach for the obvious one-liner.** `settings put system
+> peak_refresh_rate 90.0` fails in two ways that both look like success: writing
+> the value the setting already holds fires no observer, so it returns cleanly
+> and does nothing; and the peak vote is recomputed as 60 on **every screen-on**
+> regardless, while the setting still reads back `90.0`. A take filmed after
+> that command can be at 60 Hz with every check apparently passing — which is
+> how run C happened. Don't set `min_refresh_rate` to 90 either; it comes back
+> as a 60 clamp here. The script changes the value so the observer fires, holds
+> the screen on because a blank undoes everything, and then verifies against
+> `SurfaceFlinger` instead of trusting the write.
+>
+> Check by hand with `adb shell dumpsys SurfaceFlinger | grep activeMode` — it
+> should read `90.00 Hz` — and the Device tab's `refresh now`. This is a device
+> setting, not a project one, and it does not survive a screen blank, let alone
+> a transfer to another unit.
 
 Toggles: **Front buffer**, **Predict**, **Unbuffered**. Run all four meaningful
 combinations, starting with everything off (the control) and ending with

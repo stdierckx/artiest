@@ -12,13 +12,28 @@ package be.thalos.artiest
  * only way to construct a genuine control is to be able to *not* ask, and to
  * ask for 60 on purpose, from the running app.
  *
- * The vendor still has the last word. Wacom's
- * `/vendor/etc/displayconfig/display_id_0.xml` pins peak to 61 with
- * `mAlwaysRespectAppRequest=false`, so 90 Hz needs
- * `adb shell settings put system peak_refresh_rate 90.0` as well. That is why
- * the toolbar shows the rate the display actually reports next to the one that
- * was requested: on this device the two disagree by default, and a toggle whose
- * effect cannot be seen is a toggle nobody can trust.
+ * The vendor still has the last word, and this enum cannot take it back. The
+ * app's request does arrive — `dumpsys display` shows
+ * `PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE -> 90.0` with `baseModeId` on
+ * the 90 Hz mode — but a system vote one priority band higher,
+ * `PRIORITY_USER_SETTING_PEAK_RENDER_FRAME_RATE`, caps the render range at 60
+ * and wins. Nothing an app may call reaches that band, so every value of this
+ * enum can be the right request and still lose.
+ *
+ * **The `adb shell settings put system peak_refresh_rate 90.0` this KDoc used
+ * to prescribe does not work**, in two ways that both look like success.
+ * Writing the value the setting already holds fires no settings observer, so
+ * the command returns cleanly and changes nothing; and the peak vote is
+ * recomputed as 60 on every screen-on regardless, while the stored setting
+ * still reads back `90.0`. Use `tools/panel-90hz.sh`, which changes the value
+ * so the observer fires, holds the screen on because a blank undoes it, and
+ * verifies against `SurfaceFlinger` rather than trusting the write.
+ *
+ * That is why the toolbar shows the rate the display actually reports next to
+ * the one that was requested: on this device the two disagree by default, a
+ * toggle whose effect cannot be seen is a toggle nobody can trust, and it was
+ * precisely that visible disagreement — `req 90 / now 60`, on a panel that
+ * would not budge — that turned up the paragraph above.
  */
 enum class RefreshPolicy {
     /** The highest refresh rate the panel offers at its current resolution. */

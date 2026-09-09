@@ -920,6 +920,59 @@ not, and nobody noticed for a day), and the clip needs enough clean reversals �
 run C and C2 still fail on *"only 2 usable apexes"*, which is a property of the
 footage and not of the tool.
 
+**And the first of those two turned out not to be something the app can do.**
+Told to "confirm the readout says 90 Hz", the tablet never said 90 — not on
+`max`, not on `auto`, not on `60`. The instinct was that the toggle was broken.
+It is not, and the readout was not lying either; `dumpsys display` shows the
+app's request arriving and *surviving everything*:
+
+```
+PRIORITY_APP_REQUEST_BASE_MODE_REFRESH_RATE -> appRequestBaseModeRefreshRate: 90.0
+mDisplayModeSpecs={baseModeId=2 ...}          # id 2 is the 90 Hz mode
+```
+
+What overrides it is a system vote a priority band above anything an app can
+reach — `PRIORITY_USER_SETTING_PEAK_RENDER_FRAME_RATE -> render: (0.0 60.0)` —
+and the interesting part is that this vote is **recomputed as 60 on every
+screen-on**, while the stored setting still reads `90.0`. Caught in logcat
+across a blank:
+
+```
+RefreshRateSelector: Previous: appRequestRanges={render=[0.00 Hz, 90.00 Hz]}
+RefreshRateSelector: Current:  appRequestRanges={render=[0.00 Hz, 60.00 Hz]}
+```
+
+So the recipe this plan and `RefreshPolicy`'s KDoc both carried —
+`settings put system peak_refresh_rate 90.0` — was insufficient in two separate
+ways, and had been for as long as it has been written down. Writing the value
+the setting already holds fires no observer, so the command appears to succeed
+and changes nothing; and even a write that does land is undone by the next
+screen blank. That is almost certainly how run C came to be filmed at 60 Hz
+while everyone believed it was at 90.
+
+One claim did not survive the check either. This plan, the README and two
+KDocs all attributed the cap to Wacom's
+`/vendor/etc/displayconfig/display_id_0.xml` "pinning peak to 61". That file is
+345 bytes and contains a brightness map and nothing else — no refresh key at
+all. The 61 and the `mAlwaysRespectAppRequest=false` are real and visible in
+`dumpsys display`; the file they were pinned on was not their source, and the
+sentence had been copied forward unchecked since Phase 1.
+
+`tools/panel-90hz.sh` is the correction: it passes through 60 before 90 so the
+observer fires, holds the screen on for the session because a blank undoes the
+lot, and then **verifies against `SurfaceFlinger`'s `activeMode` and exits
+non-zero if the panel is not there**. It is self-tested in both directions —
+break it with a screen cycle, fix it with the script. The pre-film step is now
+running that script, not reading a number off the app.
+
+**No app change follows from this.** The temptation was to go fix the Hz
+toggle; the evidence says the toggle already does the only thing an app is
+permitted to do, and the readout showing `req 90 / now 60` was the honest
+report of a genuine disagreement. What was wrong was the protocol around it,
+and a control whose failure is legible is exactly what let this be found at
+all — which is the argument the toggle's own KDoc makes for showing both
+numbers.
+
 ### W1–W2 — the dynamics model, and the refactor that must be invisible
 
 W1 is pure `:engine` and needs no device: a `Sensor` enum (pressure, speed, tilt

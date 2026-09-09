@@ -784,10 +784,12 @@ private const val MAX_CLOCK_SKEW_NANOS = 1_000_000L
  * W15's two lines: what the device is, and whether the refresh request took.
  *
  * `req` against `now` is the whole point of the toggle. On this tablet they
- * disagree by default — Wacom's display config pins peak to 61 with
- * `mAlwaysRespectAppRequest=false`, so asking for 90 gets 60 until
- * `adb shell settings put system peak_refresh_rate 90.0` is also set — and a
- * refresh toggle whose effect cannot be read is one nobody can trust. The
+ * disagree by default — `mDefaultPeakRefreshRate` is 61 with
+ * `mAlwaysRespectAppRequest=false`, so asking for 90 gets 60 until the system
+ * peak vote is lifted with `tools/panel-90hz.sh`, which no value of
+ * [RefreshPolicy] can do from inside the app — and a refresh toggle whose
+ * effect cannot be read is one nobody can trust. Reading `req 90 / now 60` off
+ * this very line is what eventually found that. The
  * digitizer rate tracks the panel (246.85 Hz at 60, 321.75 Hz at 90), so this
  * line is also the sample rate, indirectly.
  */
