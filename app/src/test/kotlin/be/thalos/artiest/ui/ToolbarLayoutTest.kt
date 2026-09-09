@@ -21,10 +21,10 @@ class ToolbarLayoutTest {
 
     @Test
     fun `a fresh bar is empty and its slots are all free`() {
-        assertTrue(ToolbarLayout.DEFAULT.isEmpty)
-        assertEquals(0, ToolbarLayout.DEFAULT.usedSlots)
-        for (s in 0 until ToolbarLayout.DEFAULT_SLOTS) {
-            assertNull(ToolbarLayout.DEFAULT.covering(s))
+        assertTrue(empty.isEmpty)
+        assertEquals(0, empty.usedSlots)
+        for (s in 0 until 12) {
+            assertNull(empty.covering(s))
         }
     }
 
@@ -50,9 +50,9 @@ class ToolbarLayoutTest {
     @Test
     fun `a neighbour blocks an overlapping placement`() {
         val bar = empty.place(ToolItem.SIZE, 4) // covers 4..7
-        assertFalse(bar.fits(ToolItem.COLOUR, 2)) // would cover 2..5
-        assertTrue(bar.fits(ToolItem.COLOUR, 0))  // covers 0..3
-        assertTrue(bar.fits(ToolItem.COLOUR, 8))  // covers 8..11
+        assertFalse(bar.fits(ToolItem.SMOOTHING, 2)) // would cover 2..5
+        assertTrue(bar.fits(ToolItem.SMOOTHING, 0))  // covers 0..3
+        assertTrue(bar.fits(ToolItem.SMOOTHING, 8))  // covers 8..11
     }
 
     @Test
@@ -78,11 +78,11 @@ class ToolbarLayoutTest {
 
     @Test
     fun `replacing still has to fit, and a bad replacement throws`() {
-        // CLEAR at 0 (0..1), COLOUR at 2 (2..5). Swapping the two-wide CLEAR
-        // for a four-wide slider would need 0..3, which COLOUR holds. Widening
-        // an item in place is the case that has to fail, and it is a caller
-        // error rather than a silent no-op.
-        val bar = empty.place(ToolItem.CLEAR, 0).place(ToolItem.COLOUR, 2)
+        // CLEAR at 0 (0..0), SMOOTHING at 2 (2..5). Swapping the one-wide
+        // CLEAR for a four-wide slider would need 0..3, which SMOOTHING holds.
+        // Widening an item in place is the case that has to fail, and it is a
+        // caller error rather than a silent no-op.
+        val bar = empty.place(ToolItem.CLEAR, 0).place(ToolItem.SMOOTHING, 2)
         assertFalse(bar.fits(ToolItem.SIZE, 0, ignoringSlot = 0))
         assertFailsWith<IllegalArgumentException> { bar.place(ToolItem.SIZE, 0) }
     }
@@ -104,18 +104,18 @@ class ToolbarLayoutTest {
     fun `firstFit finds the leftmost gap that is big enough`() {
         val bar = empty.place(ToolItem.CLEAR, 0).place(ToolItem.FIT, 2)
         assertEquals(3, bar.firstFit(ToolItem.SIZE))
-        assertEquals(3, bar.firstFit(ToolItem.CLEAR))
+        assertEquals(1, bar.firstFit(ToolItem.UNDO))
 
-        val full = ToolbarLayout.of(4, listOf(Placement(ToolItem.CLEAR, 1)))
-        assertNull(full.firstFit(ToolItem.SIZE))
-        assertEquals(0, full.firstFit(ToolItem.FIT))
+        val full = ToolbarLayout.of(4, listOf(Placement(ToolItem.SIZE, 0)))
+        assertNull(full.firstFit(ToolItem.SMOOTHING))
+        assertNull(full.firstFit(ToolItem.FIT))
     }
 
     @Test
     fun `of drops overlaps and keeps the earlier one`() {
         val bar = ToolbarLayout.of(
             12,
-            listOf(Placement(ToolItem.SIZE, 0), Placement(ToolItem.COLOUR, 2)),
+            listOf(Placement(ToolItem.SIZE, 0), Placement(ToolItem.SMOOTHING, 2)),
         )
         assertEquals(1, bar.placements.size)
         assertEquals(ToolItem.SIZE, bar.placements.single().item)
@@ -150,15 +150,25 @@ class ToolbarLayoutTest {
 
     @Test
     fun `shrinking the bar drops what no longer reaches and keeps the rest`() {
-        val bar = ToolbarLayout.STARTER.resized(8)
+        val long = ToolbarLayout.of(
+            16,
+            listOf(
+                Placement(ToolItem.PEN, 0),
+                Placement(ToolItem.PENCIL, 1),
+                Placement(ToolItem.UNDO, 4),
+                Placement(ToolItem.SIZE, 6),   // covers 6..9
+                Placement(ToolItem.STATS, 12),
+            ),
+        )
+        val bar = long.resized(8)
         assertEquals(8, bar.slotCount)
         assertEquals(ToolItem.PEN, bar.covering(0)?.item)
-        assertEquals(ToolItem.PENCIL, bar.covering(2)?.item)
+        assertEquals(ToolItem.PENCIL, bar.covering(1)?.item)
         assertEquals(ToolItem.UNDO, bar.covering(4)?.item)
-        assertEquals(ToolItem.REDO, bar.covering(6)?.item)
-        // The colour swatches start at 8 and need four, so they no longer
-        // reach and are gone rather than clipped: half a control is not one.
-        assertEquals(4, bar.placements.size)
+        // The slider starts at 6 and needs four, so it no longer reaches and is
+        // gone rather than clipped: half a control is not one. Stats is simply
+        // past the end.
+        assertEquals(3, bar.placements.size)
     }
 
     @Test
@@ -171,15 +181,5 @@ class ToolbarLayoutTest {
         assertEquals(12, grown.slotCount)
         assertEquals(old.placements, grown.placements)
         assertTrue(grown.fits(ToolItem.UNDO, 8), "the new room is at the end and usable")
-    }
-
-    @Test
-    fun `the starter layout survives its own normalisation`() {
-        // A hand-written constant is exactly the kind of thing that quietly
-        // loses an entry to an off-by-one width, and `of` drops rather than
-        // complains — so the count is asserted here or nowhere.
-        assertEquals(10, ToolbarLayout.STARTER.placements.size)
-        assertEquals(21, ToolbarLayout.STARTER.usedSlots)
-        assertEquals(ToolbarLayout.DEFAULT_SLOTS, ToolbarLayout.STARTER.slotCount)
     }
 }

@@ -267,6 +267,143 @@ around seven controls and re-argued at fifteen.
    empty docks is five times that bet. `ToolbarLayout.STARTER` exists precisely
    so this can be reconsidered in one word.
 
+## What was built, and where it departed from the plan
+
+> Added after the fact. Everything above this line is the survey as it was
+> written on 2026-09-09; nothing in it has been edited, including the parts that
+> turned out to be wrong. This section is the report.
+
+**U2 through U6 shipped. U1 did not, and that is the interesting one.**
+
+### U1 was skipped, deliberately
+
+The plan said the modern look was mostly a version bump, and that the bump owed
+a re-measurement because it moves the latency numbers on both arms of the A/B at
+once. Both halves are still true. The bump was not taken anyway, for a reason
+the plan did not anticipate: **the whole of U3's "modern feel" turned out to be
+reachable at material3 1.3.1**, because none of it was ever about components.
+
+What makes the chrome look like this app rather than like a Google app is a
+colour scheme, a shape scale, a set of glyphs and a rule about translucency —
+`ArtiestTheme` and `ToolIcons`, neither of which needs a component that did not
+exist in 2024. `HorizontalFloatingToolbar` would have replaced a `Box` with a
+rounded background; `ButtonGroup`'s `animateWidth` would have been a nice touch
+on a control that is one slot wide. Against that: a bump that invalidates W16's
+45.2 ms and W9's per-event p50 on a branch whose entire job is chrome, where a
+regression would be unattributable between "the toolbar recomposes differently"
+and "AGP generates different bytecode".
+
+So the plan's *"restyling anything before the bump is work done twice"* is the
+one line in it that did not survive contact. It is true of components and false
+of a theme, and the theme was the whole of the answer.
+
+U1 remains worth doing. It should be its own commit with its own re-measurement,
+exactly as written, and it now has less riding on it.
+
+### U2: the icons are the app's own
+
+The plan said icons were *"the only place a third party is genuinely required"*
+and set a deadline — the `NOTICE` paragraph lands in the same commit as the
+first `.svg`, or the icons do not land. Neither happened, because no `.svg`
+landed. `ToolIcons` is twenty-two glyphs of hand-written path data, and
+authoring them cost less than a sentence that would have to stay true forever.
+
+`NOTICE` is unchanged and still says *"No third-party source, assets or brush
+data have been copied into this repository."* No dependency was added either;
+`gradle/libs.versions.toml` is untouched.
+
+The one thing worth recording for whoever draws the next glyph: **the pen and
+the pencil were the same picture** on the first build. Both are long diagonal
+objects with a point at the bottom left, and at 21dp on a toolbar the segmented
+barrel that distinguishes them is invisible. The fix was to fill the pen's nib
+and widen its barrel, so the difference is a silhouette rather than a detail.
+
+### U4 and U5: the model, and the one rule a single bar did not need
+
+`DockLayout` is `Map<Dock, ToolbarLayout>` exactly as specced, and `fits` and
+`place` delegate to the bar underneath unchanged. The stop condition — *"U4's
+`DockLayout` cannot be tested on the JVM"* — is met: `DockLayoutTest` and
+`DockCodecTest` import nothing from Compose or `android.*`.
+
+One rule was added that the plan did not name. **An item is in at most one
+place.** On one bar a duplicate is merely odd; across five docks it is two
+Eraser buttons in different corners, one lit and one not. Making `place` remove
+the item from wherever it was also made dragging fall out for free: a move is a
+`place` on the destination, and there is no second code path for it to be wrong
+in.
+
+The codec grew a dock prefix as specced, and kept its rule that decoding never
+throws. It gained a clause: **a `v1` string is not unreadable, it is a top bar.**
+Reading it as a failure would have been easy and would have silently emptied the
+toolbar of anyone who had already arranged one — the exact failure
+`ToolbarCodec`'s KDoc exists to rule out, arriving through the door marked *new
+feature*.
+
+Drag-to-dock lives inside Arrange mode, as the plan required, and dropping on
+the canvas rather than on a bar sends the control to the floating panel — which
+makes "drag it out onto the paper" mean *detach*, the gesture everyone tries.
+
+### U6 was answered differently
+
+The plan wanted tool settings as a dockable panel, replacing the
+sliders-in-the-bar concession. What shipped instead is that **a slider is a
+first-class dock citizen in both orientations**: four slots along the bottom is a
+horizontal slider, four slots down the left is a vertical one, and
+`ToolKind.SLIDER` is what the dock reads to know. The concession `ToolItem`'s
+KDoc records is therefore still in place and no longer costs anything, because
+the bar it is in can now be any of five bars.
+
+The colour is the exception, and it is the shape U6 asked for: `COLOUR` is one
+slot showing the current ink, and it opens a panel holding the wheel, the
+palette and the recents. That is the pattern the opacity and flow panel should
+copy when it wants one.
+
+### Two bugs worth keeping, because they are not obvious
+
+**`DropdownMenu` cannot contain a `BoxWithConstraints`.** The colour panel was a
+`DropdownMenu` and it crashed on the first press with `IllegalStateException:
+Asking for intrinsic measurements of SubcomposeLayout layouts is not supported`.
+`DropdownMenu` sizes its column with `IntrinsicSize.Max`; `ColorWheel`'s disc is
+a `BoxWithConstraints` because it rasterises itself at whatever size it is
+given; a `BoxWithConstraints` cannot answer an intrinsic question because its
+content does not exist until it knows its constraints. Nothing was wrong with
+either; they cannot be nested. The panel is a `Popup` with its own position
+provider now, which also handles the button being docked to any of five places.
+
+**A hue disc multiplied by value is black at the app's default ink.**
+`ColorWheel` applied value to the disc through `BlendMode.Modulate`, which is
+exactly what value means in HSV and made the disc a preview of the ink. The
+app's default ink is black, black is value zero, and the wheel's first
+impression was a hole with an invisible puck in it. The disc is drawn at full
+value now and the bar carries value alone — which is what every picker people
+already know does — and touching the disc at value zero lifts the value to one,
+because aiming at green means green.
+
+### The three open questions, answered
+
+1. **How modern is modern?** Material's components, this app's scheme. No
+   `compose-unstyled`, no second look to maintain. See `ArtiestTheme` for why
+   the chrome is dark whatever the paper is.
+2. **Does the floating dock survive rotation, or reset?** It survives, as a
+   fraction of the window in each axis. Not perfect — a fraction is not a
+   position — but never off-screen, one line of state, and one gesture to
+   correct. See `DockStore.loadFloatingAt`.
+3. **Should the default install have an empty layout?** No. The empty single bar
+   rested on an empty slot reading as *tap me*; five empty docks is five times
+   that bet and reads as broken. `DockLayout.STARTER` is the default, grouped by
+   what the control is for — tools left, history and files top, view right,
+   brush sliders bottom, floating empty.
+
+### What has not been measured
+
+Nothing here has been through W0's film or W9's counters. The chrome recomposes
+on the same UI thread that dispatches pen input, and the risk the plan named —
+*"floating-toolbar scroll behaviour recomposes during a stroke"* — has not been
+ruled out, only kept small: no scroll behaviour was adopted, the bars hold no
+animated state while idle, and a stress sweep on the tablet drew 20 848 dabs
+with the full chrome on screen. That is a smoke test, not a measurement. **The
+latency baseline is still W15's, and this branch has not re-earned it.**
+
 ## Sources
 
 Checked 2026-09-09.

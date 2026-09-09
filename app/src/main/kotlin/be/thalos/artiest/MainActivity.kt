@@ -12,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -59,15 +63,22 @@ import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
+import be.thalos.artiest.ui.ArtiestTheme
+import be.thalos.artiest.ui.Axis
 import be.thalos.artiest.ui.BrushStore
+import be.thalos.artiest.ui.ColourButton
+import be.thalos.artiest.ui.DockHost
+import be.thalos.artiest.ui.DockLayout
+import be.thalos.artiest.ui.DockStore
+import be.thalos.artiest.ui.IconToolButton
+import be.thalos.artiest.ui.ToolIcons
+import be.thalos.artiest.ui.ToolSlider
 import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
 import be.thalos.artiest.io.PngExporter
-import be.thalos.artiest.ui.SlotToolbar
 import be.thalos.artiest.ui.ToolItem
-import be.thalos.artiest.ui.ToolbarStore
 import kotlinx.coroutines.launch
 
 /**
@@ -114,8 +125,14 @@ class MainActivity : ComponentActivity() {
         applyRefreshPolicy(RefreshPolicy.HIGHEST)
 
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            // The chrome's own scheme, not the platform's. See ArtiestTheme for
+            // why there is no light variant: the paper is white in both, and a
+            // toolbar in the paper's own whites competes with the drawing.
+            ArtiestTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
                     CanvasScreen(
                         document = doc,
                         report = report,
@@ -316,12 +333,20 @@ private fun CanvasScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // The bar the user built. Loaded once and written on every change: the
-    // changes are rare and a bar that does not survive a force-quit is not a
-    // bar anyone will invest in arranging.
-    val store = remember { ToolbarStore(context) }
-    var toolbar by remember { mutableStateOf(store.load()) }
+    // The bars the user built. Loaded once and written on every change: the
+    // changes are rare and a layout that does not survive a force-quit is not a
+    // layout anyone will invest in arranging.
+    val store = remember { DockStore(context) }
+    var docks by remember { mutableStateOf(store.load()) }
     var arranging by remember { mutableStateOf(false) }
+    var floatingAt by remember {
+        val (x, y) = store.loadFloatingAt()
+        mutableStateOf(Offset(x, y))
+    }
+
+    // The colours mixed on the wheel. Pushed when the panel closes rather than
+    // on every sample of a drag -- see ColourButton for why.
+    var recentInks by remember { mutableStateOf(store.loadRecentColours()) }
 
     // The undo buttons' enabled state. `Document.canUndo` is written by the
     // render thread, so it cannot be Compose state directly; it is sampled
@@ -444,79 +469,20 @@ private fun CanvasScreen(
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        // The instruments sit under the top dock and inside the side ones, so
+        // they are readable without moving a bar out of the way. They are drawn
+        // before the chrome so that a bar wins the overlap, which is the right
+        // way round: a toolbar half covered by a diagnostic is a toolbar with a
+        // button you cannot press — but a readout whose first three lines are
+        // under the top bar is also a readout that cannot be read, so the
+        // padding here clears the bar rather than relying on the draw order.
         Column(
             modifier = Modifier
-                .statusBarsPadding()
-                .padding(12.dp),
+                .align(Alignment.TopStart)
+                .systemBarsPadding()
+                .padding(start = READOUT_INSET, top = READOUT_TOP, end = READOUT_INSET),
         ) {
-            SlotToolbar(
-                layout = toolbar,
-                arranging = arranging,
-                onArranging = { arranging = it },
-                onLayout = { toolbar = it; store.save(it) },
-            ) { item ->
-                ToolSlot(
-                    item = item,
-                    ink = ink,
-                    onInk = { ink = it },
-                    sizeMax = sizeMax,
-                    onSizeMax = { sizeMax = it },
-                    smoothing = smoothing,
-                    onSmoothing = { smoothing = it },
-                    opacity = opacity,
-                    onOpacity = { opacity = it },
-                    flow = flow,
-                    onFlow = { flow = it },
-                    grain = grain,
-                    onGrain = { grain = it },
-                    eraser = eraser,
-                    onEraser = {
-                        eraser = !eraser
-                        surface?.eraserTool = eraser
-                        generation++
-                    },
-                    preset = preset,
-                    onPreset = { p ->
-                        // The preset writes the whole brush, then the sliders
-                        // are pulled back from it. Without that second half the
-                        // LaunchedEffect above would push the *old* slider
-                        // values straight back over the preset it just set,
-                        // and switching tools would half work.
-                        surface?.let { v ->
-                            p.applyTo(v.pen)
-                            preset = p
-                            sizeMax = v.pen.sizeMax
-                            smoothing = v.pen.stabilization
-                            opacity = v.pen.opacity
-                            flow = v.pen.flow
-                            grain = v.pen.grain.strength
-                            generation++
-                        }
-                    },
-                    exporting = exporting,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
-                    onUndo = { surface?.undo(); generation++ },
-                    onRedo = { surface?.redo(); generation++ },
-                    stats = stats,
-                    onStats = { stats = !stats; generation++ },
-                    onClear = { surface?.clear(); generation++ },
-                    onFit = { surface?.fitToView(); generation++ },
-                    onZoom = { factor ->
-                        val v = surface
-                        if (v != null && v.width > 0) {
-                            // About the middle of the view, not the origin: a
-                            // zoom button that walks the drawing off the screen
-                            // is a zoom button nobody presses twice.
-                            v.applyTransform(
-                                v.transform.zoomedAbout(v.width / 2f, v.height / 2f, factor),
-                            )
-                            generation++
-                        }
-                    },
-                    onExport = doExport,
-                )
-            }
             ExportStatus(export, exporting)
             if (stats) {
                 Text(
@@ -615,23 +581,104 @@ private fun CanvasScreen(
                 )
             }
         }
+
+        DockHost(
+            layout = docks,
+            onLayout = { docks = it; store.save(it) },
+            arranging = arranging,
+            onArranging = { arranging = it },
+            floatingAt = floatingAt,
+            onFloatingAt = { floatingAt = it; store.saveFloatingAt(it.x, it.y) },
+        ) { item, axis ->
+                ToolSlot(
+                    item = item,
+                    axis = axis,
+                    ink = ink,
+                    recentInks = recentInks,
+                    onInkCommitted = { recentInks = store.pushRecentColour(it) },
+                    onInk = { ink = it },
+                    sizeMax = sizeMax,
+                    onSizeMax = { sizeMax = it },
+                    smoothing = smoothing,
+                    onSmoothing = { smoothing = it },
+                    opacity = opacity,
+                    onOpacity = { opacity = it },
+                    flow = flow,
+                    onFlow = { flow = it },
+                    grain = grain,
+                    onGrain = { grain = it },
+                    eraser = eraser,
+                    onEraser = {
+                        eraser = !eraser
+                        surface?.eraserTool = eraser
+                        generation++
+                    },
+                    preset = preset,
+                    onPreset = { p ->
+                        // The preset writes the whole brush, then the sliders
+                        // are pulled back from it. Without that second half the
+                        // LaunchedEffect above would push the *old* slider
+                        // values straight back over the preset it just set,
+                        // and switching tools would half work.
+                        surface?.let { v ->
+                            p.applyTo(v.pen)
+                            preset = p
+                            sizeMax = v.pen.sizeMax
+                            smoothing = v.pen.stabilization
+                            opacity = v.pen.opacity
+                            flow = v.pen.flow
+                            grain = v.pen.grain.strength
+                            generation++
+                        }
+                    },
+                    exporting = exporting,
+                    canUndo = canUndo,
+                    canRedo = canRedo,
+                    onUndo = { surface?.undo(); generation++ },
+                    onRedo = { surface?.redo(); generation++ },
+                    stats = stats,
+                    onStats = { stats = !stats; generation++ },
+                    onClear = { surface?.clear(); generation++ },
+                    onFit = { surface?.fitToView(); generation++ },
+                    onZoom = { factor ->
+                        val v = surface
+                        if (v != null && v.width > 0) {
+                            // About the middle of the view, not the origin: a
+                            // zoom button that walks the drawing off the screen
+                            // is a zoom button nobody presses twice.
+                            v.applyTransform(
+                                v.transform.zoomedAbout(v.width / 2f, v.height / 2f, factor),
+                            )
+                            generation++
+                        }
+                    },
+                    onExport = doExport,
+                )
+        }
     }
 }
 
 /**
  * One filled slot, drawn.
  *
- * This `when` is the app's half of the toolbar contract: [SlotToolbar] decides
+ * This `when` is the app's half of the toolbar contract: [DockHost] decides
  * *where* things go and knows nothing about what they are; this decides what a
- * [ToolItem] looks like and knows nothing about slots. Adding a Phase 2 control
- * is an entry in [ToolItem] and a branch here, and the compiler names the branch
- * you forgot because the `when` is exhaustive.
+ * [ToolItem] looks like and knows nothing about slots or docks. Adding a Phase 2
+ * control is an entry in [ToolItem] and a branch here, and the compiler names
+ * the branch you forgot because the `when` is exhaustive.
+ *
+ * [axis] is the one thing the dock has to pass through, and only the sliders
+ * read it: a slider docked to the left edge has to be a vertical slider, and
+ * nothing else in the catalogue changes shape when it is turned on its side.
  */
 @Composable
 private fun ToolSlot(
     item: ToolItem,
+    axis: Axis,
     ink: Int,
     onInk: (Int) -> Unit,
+    recentInks: List<Int>,
+    onInkCommitted: (Int) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
     smoothing: Float,
@@ -659,109 +706,74 @@ private fun ToolSlot(
     onExport: () -> Unit,
 ) {
     when (item) {
-        ToolItem.COLOUR -> Row(verticalAlignment = Alignment.CenterVertically) {
-            for (colour in PALETTE) {
-                Swatch(colour, selected = colour == ink, onClick = { onInk(colour) })
-            }
-        }
-
-        ToolItem.SIZE ->
-            LabelledSlider("size", sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, onSizeMax)
-
-        ToolItem.SMOOTHING ->
-            LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
-
-        ToolItem.OPACITY ->
-            LabelledSlider("opac", opacity, MIN_ALPHA, 1f, 2, onOpacity)
-
-        ToolItem.FLOW ->
-            LabelledSlider("flow", flow, MIN_ALPHA, 1f, 2, onFlow)
-
-        ToolItem.GRAIN ->
-            LabelledSlider("grain", grain, 0f, 1f, 2, onGrain)
-
-        ToolItem.PEN -> SlotButton(item.short, enabled = preset != BrushPreset.PEN) {
-            onPreset(BrushPreset.PEN)
-        }
-
-        ToolItem.PENCIL -> SlotButton(item.short, enabled = preset != BrushPreset.PENCIL) {
-            onPreset(BrushPreset.PENCIL)
-        }
-
-        ToolItem.ERASER -> SlotButton(if (eraser) "Erase \u25cf" else item.short, onClick = onEraser)
-
-        ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
-        ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
-
-        ToolItem.ZOOM_IN -> SlotButton(item.short) { onZoom(ZOOM_STEP) }
-        ToolItem.ZOOM_OUT -> SlotButton(item.short) { onZoom(1f / ZOOM_STEP) }
-        ToolItem.FIT -> SlotButton(item.short, onClick = onFit)
-        ToolItem.CLEAR -> SlotButton(item.short, onClick = onClear)
-        ToolItem.EXPORT -> SlotButton(item.short, enabled = !exporting, onClick = onExport)
-        ToolItem.STATS -> SlotButton(if (stats) "Stats \u25b4" else "Stats \u25be", onClick = onStats)
-    }
-}
-
-/** A button sized to its slot rather than to its label. */
-@Composable
-private fun SlotButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        contentPadding = PaddingValues(horizontal = 2.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(label, fontSize = 11.sp, maxLines = 1)
-    }
-}
-
-@Composable
-private fun Swatch(colour: Int, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 3.dp)
-            .size(if (selected) 26.dp else 20.dp)
-            .clip(CircleShape)
-            .background(Color(colour))
-            .border(
-                width = if (selected) 2.dp else 1.dp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (selected) 0.9f else 0.3f),
-                shape = CircleShape,
-            )
-            .clickable(onClick = onClick),
-    )
-}
-
-/**
- * A slider with its value beside it.
- *
- * The number is shown because these two are the only controls in the app whose
- * effect is invisible until the next stroke: a smoothing change does nothing to
- * the ink already down, and `Brush.sizeMax` is the *upper* end of a pressure
- * curve, so at a light touch moving it changes nothing at all. Without the
- * readout that reads as a broken slider.
- */
-@Composable
-private fun LabelledSlider(
-    label: String,
-    value: Float,
-    from: Float,
-    to: Float,
-    places: Int,
-    onChange: (Float) -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-    ) {
-        Text("$label ${r(value, places)}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-        Slider(
-            value = value,
-            onValueChange = onChange,
-            valueRange = from..to,
-            // Weight, not a fixed width: the slot decides how wide this is.
-            modifier = Modifier.weight(1f).padding(start = 4.dp),
+        // The one control whose face is its own value. See ColourButton.
+        ToolItem.COLOUR -> ColourButton(
+            ink = ink,
+            onInk = onInk,
+            palette = PALETTE,
+            recent = recentInks,
+            onCommit = onInkCommitted,
         )
+
+        ToolItem.SIZE -> ToolSlider(
+            ToolIcons.size, item.label, sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, axis, onSizeMax,
+        )
+
+        ToolItem.SMOOTHING -> ToolSlider(
+            ToolIcons.smoothing, item.label, smoothing, 0f, 1f, 2, axis, onSmoothing,
+        )
+
+        ToolItem.OPACITY -> ToolSlider(
+            ToolIcons.opacity, item.label, opacity, MIN_ALPHA, 1f, 2, axis, onOpacity,
+        )
+
+        ToolItem.FLOW -> ToolSlider(
+            ToolIcons.flow, item.label, flow, MIN_ALPHA, 1f, 2, axis, onFlow,
+        )
+
+        ToolItem.GRAIN -> ToolSlider(
+            ToolIcons.grain, item.label, grain, 0f, 1f, 2, axis, onGrain,
+        )
+
+        // Lit rather than disabled. The tool in the hand is a state worth
+        // seeing from across the room, and a greyed-out Pen says "broken" at a
+        // glance where a lit Pencil says "this one".
+        ToolItem.PEN -> IconToolButton(
+            icon = ToolIcons.pen,
+            label = item.label,
+            onClick = { onPreset(BrushPreset.PEN) },
+            selected = preset == BrushPreset.PEN,
+        )
+
+        ToolItem.PENCIL -> IconToolButton(
+            icon = ToolIcons.pencil,
+            label = item.label,
+            onClick = { onPreset(BrushPreset.PENCIL) },
+            selected = preset == BrushPreset.PENCIL,
+        )
+
+        ToolItem.ERASER -> IconToolButton(
+            icon = ToolIcons.eraser,
+            label = item.label,
+            onClick = onEraser,
+            selected = eraser,
+        )
+
+        ToolItem.UNDO ->
+            IconToolButton(ToolIcons.undo, item.label, onUndo, enabled = canUndo)
+        ToolItem.REDO ->
+            IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
+
+        ToolItem.ZOOM_IN ->
+            IconToolButton(ToolIcons.zoomIn, item.label, { onZoom(ZOOM_STEP) })
+        ToolItem.ZOOM_OUT ->
+            IconToolButton(ToolIcons.zoomOut, item.label, { onZoom(1f / ZOOM_STEP) })
+        ToolItem.FIT -> IconToolButton(ToolIcons.fit, item.label, onFit)
+        ToolItem.CLEAR -> IconToolButton(ToolIcons.trash, item.label, onClear)
+        ToolItem.EXPORT ->
+            IconToolButton(ToolIcons.export, item.label, onExport, enabled = !exporting)
+        ToolItem.STATS ->
+            IconToolButton(ToolIcons.stats, item.label, onStats, selected = stats)
     }
 }
 
@@ -827,8 +839,14 @@ private fun DebugRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
         modifier = Modifier
+            .padding(top = 4.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surface)
+            // Scrolls, because this row has grown a control per work item since
+            // W9 and it is now wider than the tablet. A row that runs off the
+            // screen hides whichever instrument was added last, which is
+            // reliably the one being used.
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 6.dp),
     ) {
         Text("Hz", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
@@ -1188,3 +1206,15 @@ private const val ZOOM_STEP = 1.25f
 
 private const val MIN_SIZE_MAX = 2f
 private const val MAX_SIZE_MAX = 48f
+
+/**
+ * Where the instruments start, measured off the docks rather than guessed.
+ *
+ * The side docks are one bar thick plus their inset, and the top dock is the
+ * same again downward. Deriving it means a change to `Chrome.BAR_THICKNESS`
+ * moves the readout with it instead of leaving it half underneath.
+ */
+private val READOUT_INSET = be.thalos.artiest.ui.Chrome.BAR_THICKNESS +
+    be.thalos.artiest.ui.Chrome.EDGE_INSET * 2
+
+private val READOUT_TOP = READOUT_INSET
