@@ -207,6 +207,40 @@ class Brush {
     }
 
     /**
+     * Whether spacing ignores a dab's aspect ratio.
+     *
+     * Only reaches anything once W9's dabs can be elliptical; for a round dab
+     * the two branches of [spacingFor] agree exactly, which is why adding this
+     * moves no golden.
+     *
+     * **False by default, and the default is the conservative one.** With an
+     * anisotropic dab the two sensible answers are the minor radius and the
+     * equal-area radius. The minor radius is tighter, so it lays more dabs and
+     * cannot leave gaps across the ellipse's narrow direction; the equal-area
+     * radius is orientation-independent, so a pencil rolled through a quarter
+     * turn mid-stroke does not change its dab density. Gaps are a visible
+     * defect and a density change is a subtle one, so the default protects
+     * against the visible one and this flag buys the other behaviour when W10
+     * decides it wants it.
+     */
+    var isotropicSpacing: Boolean = false
+
+    /**
+     * Arc distance to the next dab for an elliptical dab.
+     *
+     * [radiusMinor] governs when [isotropicSpacing] is false, and the
+     * equal-area radius `sqrt(major * minor)` when it is true. For a round dab
+     * the two are the same number, so this is [spacingFor] with extra steps
+     * until W9 makes the radii differ.
+     */
+    fun spacingFor(radiusMajor: Float, radiusMinor: Float): Float {
+        val a = if (radiusMajor > 0f) radiusMajor else 0f
+        val b = if (radiusMinor > 0f) radiusMinor else 0f
+        val r = if (isotropicSpacing) kotlin.math.sqrt(a * b) else if (a < b) a else b
+        return spacingFor(r)
+    }
+
+    /**
      * Arc distance from one dab to the next, for a dab of [radius].
      *
      * Floored at [MIN_SPACING_DOC], and the floor is not a rounding
@@ -219,6 +253,14 @@ class Brush {
      * Half a document pixel is also where extra dabs stop buying anything: two
      * dabs 0.4 px apart land on the same pixel and cost a draw call to
      * composite identically over themselves.
+     *
+     * **This is already recomputed per dab from the dab just laid**, which is
+     * what W3 was scheduled to change. Phase 1 built it that way: the emitter
+     * returns this value and `CatmullRomResampler` sets its `need` from it
+     * after every dab. Measured on the golden corpus, the taper stroke runs
+     * radius 0.773..10.255 with gaps 0.500..2.564 -- exactly `0.25 * radius`,
+     * floored -- so the plan's predicted golden break cannot happen and did
+     * not.
      */
     fun spacingFor(radius: Float): Float {
         val s = spacing * 2f * radius
@@ -238,6 +280,7 @@ class Brush {
         it.antiAlias = antiAlias
         it.onsetMillis = onsetMillis
         it.onsetPressure = onsetPressure
+        it.isotropicSpacing = isotropicSpacing
     }
 
     override fun toString(): String =

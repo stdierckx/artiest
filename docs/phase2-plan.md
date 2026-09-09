@@ -1063,6 +1063,36 @@ size 24 — the predicted new count is *lower*, and if it comes out higher the
 model is wrong and the item stops. Goldens are regenerated once, with the diff
 inspected stroke by stroke and the reasoning recorded in the commit.
 
+**Done, and the prediction was untestable because the change was already
+made.** Phase 1 built the spacing recompute the way W3 specifies: the emitter
+returns `spacingFor(radius)` computed from the dab it has just placed, and
+`CatmullRomResampler` sets its `need` from that return value after every dab.
+Measured across the golden corpus rather than read off the source:
+
+| stroke | dabs | gap | radius |
+|---|---|---|---|
+| straight | 516 | 0.795..0.795 | 3.180..3.180 |
+| taper | 456 | **0.500..2.564** | **0.773..10.255** |
+| onset | 226 | 0.500..0.500 | 0.775..1.775 |
+| flick | 913 | 1.152..1.152 | 4.609..4.609 |
+
+The taper row is the whole answer: the gap is `0.25 * radius` at every dab and
+floored at `MIN_SPACING_DOC` where the radius falls below 2 px, which is exactly
+the specified behaviour. Constant-pressure strokes have constant gaps. **So the
+goldens do not move, and the item's predicted break does not exist** — not
+because the prediction was wrong about the model, but because the model was
+already in force when the prediction was written.
+
+What was genuinely missing is the isotropic option, and it lands here as
+`Brush.isotropicSpacing` with an elliptical `spacingFor(major, minor)` that W9
+will be the first to call. **Default false, and the default is the conservative
+one:** the minor radius lays more dabs and cannot leave gaps across the narrow
+direction of an ellipse, while the equal-area radius is orientation-independent
+so a pencil rolled through a quarter turn keeps its density. A gap is a visible
+defect and a density change is a subtle one, so the default guards the visible
+one. For a round dab both branches agree exactly, which is the test that keeps
+this item golden-neutral.
+
 ### W4–W5 — masks, the cache, and the phase's first real risk
 
 The cache is the item that decides whether this architecture is viable at 230

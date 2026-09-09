@@ -254,4 +254,57 @@ class BrushTest {
         assertEquals(0, a.size.inputCount)
         assertEquals(99f, b.sizeMax)
     }
+
+    // ---- W3: spacing ---------------------------------------------------------
+
+    /**
+     * The item W3 was scheduled to do, verified rather than assumed. Spacing is
+     * a function of the dab just laid, so a heavier dab is followed by a longer
+     * step -- and the golden corpus's taper stroke measures exactly that.
+     */
+    @Test
+    fun `spacing follows the dab just laid`() {
+        val brush = Brush()
+        assertEquals(0.25f * 10.255f, brush.spacingFor(10.255f), 1e-4f)
+        assertEquals(0.25f * 4f, brush.spacingFor(4f), 1e-6f)
+        // and the floor, which is what makes the resampler's walk terminate
+        assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(0.773f))
+        assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(0f))
+    }
+
+    /** A round dab must take the same path either way, or W3 moves a golden. */
+    @Test
+    fun `the isotropic flag cannot change a round dab`() {
+        val brush = Brush()
+        for (r in listOf(0.4f, 1.5f, 4f, 12f)) {
+            brush.isotropicSpacing = false
+            val off = brush.spacingFor(r, r)
+            brush.isotropicSpacing = true
+            assertEquals(off, brush.spacingFor(r, r), "radius $r")
+            assertEquals(brush.spacingFor(r), off, "and both equal the round form")
+        }
+    }
+
+    @Test
+    fun `anisotropic spacing takes the minor radius so the narrow direction has no gaps`() {
+        val brush = Brush()
+        brush.isotropicSpacing = false
+        assertEquals(brush.spacingFor(2f), brush.spacingFor(8f, 2f))
+        assertEquals(brush.spacingFor(2f), brush.spacingFor(2f, 8f), "order must not matter")
+    }
+
+    @Test
+    fun `isotropic spacing takes the equal-area radius so rolling the pen does not change density`() {
+        val brush = Brush()
+        brush.isotropicSpacing = true
+        assertEquals(brush.spacingFor(4f), brush.spacingFor(8f, 2f), 1e-5f)
+        assertEquals(brush.spacingFor(4f), brush.spacingFor(2f, 8f), 1e-5f)
+    }
+
+    @Test
+    fun `a negative radius cannot produce a negative step`() {
+        val brush = Brush()
+        assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(-5f, 3f))
+        assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(-5f))
+    }
 }
