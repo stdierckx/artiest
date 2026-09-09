@@ -36,6 +36,14 @@ data class Placement(val item: ToolItem, val slot: Int) {
  *
  * The type is immutable. Every operation returns a new layout, which is what
  * makes it usable as Compose state and trivial to test.
+ *
+ * **It no longer knows how long it is by default.** It used to carry a
+ * `DEFAULT_SLOTS`, a `DEFAULT` and a `STARTER`, because for a while there was
+ * one bar and those were its answers. There are five bars now and the answers
+ * differ per bar — a column up the side of a tablet is about half the length of
+ * a row across the bottom — so the length belongs to [Dock] and the starting
+ * arrangement belongs to [DockLayout]. What is left here is the algebra, which
+ * is the part that was always general.
  */
 class ToolbarLayout private constructor(
     val slotCount: Int,
@@ -115,64 +123,6 @@ class ToolbarLayout private constructor(
         "ToolbarLayout($slotCount, " + placements.joinToString { "${it.slot}=${it.item.id}" } + ")"
 
     companion object {
-        /**
-         * Twenty 44dp slots is 880dp of bar, against roughly 1100dp of tablet
-         * in landscape. The bar scrolls rather than reflows when it does not
-         * fit — position stays absolute, only the viewport moves.
-         *
-         * It is deliberately longer than [STARTER] needs. A bar with no spare
-         * slots cannot accept the next control that ships, and `ToolbarStore`
-         * only ever widens a saved bar, never shortens it — so headroom here is
-         * what stops a full bar from making a new feature invisible. That is
-         * not hypothetical: it is what happened the day Undo and Redo were
-         * added to a saved bar with sixteen slots and sixteen in use, and again
-         * at W10, when the two brush presets took four slots that twenty did
-         * not have. `ToolbarStore` widens a saved bar to this number, so raising
-         * it is how an existing user gets room for a new control.
-         */
-        const val DEFAULT_SLOTS = 24
-
-        /**
-         * A fresh install's toolbar, and it is **deliberately empty**.
-         *
-         * This is the user's own description of the feature — "we have a empty
-         * toolbar with slots" — and it is honoured rather than softened. It has
-         * a real cost worth naming: a first run cannot draw in colour until the
-         * user has filled a slot, so the feature's discoverability rests
-         * entirely on an empty slot reading as *tap me*. If that turns out to be
-         * wrong on the tablet, the fix is to return [STARTER] here, and it is
-         * one word.
-         */
-        val DEFAULT: ToolbarLayout get() = of(DEFAULT_SLOTS, emptyList())
-
-        /**
-         * A working bar, near enough to what the app shipped with before it was
-         * customisable. Not the default — see [DEFAULT] — but the thing to
-         * return from it if an empty first run turns out to be too austere,
-         * and the fallback a reset would use. `CLEAR` is deliberately absent:
-         * it throws the drawing away and does not ask, so it can be a slot the
-         * user chooses to fill.
-         */
-        val STARTER: ToolbarLayout
-            get() = of(
-                DEFAULT_SLOTS,
-                listOf(
-                    // W10's two tools first: which tool is in the hand is the
-                    // most-used control in a drawing app, and it was not on
-                    // this bar at all until the pencil existed to switch to.
-                    Placement(ToolItem.PEN, 0),
-                    Placement(ToolItem.PENCIL, 2),
-                    Placement(ToolItem.UNDO, 4),
-                    Placement(ToolItem.REDO, 6),
-                    Placement(ToolItem.COLOUR, 8),
-                    Placement(ToolItem.SIZE, 12),
-                    Placement(ToolItem.ZOOM_OUT, 16),
-                    Placement(ToolItem.ZOOM_IN, 17),
-                    Placement(ToolItem.FIT, 18),
-                    Placement(ToolItem.STATS, 20),
-                ),
-            )
-
         /**
          * Build a layout, dropping anything that cannot be represented.
          *

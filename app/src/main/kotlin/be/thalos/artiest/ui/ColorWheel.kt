@@ -23,10 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -125,14 +123,24 @@ fun ColorWheel(
 /**
  * The hue/saturation disc.
  *
- * **Value is applied as a multiply, not as a black scrim over the top.** The
- * two look identical in the middle of the wheel and differ exactly at the rim:
- * the raster's edge is antialiased in its alpha channel, so a hard-edged black
- * circle drawn at the same radius leaves a dark halo one pixel wide, most
- * visible at the low values where it is least wanted. `BlendMode.Modulate`
- * multiplies all four channels, and multiplying by `(v, v, v, 1)` is exactly
- * what value means in HSV — `HsvTest` pins that identity — so the alpha, and
- * with it the soft rim, comes through untouched.
+ * **It is drawn at full value, whatever value is selected**, and the bar
+ * beneath it carries the value on its own. That is a correction, and the bug it
+ * fixes is the first thing anyone would have hit: the app's default ink is
+ * black, black is value zero, and a disc multiplied by zero is a black circle
+ * with an invisible puck in it. The wheel's first impression was a hole.
+ *
+ * The version it replaces multiplied the raster by `(v, v, v, 1)` through
+ * `BlendMode.Modulate`, which is exactly what value means in HSV — `HsvTest`
+ * pins that identity — and which had a real argument behind it: the disc was
+ * then a preview of the ink rather than a chart of hues. The argument is sound
+ * and the result is unusable at the bottom of the range, which is where a
+ * drawing app starts. Every picker that people already know how to use makes
+ * the same trade: the disc is the hue and saturation chart, the bar is the
+ * brightness, and the puck is what says which colour you actually have.
+ *
+ * The alpha channel is why there is still no scrim anywhere in this file. The
+ * raster's edge is antialiased in its alpha, so a hard-edged circle drawn over
+ * it at the same radius leaves a dark halo one pixel wide.
  */
 @Composable
 private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
@@ -157,7 +165,14 @@ private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
                         ColorDisc.sample(
                             dx = (position.x - viewport.width / 2f) / radius,
                             dy = (position.y - viewport.height / 2f) / radius,
-                            value = hsv.value,
+                            // Aiming at green on a wheel whose value is zero
+                            // means green, not black. Without this the disc is a
+                            // dead end from the app's own default ink: every tap
+                            // moves the puck and every tap returns black, and
+                            // the only way out is a bar the user has not looked
+                            // at yet. Black stays one tap away on the palette
+                            // and at the left end of that bar.
+                            value = if (hsv.value <= 0f) 1f else hsv.value,
                             fallbackHue = hsv.hue,
                         )
                     )
@@ -177,10 +192,6 @@ private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
                     ((size.height - side) / 2f).toInt(),
                 ),
                 dstSize = IntSize(side.toInt(), side.toInt()),
-                colorFilter = ColorFilter.tint(
-                    Color(hsv.value, hsv.value, hsv.value, 1f),
-                    BlendMode.Modulate,
-                ),
                 filterQuality = FilterQuality.Medium,
             )
 
