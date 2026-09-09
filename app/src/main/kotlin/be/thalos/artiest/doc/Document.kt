@@ -358,8 +358,8 @@ class Document(
     /** A fresh empty sheet, allocated by the UI thread. See [LayerStack]. */
     fun newLayer(): Layer = layers.newLayer()
 
-    /** The next unused default sheet name. UI thread. */
-    fun suggestLayerName(): String = layers.suggestName()
+    /** The next unused sheet name built on [base]. UI thread. */
+    fun suggestLayerName(base: String = "Layer"): String = layers.suggestName(base)
 
     /** Drop queued commits without applying them. Teardown only. */
     fun abandonCommits() {

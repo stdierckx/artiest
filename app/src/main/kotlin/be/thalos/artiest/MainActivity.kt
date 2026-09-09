@@ -8,7 +8,10 @@ import android.os.Looper
 import android.view.Display
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,6 +86,8 @@ import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
+import be.thalos.artiest.io.ImportResult
+import be.thalos.artiest.io.PictureImporter
 import be.thalos.artiest.io.PngExporter
 import be.thalos.artiest.ui.ToolItem
 import kotlinx.coroutines.launch
@@ -319,6 +324,10 @@ private fun CanvasScreen(
     var polling by remember { mutableStateOf(true) }
     var export by remember { mutableStateOf<ExportResult?>(null) }
     var exporting by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+
+    /** The last import's outcome, as one line, or empty when there has been none. */
+    var importNote by remember { mutableStateOf("") }
     var stats by remember { mutableStateOf(false) }
     var policy by remember { mutableStateOf(RefreshPolicy.HIGHEST) }
     var panelStatus by remember { mutableStateOf("") }
@@ -542,6 +551,41 @@ private fun CanvasScreen(
         surface?.redrawDry()
     }
 
+    /**
+     * The system photo picker.
+     *
+     * `PickVisualMedia` and not `GetContent`, and not a `READ_MEDIA_IMAGES`
+     * permission either: the picker runs in another process, hands back a URI
+     * for the one file the user chose, and needs no permission at all. An app
+     * that asks for the whole gallery in order to open one reference photo is
+     * an app that has asked for more than it needs.
+     */
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) {
+            // The user backed out. Not a failure and not worth a line of
+            // chrome; the note is cleared so a stale one from a previous
+            // attempt does not read as this attempt's answer.
+            importNote = ""
+            return@rememberLauncherForActivityResult
+        }
+        importing = true
+        importNote = "opening the picture..."
+        scope.launch {
+            val name = document.suggestLayerName("Picture")
+            importNote = when (val r = PictureImporter.importInto(context, document, uri, name)) {
+                is ImportResult.Imported -> "imported ${r.width}x${r.height} as \"${r.name}\""
+                is ImportResult.Failed -> "could not import: ${r.reason}"
+            }
+            importing = false
+            // The stack changed, and nothing else is going to ask for the frame
+            // that draws it -- the same reason `onLayerOp` asks for one.
+            surface?.redrawDry()
+            generation++
+        }
+    }
+
     // Hoisted out of the toolbar because the toolbar is now generic: it is
     // handed a renderer and does not know what an export is.
     val doExport: () -> Unit = {
@@ -612,6 +656,19 @@ private fun CanvasScreen(
                 .padding(start = READOUT_INSET, top = READOUT_TOP, end = READOUT_INSET),
         ) {
             ExportStatus(export, exporting)
+            if (importNote.isNotEmpty()) {
+                Text(
+                    text = importNote,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
             if (stats) {
                 Text(
                     text = readout(
@@ -796,6 +853,8 @@ private fun CanvasScreen(
                         }
                     },
                     exporting = exporting,
+                    importing = importing,
+                    onImport = { picker.launch(imageRequest) },
                     canUndo = canUndo,
                     canRedo = canRedo,
                     onUndo = { surface?.undo(); generation++ },
@@ -866,6 +925,8 @@ private fun ToolSlot(
     eraser: Boolean,
     onEraser: () -> Unit,
     exporting: Boolean,
+    importing: Boolean,
+    onImport: () -> Unit,
     canUndo: Boolean,
     canRedo: Boolean,
     onUndo: () -> Unit,
@@ -966,6 +1027,8 @@ private fun ToolSlot(
         ToolItem.CLEAR -> IconToolButton(ToolIcons.trash, item.label, onClear)
         ToolItem.EXPORT ->
             IconToolButton(ToolIcons.export, item.label, onExport, enabled = !exporting)
+        ToolItem.IMPORT ->
+            IconToolButton(ToolIcons.import_, item.label, onImport, enabled = !importing)
         ToolItem.STATS ->
             IconToolButton(ToolIcons.stats, item.label, onStats, selected = stats)
     }
@@ -1404,6 +1467,15 @@ private const val WET_TEST_ALPHA = 0.3f
  * meant; `CanvasTransform.zoomedAbout` clamps the ends.
  */
 private const val ZOOM_STEP = 1.25f
+
+/**
+ * What the photo picker is asked for: pictures, not video.
+ *
+ * A value rather than a call at the button, because building the request is
+ * cheap but doing it inside a lambda that recomposes with the toolbar is a
+ * needless allocation on a path that already has enough of them.
+ */
+private val imageRequest = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
 
 private const val MIN_SIZE_MAX = 2f
 

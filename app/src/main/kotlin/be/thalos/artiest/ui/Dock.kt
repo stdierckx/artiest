@@ -272,8 +272,9 @@ class DockLayout private constructor(private val bars: Map<Dock, ToolbarLayout>)
                         listOf(
                             Placement(ToolItem.UNDO, 0),
                             Placement(ToolItem.REDO, 1),
-                            Placement(ToolItem.EXPORT, 3),
-                            Placement(ToolItem.STATS, 4),
+                            Placement(ToolItem.IMPORT, 3),
+                            Placement(ToolItem.EXPORT, 4),
+                            Placement(ToolItem.STATS, 5),
                         ),
                     ),
                     Dock.RIGHT to ToolbarLayout.of(

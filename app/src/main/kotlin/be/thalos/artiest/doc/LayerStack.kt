@@ -375,12 +375,21 @@ class LayerStack(
      */
     fun newLayer(): Layer = Layer(widthPx, heightPx, enforceOffMainThread)
 
-    /** The next unused default name, so two sheets never read the same. */
-    fun suggestName(): String {
-        var n = entries.size + 1
-        while (entries.any { it.name == "Layer $n" }) n++
-        return "Layer $n"
+    /**
+     * The next unused name built on [base], so two sheets never read the same.
+     *
+     * Names are not identity -- [Entry.id] is -- so a collision is cosmetic
+     * rather than dangerous. It is still worth avoiding: two rows reading
+     * "Picture" in a panel whose whole job is telling sheets apart is a panel
+     * that has stopped working.
+     */
+    fun suggestName(base: String = "Layer"): String {
+        var n = if (base == "Layer") entries.size + 1 else 1
+        while (entries.any { it.name == nameOf(base, n) }) n++
+        return nameOf(base, n)
     }
+
+    private fun nameOf(base: String, n: Int): String = if (n <= 1) base else base + " " + n
 
     private fun publish() {
         val list = ArrayList<LayerInfo>(entries.size)

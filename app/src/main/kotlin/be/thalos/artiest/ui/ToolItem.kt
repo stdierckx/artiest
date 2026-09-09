@@ -184,6 +184,16 @@ enum class ToolItem(
 
     EXPORT("export", "Export PNG", "Export", 1, ToolGroup.FILE),
 
+    /**
+     * A picture from the tablet, brought in as a layer of its own.
+     *
+     * In [ToolGroup.FILE] beside Export and not in DRAW, because it is the same
+     * kind of act: something crosses the boundary between this drawing and the
+     * rest of the device. See `PictureImporter` for why it lands on a new sheet
+     * rather than on the one being worked on.
+     */
+    IMPORT("import", "Import picture", "Import", 1, ToolGroup.FILE),
+
     STATS("stats", "Instruments", "Stats", 1, ToolGroup.DEBUG, ToolKind.TOGGLE),
     ;
 

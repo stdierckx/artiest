@@ -69,6 +69,7 @@ object ToolIcons {
         ToolItem.FIT -> fit
         ToolItem.CLEAR -> trash
         ToolItem.EXPORT -> export
+        ToolItem.IMPORT -> import_
         ToolItem.STATS -> stats
     }
 
@@ -527,6 +528,31 @@ object ToolIcons {
                 lineTo(12f, 15.6f)
                 lineTo(18.4f, 9.2f)
             }
+        }
+    }
+
+    /**
+     * A picture frame with a horizon and a sun, and an arrow going **into** it.
+     *
+     * The mirror of [export], which is the same arrow the other way out of the
+     * same shape. Two buttons that differ only in the direction of an arrow are
+     * a pair the eye learns once; a photograph glyph beside a download glyph is
+     * two unrelated ideas.
+     */
+    val import_: ImageVector by lazy {
+        icon("import") {
+            stroke {
+                rect(3.4f, 5.6f, 20.6f, 18.4f)
+                moveTo(3.4f, 15.0f)
+                lineTo(9.0f, 10.2f)
+                lineTo(14.4f, 15.0f)
+                moveTo(12.0f, 1.2f)
+                lineTo(12.0f, 8.4f)
+                moveTo(9.2f, 5.8f)
+                lineTo(12.0f, 8.6f)
+                lineTo(14.8f, 5.8f)
+            }
+            fill { circle(16.2f, 9.6f, 1.7f) }
         }
     }
 
