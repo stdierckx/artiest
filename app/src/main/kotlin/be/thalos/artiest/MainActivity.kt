@@ -12,9 +12,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -56,6 +58,9 @@ import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
 import be.thalos.artiest.io.PngExporter
+import be.thalos.artiest.ui.SlotToolbar
+import be.thalos.artiest.ui.ToolItem
+import be.thalos.artiest.ui.ToolbarStore
 import kotlinx.coroutines.launch
 
 /**
@@ -231,6 +236,13 @@ private fun CanvasScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // The bar the user built. Loaded once and written on every change: the
+    // changes are rare and a bar that does not survive a force-quit is not a
+    // bar anyone will invest in arranging.
+    val store = remember { ToolbarStore(context) }
+    var toolbar by remember { mutableStateOf(store.load()) }
+    var arranging by remember { mutableStateOf(false) }
+
     // Applied on every change and once when the view arrives, because the view
     // is built by the AndroidView factory after the first composition.
     LaunchedEffect(surface, ink, sizeMax, smoothing) {
@@ -247,6 +259,31 @@ private fun CanvasScreen(
         while (true) {
             kotlinx.coroutines.delay(500)
             if (polling && stats) generation++
+        }
+    }
+
+    // Hoisted out of the toolbar because the toolbar is now generic: it is
+    // handed a renderer and does not know what an export is.
+    val doExport: () -> Unit = {
+        // A redraw first, on this thread, because the export cannot ask for
+        // one - it waits for the commit queue to drain and only the render
+        // thread drains it.
+        //
+        // Stated at its real size: every path that queues a commit already
+        // asks for a render of its own (`commitStroke` calls `commit()`,
+        // `clear` calls `redrawDry`), so on a live surface this is a second
+        // chance and not the first, and measured on the tablet the export's
+        // wait was 0 ms every time. What it covers is a render that was
+        // scheduled and then deferred, and it is a no-op when there is no
+        // surface - which is the only state in which the queue is reliably
+        // non-empty, and also the one in which this button cannot be pressed.
+        surface?.redrawDry()
+        exporting = true
+        export = null
+        scope.launch {
+            export = PngExporter.export(context, document)
+            exporting = false
+            generation++
         }
     }
 
@@ -269,44 +306,40 @@ private fun CanvasScreen(
                 .statusBarsPadding()
                 .padding(12.dp),
         ) {
-            Toolbar(
-                ink = ink,
-                onInk = { ink = it },
-                sizeMax = sizeMax,
-                onSizeMax = { sizeMax = it },
-                smoothing = smoothing,
-                onSmoothing = { smoothing = it },
-                exporting = exporting,
-                stats = stats,
-                onStats = { stats = !stats; generation++ },
-                onClear = { surface?.clear(); generation++ },
-                onFit = { surface?.fitToView(); generation++ },
-                onExport = {
-                    // A redraw first, on this thread, because the export
-                    // cannot ask for one — it waits for the commit queue to
-                    // drain and only the render thread drains it.
-                    //
-                    // Stated at its real size: every path that queues a
-                    // commit already asks for a render of its own
-                    // (`commitStroke` calls `commit()`, `clear` calls
-                    // `redrawDry`), so on a live surface this is a second
-                    // chance and not the first, and measured on the tablet
-                    // the export's wait was 0 ms every time. What it covers
-                    // is a render that was scheduled and then deferred, and
-                    // it is a no-op when there is no surface — which is the
-                    // only state in which the queue is reliably non-empty,
-                    // and also the one in which this button cannot be
-                    // pressed.
-                    surface?.redrawDry()
-                    exporting = true
-                    export = null
-                    scope.launch {
-                        export = PngExporter.export(context, document)
-                        exporting = false
-                        generation++
-                    }
-                },
-            )
+            SlotToolbar(
+                layout = toolbar,
+                arranging = arranging,
+                onArranging = { arranging = it },
+                onLayout = { toolbar = it; store.save(it) },
+            ) { item ->
+                ToolSlot(
+                    item = item,
+                    ink = ink,
+                    onInk = { ink = it },
+                    sizeMax = sizeMax,
+                    onSizeMax = { sizeMax = it },
+                    smoothing = smoothing,
+                    onSmoothing = { smoothing = it },
+                    exporting = exporting,
+                    stats = stats,
+                    onStats = { stats = !stats; generation++ },
+                    onClear = { surface?.clear(); generation++ },
+                    onFit = { surface?.fitToView(); generation++ },
+                    onZoom = { factor ->
+                        val v = surface
+                        if (v != null && v.width > 0) {
+                            // About the middle of the view, not the origin: a
+                            // zoom button that walks the drawing off the screen
+                            // is a zoom button nobody presses twice.
+                            v.requestTransform(
+                                v.transform.zoomedAbout(v.width / 2f, v.height / 2f, factor),
+                            )
+                            generation++
+                        }
+                    },
+                    onExport = doExport,
+                )
+            }
             ExportStatus(export, exporting)
             if (stats) {
                 Text(
@@ -380,8 +413,18 @@ private fun CanvasScreen(
     }
 }
 
+/**
+ * One filled slot, drawn.
+ *
+ * This `when` is the app's half of the toolbar contract: [SlotToolbar] decides
+ * *where* things go and knows nothing about what they are; this decides what a
+ * [ToolItem] looks like and knows nothing about slots. Adding a Phase 2 control
+ * is an entry in [ToolItem] and a branch here, and the compiler names the branch
+ * you forgot because the `when` is exhaustive.
+ */
 @Composable
-private fun Toolbar(
+private fun ToolSlot(
+    item: ToolItem,
     ink: Int,
     onInk: (Int) -> Unit,
     sizeMax: Float,
@@ -393,30 +436,41 @@ private fun Toolbar(
     onStats: () -> Unit,
     onClear: () -> Unit,
     onFit: () -> Unit,
+    onZoom: (Float) -> Unit,
     onExport: () -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            // The bar floats over the canvas, so it needs a ground of its own:
-            // black ink under a black label is a toolbar that disappears
-            // exactly when the drawing gets interesting.
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
-        for (colour in PALETTE) {
-            Swatch(colour, selected = colour == ink, onClick = { onInk(colour) })
+    when (item) {
+        ToolItem.COLOUR -> Row(verticalAlignment = Alignment.CenterVertically) {
+            for (colour in PALETTE) {
+                Swatch(colour, selected = colour == ink, onClick = { onInk(colour) })
+            }
         }
-        Spacer(Modifier.width(14.dp))
-        LabelledSlider("size", sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, onSizeMax)
-        Spacer(Modifier.width(10.dp))
-        LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
-        Spacer(Modifier.width(6.dp))
-        TextButton(onClick = onClear) { Text("Clear") }
-        TextButton(onClick = onFit) { Text("Fit") }
-        TextButton(enabled = !exporting, onClick = onExport) { Text("Export") }
-        TextButton(onClick = onStats) { Text(if (stats) "Stats ▴" else "Stats ▾") }
+
+        ToolItem.SIZE ->
+            LabelledSlider("size", sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, onSizeMax)
+
+        ToolItem.SMOOTHING ->
+            LabelledSlider("smooth", smoothing, 0f, 1f, 2, onSmoothing)
+
+        ToolItem.ZOOM_IN -> SlotButton(item.short) { onZoom(ZOOM_STEP) }
+        ToolItem.ZOOM_OUT -> SlotButton(item.short) { onZoom(1f / ZOOM_STEP) }
+        ToolItem.FIT -> SlotButton(item.short, onClick = onFit)
+        ToolItem.CLEAR -> SlotButton(item.short, onClick = onClear)
+        ToolItem.EXPORT -> SlotButton(item.short, enabled = !exporting, onClick = onExport)
+        ToolItem.STATS -> SlotButton(if (stats) "Stats \u25b4" else "Stats \u25be", onClick = onStats)
+    }
+}
+
+/** A button sized to its slot rather than to its label. */
+@Composable
+private fun SlotButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 2.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(label, fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -455,13 +509,17 @@ private fun LabelledSlider(
     places: Int,
     onChange: (Float) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("$label ${r(value, places)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+    ) {
+        Text("$label ${r(value, places)}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         Slider(
             value = value,
             onValueChange = onChange,
             valueRange = from..to,
-            modifier = Modifier.width(120.dp).padding(start = 6.dp),
+            // Weight, not a fixed width: the slot decides how wide this is.
+            modifier = Modifier.weight(1f).padding(start = 4.dp),
         )
     }
 }
@@ -797,6 +855,13 @@ private const val DEFAULT_SIZE_MAX = 24f
 
 /** `RoundPen.stabilization`'s default. The plan's number, on the plan's slider. */
 private const val DEFAULT_SMOOTHING = 0.15f
+
+/**
+ * One press of the zoom buttons. A quarter is large enough that a press is
+ * visibly worth making and small enough that three of them land somewhere you
+ * meant; `CanvasTransform.zoomedAbout` clamps the ends.
+ */
+private const val ZOOM_STEP = 1.25f
 
 private const val MIN_SIZE_MAX = 2f
 private const val MAX_SIZE_MAX = 48f

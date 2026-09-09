@@ -1,0 +1,27 @@
+artiest
+Copyright 2026 Stephane Dierckx
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+--------------------------------------------------------------------------
+
+Two notes on what that licence covers, because a software licence over a
+repository that also contains a drawing is worth being explicit about.
+
+1. docs/reference/graphite-target.png is the author's own pencil sketch,
+   included as a measurement target: the brush engine is judged against its
+   alpha distribution, not against an opinion. It is published with the
+   author's consent under the same Apache-2.0 terms as the code. It is
+   reference material, not a logo or a trade mark.
+
+2. No third-party source, assets or brush data have been copied into this
+   repository. Where the design was informed by other drawing programs --
+   Krita and GIMP (GPL-3.0), MyPaint (GPL-2.0), and the Android graphics
+   stack -- the technique was learned from documentation and published
+   architecture descriptions and reimplemented here. docs/phase2-plan.md
+   records which idea came from where, and why each was taken, adapted or
+   skipped. See "Prior art, and the rule that governs it".
+
+Third-party dependencies are declared in gradle/libs.versions.toml and are
+retrieved at build time; none is vendored here. The AndroidX libraries this
+project builds against are themselves Apache-2.0.

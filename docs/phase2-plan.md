@@ -339,10 +339,15 @@ What that changes:
   code** — the prior-art section was written from architectural knowledge and the
   plan it produced is complete. Trading a permanent constraint for something we
   have already worked around is a bad trade.
-- **So: keep read-and-reimplement, and pick a permissive licence.** MIT or
-  Apache-2.0 for artiest itself. It matches "everyone can enjoy it", keeps every
-  future option open, and costs nothing we intended to use. **This is a
-  recommendation, not a decision** — see the open questions.
+- **So: keep read-and-reimplement, and pick a permissive licence.** ~~MIT or
+  Apache-2.0 for artiest itself.~~ **Decided 2026-09-09: Apache-2.0.** See
+  `LICENSE` and `NOTICE`. The deciding argument over MIT was not freedom — they
+  are equivalent there — but that this is a *stylus and rasterisation* project,
+  and those are areas with live patents. Apache-2.0 carries an express patent
+  grant from every contributor and terminates it for anyone who sues over the
+  work; MIT is silent on patents, which means a contributor's patent claim is
+  simply an open question. It also matches every dependency the project has, so
+  compatibility never has to be thought about again.
 
 Every dependency was already clean and stays clean: Kotlin, AndroidX and
 `androidx.graphics:graphics-core` are Apache-2.0.
@@ -563,6 +568,7 @@ it is the direct consequence of the 36 ms finding.
 | 13 | Prediction, re-tested — only now that the wet stroke is re-renderable | both | Med | 6 | 0.5 |
 | 14 | **GATED.** GL engine, entered only on a measurement from 5, 6 or 8 that names what it fixes | `:app` | **High** | 5, 6, 8 | 3+ |
 | 15 | Feel pass, re-film, reconcile `analysis.html` and this plan against what was measured | device, docs | Low | 10 | 1 |
+| C | **Unplanned, done 2026-09-09.** Customisable toolbar: slot model, chooser, persistence. See below | `:app` | Low | — | 0.5 |
 
 **≈18.5 days if W14 does not fire, plus 3 or more if it does.** Same caveat
 Phase 1's estimate earned: the work happens in sessions, not days, and the items
@@ -576,6 +582,73 @@ strongest lesson is that a measurement harness with no review pass produces
 confident wrong answers, and run C proved the film tool is not yet trustworthy.
 **Do not cut W6, W7 or W8** — between them they are the phase, and the
 reference measurement says W6 and W7 are the larger half of it.
+
+### Wc — the customisable toolbar, which was not in this plan
+
+Added to the record because it happened, not because it was foreseen. The
+honest account: the camera was two hours away, W0's remaining work needs a film,
+and asked what else there was the user answered with a design — *"The vision is
+complete customizability: we have a empty toolbar with slots. If the user clicks
+an empty slot, he is presented a menu, from which he can choose a button or
+component."*
+
+**Why it was worth doing before the brush engine rather than after.** Not
+because the toolbar is urgent — there are seven controls to arrange and the
+feature only compounds as there are more. Because of what it does to *those*
+controls. Phase 1's toolbar was a hand-built `Row`, so W7's opacity and flow
+sliders and W10's preset picker each meant editing a layout and re-deciding
+where everything sits. They now mean one entry in a catalogue and one branch in
+an exhaustive `when` that the compiler checks. The order matters: doing this
+after W7 and W10 would have meant building the same bar twice.
+
+**What was built.** `ToolItem` is the catalogue; `ToolbarLayout` is a fixed row
+of 16 slots with items one to four slots wide, immutable, every operation
+returning a new layout; `ToolbarCodec` puts it in one line of
+`SharedPreferences`. Three decisions in there are worth keeping:
+
+- **Fixed slots, not a row that grows.** A bar that reflows when you add
+  something puts Export somewhere new every week, and the one thing a toolbar is
+  for is that your hand knows where the button is. The bar scrolls when it is
+  longer than the screen; positions stay absolute.
+- **The chooser greys out what will not fit rather than rearranging to make it
+  fit.** Shoving the neighbours along, or silently placing the item elsewhere,
+  both move something the user did not touch.
+- **Decoding never throws.** This string is written by one build and read by the
+  next, so an unknown id, a stale slot count and an overlapping pair are all
+  normal, and none of them may be a crash into a blank screen. Unreadable
+  becomes the default; unusable *entries* are dropped and the rest survives.
+
+**Twenty-three JVM tests, and that is the point of the split.** Everything about
+where an item may go is decidable without a device and is tested; only how it
+looks is not. It was written and proved correct while the tablet was
+unreachable, and needed one build to confirm on hardware.
+
+**One concession to reality, stated rather than hidden.** The design says
+long-press a filled slot to change it. A `Slider` consumes presses, so a
+long-press over the size slider never reaches the toolbar, and a bar where the
+gesture works on buttons and silently fails on sliders is worse than one where
+it never works. So filled slots are edited through an **Arrange** toggle at the
+end of the bar, and empty slots keep the direct tap the design asks for, because
+they have nothing inside competing for it.
+
+**The default bar is empty**, as asked. That has a real cost — a fresh install
+cannot draw in colour until a slot is filled, so the whole feature rests on an
+empty slot reading as *tap me*. `ToolbarLayout.STARTER` is the populated bar
+kept beside it, and switching the default to it is one word.
+
+**What is deliberately absent.** The user's target catalogue is undo, redo,
+eraser, pen, pencil, marker, layers, colour wheel, document history. None of
+them is in the chooser, because a chooser full of buttons that do nothing is
+worse than a short one: the user cannot tell a control they have not understood
+from one that was never wired. Each is recorded in `ToolItem`'s KDoc against the
+work item that unlocks it — W10 for presets, W11 for the eraser, Phase 3 for
+undo and layers, Phase 4 for the colour wheel — so it is visible that they were
+scoped, not forgotten. Zoom in and zoom out shipped, because
+`CanvasTransform.zoomedAbout` already existed and they are two lines.
+
+**Marker is a question, not a backlog item.** The plan deleted it when the
+reference turned out to be one pencil at two tilts. It comes back only if it is
+wanted for its own sake, and that is the user's call rather than a gap to fill.
 
 ### W0 — the before-picture, and why it is first
 
@@ -837,7 +910,7 @@ be corrected.
 | Texture read doubles per-dab cost | W8: cost per dab jumps against W5's baseline | Bake grain into the cached mask per canvas cell |
 | "Graphite" is not reachable on this path | W10: the user's verdict | **Stop condition — fall back to Ink for v1** |
 | The film tool still does not transfer | W0: cannot reproduce 45.2 ms | Fix the tool before building anything |
-| Public repo vs GPL reference material | Open question 1, still unanswered | Read-and-reimplement stands until answered |
+| Public repo vs GPL reference material | ~~Open question 1~~ **Closed:** Apache-2.0, so GPL source stays unreadable | Read-and-reimplement is now permanent, not provisional |
 
 ## Stop conditions
 
@@ -873,9 +946,10 @@ and it was the most valuable thing that happened.
 1. ~~**Does the repo stay public?**~~ **Answered 2026-09-09, twice.** Briefly
    "private and sold for EUR 1"; then reconsidered to **public and free**, which
    is where it now stands. See the licence rule for what each reversal changed.
-   What is still open is the narrower question it exposed: **which licence?**
-   Recommendation is MIT or Apache-2.0. GPL-3.0 is available and not worth its
-   permanence.
+   The narrower question it exposed — **which licence?** — is **answered
+   2026-09-09: Apache-2.0**, in `LICENSE`, with `NOTICE` covering the reference
+   artwork and the read-and-reimplement rule. GPL-3.0 was available and was not
+   worth its permanence.
 2. ~~**What is the graphite reference?**~~ **Answered 2026-09-09:**
    `docs/reference/graphite-target.png`. Measuring it reordered W6-W8; see
    **The bar, measured**.

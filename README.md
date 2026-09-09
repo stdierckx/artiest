@@ -9,7 +9,19 @@ else is designed around.
 
 Full architecture and the phased build plan: [`docs/analysis.html`](docs/analysis.html).
 
-## Status: Phase 0 — hardware spike
+## Status
+
+| Phase | State |
+|---|---|
+| 0 — hardware spike (`:spike`) | Complete. The go/no-go gate passed; the module is frozen as the A/B control. |
+| 1 — the app's skeleton (`:engine` + `:app`) | Complete, 16 of 17 items. Ink, input, transform, export, and the measurements everything else is argued from. |
+| 2 — the brush engine | In progress. See [`docs/phase2-plan.md`](docs/phase2-plan.md). |
+
+The rest of this file still describes Phase 0's harness and how to build it,
+which is accurate for `:spike` and is what a fresh machine needs first. The app
+itself is `./gradlew :app:installDebug`.
+
+### Phase 0 — hardware spike
 
 Not the app. A measuring instrument, in `:spike`, that answers the questions
 the rest of the plan rests on **before** anything is built on top of them:
@@ -229,3 +241,20 @@ artiest/
 
 The multi-module layout in the analysis starts at Phase 1. Phase 0 is
 deliberately one module, because it gets deleted.
+
+## Licence
+
+[Apache-2.0](LICENSE). Public and free — the point is that people can use it,
+not that anyone is paid for it.
+
+Apache rather than MIT for one reason worth stating: this is a stylus and
+rasterisation project, and those are areas with live patents. Apache-2.0 carries
+an express patent grant from every contributor and withdraws it from anyone who
+sues over the work. MIT says nothing about patents at all. Every dependency here
+is already Apache-2.0, so matching it also means compatibility never has to be
+thought about again.
+
+No third-party source or assets are vendored. Where the design was informed by
+other drawing programs, the technique was learned from documentation and
+reimplemented; [`NOTICE`](NOTICE) says so and
+[`docs/phase2-plan.md`](docs/phase2-plan.md) records which idea came from where.
