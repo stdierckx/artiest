@@ -152,11 +152,13 @@ class ToolbarLayoutTest {
     fun `shrinking the bar drops what no longer reaches and keeps the rest`() {
         val bar = ToolbarLayout.STARTER.resized(8)
         assertEquals(8, bar.slotCount)
-        assertEquals(ToolItem.UNDO, bar.covering(0)?.item)
-        assertEquals(ToolItem.COLOUR, bar.covering(4)?.item)
-        // The size slider starts at 8 and needs four, so it no longer reaches
-        // and is gone rather than clipped: half a slider is not a control.
-        assertEquals(3, bar.placements.size)
+        assertEquals(ToolItem.PEN, bar.covering(0)?.item)
+        assertEquals(ToolItem.PENCIL, bar.covering(2)?.item)
+        assertEquals(ToolItem.UNDO, bar.covering(4)?.item)
+        assertEquals(ToolItem.REDO, bar.covering(6)?.item)
+        // The colour swatches start at 8 and need four, so they no longer
+        // reach and are gone rather than clipped: half a control is not one.
+        assertEquals(4, bar.placements.size)
     }
 
     @Test
@@ -176,8 +178,8 @@ class ToolbarLayoutTest {
         // A hand-written constant is exactly the kind of thing that quietly
         // loses an entry to an off-by-one width, and `of` drops rather than
         // complains — so the count is asserted here or nowhere.
-        assertEquals(8, ToolbarLayout.STARTER.placements.size)
-        assertEquals(17, ToolbarLayout.STARTER.usedSlots)
+        assertEquals(10, ToolbarLayout.STARTER.placements.size)
+        assertEquals(21, ToolbarLayout.STARTER.usedSlots)
         assertEquals(ToolbarLayout.DEFAULT_SLOTS, ToolbarLayout.STARTER.slotCount)
     }
 }

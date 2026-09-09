@@ -57,6 +57,7 @@ import be.thalos.artiest.canvas.InputStats
 import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.doc.UndoHistory
 import be.thalos.artiest.engine.input.CancelCause
 import be.thalos.artiest.input.clockSkewNanos
@@ -301,6 +302,9 @@ private fun CanvasScreen(
     /** W8. Zero is the pen, untextured, which is what Phase 1 shipped. */
     var grain by remember { mutableFloatStateOf(0f) }
 
+    /** W10. Which of the two tools is in the hand. */
+    var preset by remember { mutableStateOf(BrushPreset.PEN) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -419,6 +423,24 @@ private fun CanvasScreen(
                     onFlow = { flow = it },
                     grain = grain,
                     onGrain = { grain = it },
+                    preset = preset,
+                    onPreset = { p ->
+                        // The preset writes the whole brush, then the sliders
+                        // are pulled back from it. Without that second half the
+                        // LaunchedEffect above would push the *old* slider
+                        // values straight back over the preset it just set,
+                        // and switching tools would half work.
+                        surface?.let { v ->
+                            p.applyTo(v.pen)
+                            preset = p
+                            sizeMax = v.pen.sizeMax
+                            smoothing = v.pen.stabilization
+                            opacity = v.pen.opacity
+                            flow = v.pen.flow
+                            grain = v.pen.grain.strength
+                            generation++
+                        }
+                    },
                     exporting = exporting,
                     canUndo = canUndo,
                     canRedo = canRedo,
@@ -562,6 +584,8 @@ private fun ToolSlot(
     onFlow: (Float) -> Unit,
     grain: Float,
     onGrain: (Float) -> Unit,
+    preset: BrushPreset,
+    onPreset: (BrushPreset) -> Unit,
     exporting: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -595,6 +619,14 @@ private fun ToolSlot(
 
         ToolItem.GRAIN ->
             LabelledSlider("grain", grain, 0f, 1f, 2, onGrain)
+
+        ToolItem.PEN -> SlotButton(item.short, enabled = preset != BrushPreset.PEN) {
+            onPreset(BrushPreset.PEN)
+        }
+
+        ToolItem.PENCIL -> SlotButton(item.short, enabled = preset != BrushPreset.PENCIL) {
+            onPreset(BrushPreset.PENCIL)
+        }
 
         ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
         ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
@@ -877,6 +909,9 @@ private fun readout(
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
+        "brush    ${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
+        "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +
+        "shaped ${surface.pen.hasShapeDynamics}\n" +
         "grain    ${r(surface.pen.grain.strength, 2)} strength   " +
         "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
         "${surface.grainBuilds} built\n" +

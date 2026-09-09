@@ -88,6 +88,14 @@ enum class ToolItem(
      */
     GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW),
 
+    /**
+     * W10's two tools. The user's original catalogue asked for "pen, marker,
+     * pencil"; the marker is deliberately absent — see [BrushPreset] for why
+     * one tilted pencil does what a second tool was invented to do.
+     */
+    PEN("pen", "Pen", "Pen", 2, ToolGroup.DRAW),
+    PENCIL("pencil", "Pencil", "Pencil", 2, ToolGroup.DRAW),
+
     ZOOM_IN("zoom_in", "Zoom in", "+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "\u2212", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

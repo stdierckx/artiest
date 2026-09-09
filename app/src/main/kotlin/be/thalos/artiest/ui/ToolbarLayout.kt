@@ -125,9 +125,12 @@ class ToolbarLayout private constructor(
          * only ever widens a saved bar, never shortens it — so headroom here is
          * what stops a full bar from making a new feature invisible. That is
          * not hypothetical: it is what happened the day Undo and Redo were
-         * added to a saved bar with sixteen slots and sixteen in use.
+         * added to a saved bar with sixteen slots and sixteen in use, and again
+         * at W10, when the two brush presets took four slots that twenty did
+         * not have. `ToolbarStore` widens a saved bar to this number, so raising
+         * it is how an existing user gets room for a new control.
          */
-        const val DEFAULT_SLOTS = 20
+        const val DEFAULT_SLOTS = 24
 
         /**
          * A fresh install's toolbar, and it is **deliberately empty**.
@@ -154,14 +157,19 @@ class ToolbarLayout private constructor(
             get() = of(
                 DEFAULT_SLOTS,
                 listOf(
-                    Placement(ToolItem.UNDO, 0),
-                    Placement(ToolItem.REDO, 2),
-                    Placement(ToolItem.COLOUR, 4),
-                    Placement(ToolItem.SIZE, 8),
-                    Placement(ToolItem.ZOOM_OUT, 12),
-                    Placement(ToolItem.ZOOM_IN, 13),
-                    Placement(ToolItem.FIT, 14),
-                    Placement(ToolItem.STATS, 15),
+                    // W10's two tools first: which tool is in the hand is the
+                    // most-used control in a drawing app, and it was not on
+                    // this bar at all until the pencil existed to switch to.
+                    Placement(ToolItem.PEN, 0),
+                    Placement(ToolItem.PENCIL, 2),
+                    Placement(ToolItem.UNDO, 4),
+                    Placement(ToolItem.REDO, 6),
+                    Placement(ToolItem.COLOUR, 8),
+                    Placement(ToolItem.SIZE, 12),
+                    Placement(ToolItem.ZOOM_OUT, 16),
+                    Placement(ToolItem.ZOOM_IN, 17),
+                    Placement(ToolItem.FIT, 18),
+                    Placement(ToolItem.STATS, 20),
                 ),
             )
 

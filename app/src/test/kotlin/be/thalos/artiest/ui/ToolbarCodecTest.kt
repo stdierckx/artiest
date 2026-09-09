@@ -19,7 +19,7 @@ class ToolbarCodecTest {
     fun `a layout survives the round trip`() {
         val there = ToolbarCodec.encode(ToolbarLayout.STARTER)
         assertEquals(
-            "v1|20|0=undo,2=redo,4=colour,8=size,12=zoom_out,13=zoom_in,14=fit,15=stats",
+            "v1|24|0=pen,2=pencil,4=undo,6=redo,8=colour,12=size,16=zoom_out,17=zoom_in,18=fit,20=stats",
             there,
         )
         assertEquals(ToolbarLayout.STARTER, ToolbarCodec.decode(there))
@@ -28,7 +28,7 @@ class ToolbarCodecTest {
     @Test
     fun `an empty bar survives the round trip`() {
         val there = ToolbarCodec.encode(ToolbarLayout.DEFAULT)
-        assertEquals("v1|20|", there)
+        assertEquals("v1|24|", there)
         assertEquals(ToolbarLayout.DEFAULT, ToolbarCodec.decode(there))
     }
 
