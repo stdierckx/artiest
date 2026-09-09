@@ -145,6 +145,50 @@ class Brush {
      */
     var grain: GrainSpec = GrainSpec()
 
+    /**
+     * The dab's minor axis over its major. W9.
+     *
+     * Both ends are 1 by default and no sensor is attached, so every dab the
+     * pen lays is a circle and the dab goldens do not move. The pencil sets
+     * `min = 1, max = 0.25` and drives it from [Sensor.TILT]: held upright the
+     * nib is round, laid over it flattens into the elongated contact patch a
+     * real pencil makes. The range is inverted on purpose — [CurveOption]
+     * interpolates either way, and "more of this sensor means less of this
+     * value" is a real brush rather than a special case.
+     */
+    val aspect: CurveOption = CurveOption(1f, 1f)
+
+    /**
+     * The dab's major-axis angle, in radians. W9.
+     *
+     * Driven from [Sensor.ORIENTATION] for the pencil, whose reading is
+     * `(orientation + PI) / 2PI`, so a range of `0..PI` maps a full turn of the
+     * pen onto the ellipse's whole symmetry period — an ellipse at θ and θ+PI
+     * being the same shape. Zero-width by default, so the pen's dabs have a
+     * rotation of exactly 0.
+     */
+    val rotation: CurveOption = CurveOption(0f, 0f)
+
+    /**
+     * How far a dab may be thrown off the path, in document pixels. W9.
+     *
+     * The direction is random per dab; this is only the distance. Scatter is
+     * what stops a hatching stroke reading as a ruled line — real graphite
+     * skips sideways off the tooth of the paper — and it is the one shape
+     * parameter that can make a stroke *wider* than its nib.
+     */
+    val scatter: CurveOption = CurveOption(0f, 0f)
+
+    /**
+     * Per-dab size variation, as a fraction of the dab's own size. W9.
+     *
+     * 0.3 means each dab is between 70% and 100% of the size the curve asked
+     * for. One-sided downward rather than symmetric, because a jitter that can
+     * *grow* a dab makes the stroke's bounds unpredictable, and the bounds are
+     * what undo snapshots.
+     */
+    val sizeJitter: CurveOption = CurveOption(0f, 0f)
+
     /** Passed to `Stabilizer` at `StrokeBuilder` construction. */
     var stabilization: Float = 0.15f
 
@@ -315,13 +359,32 @@ class Brush {
         it.onsetPressure = onsetPressure
         it.isotropicSpacing = isotropicSpacing
         it.grain = grain
+        copyOption(aspect, it.aspect)
+        copyOption(rotation, it.rotation)
+        copyOption(scatter, it.scatter)
+        copyOption(sizeJitter, it.sizeJitter)
     }
+
+    /** Whether any W9 shape dynamic is switched on. */
+    val hasShapeDynamics: Boolean
+        get() = aspect.inputCount > 0 || rotation.inputCount > 0 ||
+            scatter.inputCount > 0 || sizeJitter.inputCount > 0 ||
+            aspect.min != 1f || aspect.max != 1f ||
+            scatter.max != 0f || sizeJitter.max != 0f
 
     override fun toString(): String =
         "Brush(size=$sizeMin..$sizeMax, spacing=$spacing, curve=$sizeCurve, " +
             "onset=${onsetMillis}ms@$onsetPressure, stab=$stabilization)"
 
     companion object {
+
+        private fun copyOption(from: CurveOption, to: CurveOption) {
+            to.min = from.min
+            to.max = from.max
+            to.combine = from.combine
+            to.clearInputs()
+            for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
+        }
 
         /** See [spacingFor]. Document pixels. */
         const val MIN_SPACING_DOC: Float = 0.5f

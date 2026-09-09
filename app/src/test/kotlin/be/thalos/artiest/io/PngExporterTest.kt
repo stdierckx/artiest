@@ -391,7 +391,7 @@ class PngExporterTest {
     // --- helpers -------------------------------------------------------------
 
     private fun oneDab(): Stroke = Stroke.copyOf(
-        dabs = floatArrayOf(20f, 12f, 6f),
+        dabs = floatArrayOf(20f, 12f, 6f, 1f, 0f),
         dabCount = 1,
         colorArgb = Color.BLACK,
         antiAlias = true,

@@ -1,6 +1,12 @@
 package be.thalos.artiest.engine.ink
 
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.brush.DabContext
+import be.thalos.artiest.engine.brush.TiltFilter
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.Stabilizer
 
@@ -64,7 +70,23 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
     private val accumulator = MutableBounds()
 
-    /** x, y, radius triples, as `Stroke` lays them out. See [Stroke.STRIDE]. */
+    /** W9's tilt and orientation, low-passed. See [TiltFilter]. */
+    private val tilt = TiltFilter()
+
+    /** Reused per dab; nothing retains it. See [DabContext]. */
+    private val context = DabContext()
+
+    private var randomState: Int = 1
+    private var strokeSeed: Int = 0
+    private var strokeRandom: Float = 0f
+    private var lastSpeed: Float = 0f
+    private var lastDirection: Float = 0f
+    private var lastSampleNanos: Long = 0L
+    private var lastTiltNanos: Long = 0L
+    private var lastSampleX: Float = Float.NaN
+    private var lastSampleY: Float = Float.NaN
+
+    /** x, y, radius, aspect, rotation, as `Stroke` lays them out. See [Stroke.STRIDE]. */
     private var dabs = FloatArray(INITIAL_DABS * Stroke.STRIDE)
 
     /** How many dabs the stroke in flight has emitted so far. */
@@ -96,6 +118,18 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
             stabilizer = Stabilizer(pen.stabilization)
         }
         stabilizer.reset()
+        tilt.reset()
+        // Seeded from the stroke counter, so two strokes differ but a replay of
+        // the same stroke does not.
+        strokeSeed++
+        randomState = 0x9E3779B9.toInt() * strokeSeed + 0x85EBCA6B.toInt()
+        strokeRandom = nextRandom()
+        lastSpeed = 0f
+        lastDirection = 0f
+        lastSampleNanos = 0L
+        lastTiltNanos = 0L
+        lastSampleX = Float.NaN
+        lastSampleY = Float.NaN
         resampler.begin()
         accumulator.reset()
         dabCount = 0
@@ -144,7 +178,32 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     val smoothingStrength: Float get() = stabilizer.strength
 
     fun add(sample: PenSample) {
+        addTilt(sample.tilt, sample.orientation, sample.eventTimeNanos)
         add(sample.x, sample.y, sample.pressure, sample.eventTimeNanos)
+    }
+
+    /**
+     * Feed the tilt half of a sample, which the by-parts [add] cannot carry.
+     *
+     * Separate because the app converts coordinates in place and hands them
+     * over as floats — see the other [add]'s note — while tilt needs no
+     * conversion at all: it is an angle of the pen against the glass and has
+     * nothing to do with where the document is. Callers that never tilt
+     * anything simply do not call this, and every shape dynamic then reads a
+     * filter that was never started, which is a tilt of zero: upright.
+     *
+     * **Fed to the filter here rather than interpolated along the spline.**
+     * Tilt is low-passed with a 40 ms time constant against samples 3 ms apart,
+     * so it barely moves within one segment, and widening the resampler to
+     * interpolate a value that changes by a thousandth of a radian between
+     * knots would cost two more arrays on the hottest path in the engine to buy
+     * nothing measurable.
+     */
+    fun addTilt(tiltRad: Float, orientationRad: Float, eventTimeNanos: Long) {
+        val dtMillis =
+            if (lastTiltNanos == 0L) 0f else (eventTimeNanos - lastTiltNanos) / 1_000_000f
+        lastTiltNanos = eventTimeNanos
+        tilt.update(tiltRad, orientationRad, dtMillis)
     }
 
     /**
@@ -166,6 +225,7 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         require(xDoc.isFinite() && yDoc.isFinite()) {
             "sample $sampleCount was ($xDoc, $yDoc)"
         }
+        updateTravel(xDoc, yDoc, eventTimeNanos)
         require(pressure.isFinite()) { "sample $sampleCount pressure was $pressure" }
         if (sampleCount == 0) downTimeNanos = eventTimeNanos
         sampleCount++
@@ -223,6 +283,12 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     /** Dab [i]'s painted radius. */
     fun radius(i: Int): Float = dabs[i * Stroke.STRIDE + 2]
 
+    /** Dab [i]'s minor over major. See `Stroke.aspect`. */
+    fun aspect(i: Int): Float = dabs[i * Stroke.STRIDE + 3]
+
+    /** Dab [i]'s major-axis angle. See `Stroke.rotation`. */
+    fun rotation(i: Int): Float = dabs[i * Stroke.STRIDE + 4]
+
     /**
      * The stroke's document-space extent so far, for the wet pass's dirty
      * rectangle. Allocates; call it once per frame, not once per dab.
@@ -238,15 +304,95 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
      * the stale-rim bug cannot be written here.
      */
     override fun emit(x: Float, y: Float, pressure: Float, elapsedMillis: Float): Float {
-        val radius = pen.sizeFor(pressure, elapsedMillis) * 0.5f
+        var radius = pen.sizeFor(pressure, elapsedMillis) * 0.5f
+        var px = x
+        var py = y
+        var aspect = 1f
+        var rotation = 0f
+
+        // W9. Skipped entirely for a brush with no shape dynamics, which is
+        // every brush Phase 1 had: filling a context and evaluating four
+        // options costs more than the pen's whole dab, and the pen's answers
+        // would all be the constants above.
+        if (pen.hasShapeDynamics) {
+            val c = context
+            c.pressure = pressure
+            c.elapsedMillis = elapsedMillis
+            c.tiltRad = tilt.tiltRad
+            c.orientationRad = tilt.orientationRad
+            c.speedDocPxPerMs = lastSpeed
+            c.directionRad = lastDirection
+            c.randomDab = nextRandom()
+            c.randomStroke = strokeRandom
+            aspect = pen.aspect.valueFor(c).coerceIn(ASPECT_MIN, 1f)
+            rotation = pen.rotation.valueFor(c)
+            val jitter = pen.sizeJitter.valueFor(c)
+            if (jitter > 0f) radius *= 1f - jitter * nextRandom()
+            val throwPx = pen.scatter.valueFor(c)
+            if (throwPx > 0f) {
+                val a = nextRandom() * TWO_PI
+                px += throwPx * cos(a)
+                py += throwPx * sin(a)
+            }
+        }
+
         ensureCapacity()
         val o = dabCount * Stroke.STRIDE
-        dabs[o] = x
-        dabs[o + 1] = y
+        dabs[o] = px
+        dabs[o + 1] = py
         dabs[o + 2] = radius
+        dabs[o + 3] = aspect
+        dabs[o + 4] = rotation
         dabCount++
-        accumulator.add(x, y, radius)
-        return pen.spacingFor(radius)
+        // The bounds take the *major* radius whatever the aspect, because an
+        // ellipse fits inside the circle of its major axis at every rotation.
+        // Using the minor axis would leave the undo snapshot short of the ink
+        // wherever the dab was turned across the stroke.
+        accumulator.add(px, py, radius)
+        return pen.spacingFor(radius, radius * aspect)
+    }
+
+    /**
+     * A deterministic 0..1 for scatter and jitter.
+     *
+     * Its own generator rather than `Math.random`, seeded per stroke, because
+     * the dab goldens have to be reproducible: a stroke replayed from the same
+     * samples must produce the same dabs, and a shared global generator makes
+     * that depend on what else in the process drew first. xorshift because it
+     * is four operations and this runs twice a dab.
+     */
+    /**
+     * Speed and heading, from consecutive raw samples.
+     *
+     * Raw rather than smoothed on purpose: [Sensor.SPEED] is asking how fast
+     * the hand is moving, and the stabilizer's output is a lagged version of
+     * that which would make a speed-driven brush respond late to exactly the
+     * flicks it is meant to catch.
+     *
+     * A zero or backwards time step holds the previous reading rather than
+     * dividing by it. Samples within one `MotionEvent` batch can share a
+     * timestamp, which `MotionEvents` documents for a related reason.
+     */
+    private fun updateTravel(x: Float, y: Float, eventTimeNanos: Long) {
+        if (lastSampleX.isFinite()) {
+            val dx = x - lastSampleX
+            val dy = y - lastSampleY
+            val dtMillis = (eventTimeNanos - lastSampleNanos) / 1_000_000f
+            if (dtMillis > 0f) lastSpeed = hypot(dx, dy) / dtMillis
+            if (dx != 0f || dy != 0f) lastDirection = atan2(dy, dx)
+        }
+        lastSampleX = x
+        lastSampleY = y
+        lastSampleNanos = eventTimeNanos
+    }
+
+    private fun nextRandom(): Float {
+        var v = randomState
+        v = v xor (v shl 13)
+        v = v xor (v ushr 17)
+        v = v xor (v shl 5)
+        randomState = v
+        return (v ushr 8 and 0xFFFFFF).toFloat() / 0xFFFFFF.toFloat()
     }
 
     /**
@@ -276,6 +422,11 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         "StrokeBuilder(open=$open, samples=$sampleCount, dabs=$dabCount, $pen)"
 
     companion object {
+
+        /** The flattest a dab may get. Below this an ellipse is a line and the mask is empty. */
+        const val ASPECT_MIN = 0.05f
+
+        private const val TWO_PI = (2.0 * Math.PI).toFloat()
 
         /**
          * 256 dabs, 3 KB. A 24 px nib spaces at 3 px, so this covers a 768 px

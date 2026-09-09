@@ -108,7 +108,7 @@ class DabRasterizer(
         canvas.clipRect(0f, 0f, docWidthPx.toFloat(), docHeightPx.toFloat())
         var i = 0
         while (i < n) {
-            dab(canvas, batch.x(i), batch.y(i), batch.radius(i))
+            dab(canvas, batch.x(i), batch.y(i), batch.radius(i), batch.aspect(i), batch.rotation(i))
             i++
         }
         canvas.restoreToCount(save)
@@ -129,7 +129,7 @@ class DabRasterizer(
         if (flow < 1f) paint.alpha = (flow.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
         var i = 0
         while (i < n) {
-            dab(canvas, batch.x(i), batch.y(i), batch.radius(i))
+            dab(canvas, batch.x(i), batch.y(i), batch.radius(i), batch.aspect(i), batch.rotation(i))
             i++
         }
     }
@@ -179,7 +179,7 @@ class DabRasterizer(
         val n = stroke.dabCount
         var i = 0
         while (i < n) {
-            dab(canvas, stroke.x(i), stroke.y(i), stroke.radius(i))
+            dab(canvas, stroke.x(i), stroke.y(i), stroke.radius(i), stroke.aspect(i), stroke.rotation(i))
             i++
         }
     }
@@ -199,14 +199,25 @@ class DabRasterizer(
      * and scaling it back would cost a matrix per dab to undo the quantisation
      * the cache exists to exploit.
      */
-    private fun dab(canvas: Canvas, x: Float, y: Float, radius: Float) {
+    private fun dab(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        radius: Float,
+        aspect: Float = 1f,
+        rotation: Float = 0f,
+    ) {
         if (!(radius > 0f)) return
         val cache = stamps
-        if (mode == Mode.CIRCLE || cache == null) {
+        // An elliptical dab has no circle path. drawCircle cannot express it at
+        // all, so a shaped brush forces the stamp regardless of [mode] rather
+        // than silently drawing round dabs and looking like a broken preset.
+        val shaped = aspect < 1f
+        if ((mode == Mode.CIRCLE && !shaped) || cache == null) {
             canvas.drawCircle(x, y, radius, paint)
             return
         }
-        val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, 1f, 0f))
+        val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, aspect, rotation))
         canvas.drawBitmap(cache.bitmapOf(mask), x - mask.hotspotX, y - mask.hotspotY, paint)
     }
 }

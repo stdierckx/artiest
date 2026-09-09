@@ -40,7 +40,7 @@ class StampRasterizerTest {
 
     private fun oneDab(x: Float, y: Float, r: Float, colour: Int = Color.BLACK): Stroke =
         Stroke.copyOf(
-            dabs = floatArrayOf(x, y, r),
+            dabs = floatArrayOf(x, y, r, 1f, 0f),
             dabCount = 1,
             colorArgb = colour,
             antiAlias = true,
@@ -164,11 +164,13 @@ class StampRasterizerTest {
     @Test
     fun `a stroke of many dabs stamps every one of them`() {
         val n = 20
-        val dabs = FloatArray(n * 3)
+        val dabs = FloatArray(n * Stroke.STRIDE)
         for (i in 0 until n) {
-            dabs[i * 3] = 8f + i * 2.4f
-            dabs[i * 3 + 1] = 32f
-            dabs[i * 3 + 2] = 4f
+            val o = i * Stroke.STRIDE
+            dabs[o] = 8f + i * 2.4f
+            dabs[o + 1] = 32f
+            dabs[o + 2] = 4f
+            dabs[o + 3] = 1f
         }
         val stroke = Stroke.copyOf(dabs, n, Color.BLACK, true, Bounds.of(0f, 20f, 64f, 44f))
         val bmp = surface()

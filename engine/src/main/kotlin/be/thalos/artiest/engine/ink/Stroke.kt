@@ -80,16 +80,34 @@ class Stroke private constructor(
     /** Dab [i]'s centre y. See [x]. */
     fun y(i: Int): Float = dabs[i * STRIDE + 1]
 
-    /** Dab [i]'s painted radius. See [x]. */
+    /** Dab [i]'s painted radius — the **major** semi-axis. See [x]. */
     fun radius(i: Int): Float = dabs[i * STRIDE + 2]
+
+    /**
+     * Dab [i]'s minor axis over its major, 0..1. 1 is a circle, which is what
+     * every dab the pen lays is.
+     */
+    fun aspect(i: Int): Float = dabs[i * STRIDE + 3]
+
+    /** Dab [i]'s major-axis angle in radians. Meaningless when [aspect] is 1. */
+    fun rotation(i: Int): Float = dabs[i * STRIDE + 4]
 
     override fun toString(): String =
         "Stroke($dabCount dabs, color 0x${colorArgb.toUInt().toString(16)}, $bounds)"
 
     companion object {
 
-        /** Floats per dab in the payload: x, y, radius. */
-        const val STRIDE = 3
+        /**
+         * Floats per dab: x, y, radius, aspect, rotation.
+         *
+         * **Widened from 3 at W9, and the dab goldens did not move**, which is
+         * the check that matters: the golden files serialize x, y and radius,
+         * and a round dab has an aspect of exactly 1 and a rotation of exactly
+         * 0. Two more floats a dab is 8 bytes on a payload that is copied once
+         * per stroke, against the alternative of a parallel array or a second
+         * stroke type for elliptical brushes.
+         */
+        const val STRIDE = 5
 
         /**
          * Copy [dabCount] dabs out of a builder's buffer and freeze them.

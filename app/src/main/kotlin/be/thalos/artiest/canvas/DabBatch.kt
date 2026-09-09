@@ -32,7 +32,7 @@ class DabBatch internal constructor(
     val capacity: Int,
 ) {
 
-    /** x, y, radius triples, doc space, [STRIDE] floats each. */
+    /** Dabs in document space, [STRIDE] floats each. */
     internal val dabs = FloatArray(capacity * STRIDE)
 
     /** Dabs actually filled. Reset to 0 by [DabBatchPool.acquire]. */
@@ -56,11 +56,13 @@ class DabBatch internal constructor(
     /** True for a batch allocated past the ring — see [DabBatchPool.spills]. */
     internal var spilled: Boolean = false
 
-    internal fun add(x: Float, y: Float, radius: Float) {
+    internal fun add(x: Float, y: Float, radius: Float, aspect: Float = 1f, rotation: Float = 0f) {
         val o = count * STRIDE
         dabs[o] = x
         dabs[o + 1] = y
         dabs[o + 2] = radius
+        dabs[o + 3] = aspect
+        dabs[o + 4] = rotation
         count++
     }
 
@@ -75,6 +77,12 @@ class DabBatch internal constructor(
     /** Dab [i]'s painted radius. */
     fun radius(i: Int): Float = dabs[i * STRIDE + 2]
 
+    /** Minor over major, 0..1. See `Stroke.aspect`. */
+    fun aspect(i: Int): Float = dabs[i * STRIDE + 3]
+
+    /** Major-axis angle in radians. See `Stroke.rotation`. */
+    fun rotation(i: Int): Float = dabs[i * STRIDE + 4]
+
     /** How many dabs a reader should draw. */
     val size: Int get() = count
 
@@ -82,8 +90,14 @@ class DabBatch internal constructor(
         "DabBatch(seq=$sequence, $count/$capacity dabs${if (spilled) ", spilled" else ""})"
 
     companion object {
-        /** Floats per dab: x, y, radius. Matches `Stroke.STRIDE` by contract. */
-        const val STRIDE = 3
+        /**
+         * Floats per dab: x, y, radius, aspect, rotation. Matches
+         * `Stroke.STRIDE` by contract, and the contract is why they are written
+         * as one number rather than two that happen to agree: the wet pass and
+         * the dry commit read the same layout, and a batch a stride behind a
+         * stroke draws garbage rather than failing.
+         */
+        const val STRIDE = 5
 
         /**
          * 64 dabs, which is not a round number chosen for looking like one.

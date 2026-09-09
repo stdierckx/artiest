@@ -1262,7 +1262,10 @@ class InkSurfaceView(
             var batch: DabBatch? = null
             while (emitted < builder.dabCount) {
                 val b = batch ?: acquireBatch().also { batch = it }
-                b.add(builder.x(emitted), builder.y(emitted), builder.radius(emitted))
+                b.add(
+                    builder.x(emitted), builder.y(emitted), builder.radius(emitted),
+                    builder.aspect(emitted), builder.rotation(emitted),
+                )
                 emitted++
                 if (b.isFull) {
                     drawWet(b)
@@ -1408,6 +1411,12 @@ class InkSurfaceView(
 
         override fun emit(x: Float, y: Float, pressure: Float, elapsedMillis: Float): Float {
             val radius = pen.sizeFor(pressure, elapsedMillis) * 0.5f
+            // No shape dynamics on the speculative tail, deliberately. Scatter
+            // and jitter are random per dab, so a predicted dab and the real
+            // dab that replaces it would land in different places and the tail
+            // would visibly disagree with the ink it is guessing at. A round
+            // guess that is slightly the wrong shape is a smaller error than a
+            // correctly shaped one in the wrong place.
             batch?.let { if (!it.isFull) it.add(x, y, radius) }
             return pen.spacingFor(radius)
         }

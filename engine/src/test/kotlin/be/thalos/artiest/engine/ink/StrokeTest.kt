@@ -18,12 +18,16 @@ class StrokeTest {
 
     private val bounds = Bounds.of(0f, 0f, 10f, 10f)
 
-    private fun dabs(vararg triples: Float) = triples
+    private fun dabs(vararg values: Float) = values
+
+    /** One dab's five floats: x, y, radius, aspect, rotation. See [Stroke.STRIDE]. */
+    private fun dab(x: Float, y: Float, r: Float, aspect: Float = 1f, rot: Float = 0f) =
+        floatArrayOf(x, y, r, aspect, rot)
 
     @Test
     fun `the accessors read back the dabs they were given`() {
         val s = Stroke.copyOf(
-            dabs(1f, 2f, 3f, 4f, 5f, 6f),
+            dab(1f, 2f, 3f) + dab(4f, 5f, 6f, aspect = 0.5f, rot = 1.2f),
             dabCount = 2,
             colorArgb = 0xFF000000.toInt(),
             antiAlias = true,
@@ -31,7 +35,10 @@ class StrokeTest {
         )
         assertEquals(2, s.dabCount)
         assertEquals(1f, s.x(0)); assertEquals(2f, s.y(0)); assertEquals(3f, s.radius(0))
+        assertEquals(1f, s.aspect(0), "a dab with no shape dynamics is a circle")
+        assertEquals(0f, s.rotation(0))
         assertEquals(4f, s.x(1)); assertEquals(5f, s.y(1)); assertEquals(6f, s.radius(1))
+        assertEquals(0.5f, s.aspect(1)); assertEquals(1.2f, s.rotation(1))
         assertEquals(0xFF000000.toInt(), s.colorArgb)
         assertTrue(s.antiAlias)
         assertEquals(bounds, s.bounds)
@@ -41,7 +48,7 @@ class StrokeTest {
     @Test
     fun `dabs past the count are not copied and not reachable`() {
         val s = Stroke.copyOf(
-            dabs(1f, 2f, 3f, 99f, 99f, 99f),
+            dab(1f, 2f, 3f) + dab(99f, 99f, 99f),
             dabCount = 1,
             colorArgb = 0,
             antiAlias = true,
@@ -60,14 +67,14 @@ class StrokeTest {
      */
     @Test
     fun `a committed stroke does not change when the builder reuses its buffer`() {
-        val buffer = floatArrayOf(1f, 2f, 3f)
+        val buffer = dab(1f, 2f, 3f, aspect = 0.5f, rot = 1.2f)
         val s = Stroke.copyOf(buffer, 1, colorArgb = 0, antiAlias = true, bounds = bounds)
-        buffer[0] = -1f
-        buffer[1] = -2f
-        buffer[2] = -3f
+        for (i in buffer.indices) buffer[i] = -1f
         assertEquals(1f, s.x(0))
         assertEquals(2f, s.y(0))
         assertEquals(3f, s.radius(0))
+        assertEquals(0.5f, s.aspect(0))
+        assertEquals(1.2f, s.rotation(0))
     }
 
     /**
