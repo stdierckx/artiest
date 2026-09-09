@@ -61,11 +61,15 @@ import be.thalos.artiest.canvas.InputStats
 import be.thalos.artiest.canvas.RejectionStress
 import be.thalos.artiest.canvas.StrokeStress
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.LayerInfo
+import be.thalos.artiest.doc.LayerOp
+import be.thalos.artiest.doc.LayerStack
 import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
 import be.thalos.artiest.ui.BrushCursor
+import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.DockHost
@@ -369,6 +373,16 @@ private fun CanvasScreen(
      */
     val cursorAt = remember { mutableStateOf(Offset.Unspecified) }
 
+    // The layer stack, as the UI sees it. `LayerStack.snapshot` is a volatile
+    // field the render thread republishes -- a new immutable list per change --
+    // so this is a reference comparison and a recomposition only when something
+    // actually moved. Polled rather than pushed for the reason `canUndo` is:
+    // the render thread has no way to reach into a composition, and a callback
+    // it could call would be a callback running on the wrong thread.
+    var layerRows by remember { mutableStateOf(document.layers.snapshot) }
+    var activeLayer by remember { mutableIntStateOf(document.layers.activeId) }
+    var layersOpen by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -445,6 +459,13 @@ private fun CanvasScreen(
             pen.onsetMillis = b.onsetMillis
             pen.onsetPressure = b.onsetPressure
             pen.grain = b.grain
+            // Restored like every other scalar, and it was missed. `burnish` is
+            // written by the codec and was simply not read back here, so the
+            // pencil lost its tooth-crushing the first time the app was
+            // restarted -- a change that had been measured, shipped and then
+            // silently undone by the next launch. Checked on the tablet: the
+            // stored brush read `burnish 0.0` under a preset that sets 0.75.
+            pen.burnish = b.burnish
             pen.erase = b.erase
             pen.eraseSizeMax = b.eraseSizeMax
             preset.applyToShapeOnly(v.pen)
@@ -492,6 +513,33 @@ private fun CanvasScreen(
             if (canUndo != document.canUndo) canUndo = document.canUndo
             if (canRedo != document.canRedo) canRedo = document.canRedo
         }
+    }
+
+    // Only while the panel is open, and faster than the undo poll, because
+    // this one is watching the result of a press the user just made: a row that
+    // takes half a second to light up reads as a button that did not work.
+    // Closed, nothing here runs at all -- the button itself shows no state.
+    LaunchedEffect(document, layersOpen) {
+        if (!layersOpen) return@LaunchedEffect
+        while (true) {
+            val snap = document.layers.snapshot
+            if (snap !== layerRows) layerRows = snap
+            if (activeLayer != document.layers.activeId) activeLayer = document.layers.activeId
+            kotlinx.coroutines.delay(100)
+        }
+    }
+
+    /**
+     * Queue a change to the stack and ask for a frame.
+     *
+     * The second half is not optional. A stroke asks for its own render when it
+     * commits; a layer operation has nothing that would, so without this the
+     * queue would sit there until the user drew something and the panel would
+     * show a press that had apparently done nothing.
+     */
+    val onLayerOp: (LayerOp) -> Unit = { op ->
+        document.requestLayers(op)
+        surface?.redrawDry()
     }
 
     // Hoisted out of the toolbar because the toolbar is now generic: it is
@@ -683,6 +731,37 @@ private fun CanvasScreen(
                     onSizeMax = { sizeMax = it },
                     eraserSize = eraserSize,
                     onEraserSize = { eraserSize = it },
+                    layerRows = layerRows,
+                    activeLayer = activeLayer,
+                    onLayerOp = onLayerOp,
+                    onLayerAdd = {
+                        // The empty sheet is allocated here, on the UI thread,
+                        // and handed over. See `LayerStack`: 27.19 MiB inside a
+                        // render callback is a hitch in the frame the user is
+                        // drawing into.
+                        onLayerOp(LayerOp.Add(document.newLayer(), document.suggestLayerName()))
+                    },
+                    onLayerDuplicate = {
+                        onLayerOp(
+                            LayerOp.Duplicate(
+                                activeLayer,
+                                document.newLayer(),
+                                document.suggestLayerName(),
+                            ),
+                        )
+                    },
+                    onLayersOpen = { open ->
+                        layersOpen = open
+                        document.layers.wantThumbnails = open
+                        if (open) {
+                            layerRows = document.layers.snapshot
+                            activeLayer = document.layers.activeId
+                            // The thumbnails are built one per frame by the
+                            // render callback, so opening the panel has to ask
+                            // for the first of those frames.
+                            surface?.redrawDry()
+                        }
+                    },
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
                     opacity = opacity,
@@ -768,6 +847,12 @@ private fun ToolSlot(
     onSizeMax: (Float) -> Unit,
     eraserSize: Float,
     onEraserSize: (Float) -> Unit,
+    layerRows: List<LayerInfo>,
+    activeLayer: Int,
+    onLayerOp: (LayerOp) -> Unit,
+    onLayerAdd: () -> Unit,
+    onLayerDuplicate: () -> Unit,
+    onLayersOpen: (Boolean) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
     opacity: Float,
@@ -855,6 +940,16 @@ private fun ToolSlot(
             IconToolButton(ToolIcons.undo, item.label, onUndo, enabled = canUndo)
         ToolItem.REDO ->
             IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
+
+        ToolItem.LAYERS -> LayersButton(
+            layers = layerRows,
+            activeId = activeLayer,
+            maxLayers = LayerStack.MAX_LAYERS,
+            onOp = onLayerOp,
+            onAdd = onLayerAdd,
+            onDuplicate = onLayerDuplicate,
+            onOpenChange = onLayersOpen,
+        )
 
         ToolItem.ZOOM_IN ->
             IconToolButton(ToolIcons.zoomIn, item.label, { onZoom(ZOOM_STEP) })

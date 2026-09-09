@@ -51,6 +51,7 @@ object ToolIcons {
         ToolItem.PENCIL -> pencil
         ToolItem.ERASER -> eraser
         ToolItem.ERASER_SIZE -> eraser
+        ToolItem.LAYERS -> layers
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.
@@ -399,6 +400,101 @@ object ToolIcons {
                 lineTo(12f, 18.4f)
                 moveTo(5.6f, 12f)
                 lineTo(18.4f, 12f)
+            }
+        }
+    }
+
+    /**
+     * Three offset sheets: the stack, seen from a corner.
+     *
+     * Not the usual pile of parallelograms. At 21dp an isometric stack is three
+     * grey slivers; three rectangles offset by two units each keep their edges
+     * where the eye can find them, and the front one is filled so the glyph has
+     * a subject rather than being an outline of an outline.
+     */
+    val layers: ImageVector by lazy {
+        icon("layers") {
+            stroke {
+                rect(3.4f, 3.4f, 16.6f, 14.6f)
+                rect(6.0f, 6.0f, 19.2f, 17.2f)
+            }
+            fill { rect(8.6f, 8.6f, 21.8f, 19.8f) }
+        }
+    }
+
+    /** An eye. Shown on a sheet that is visible; [hidden] is its other face. */
+    val visible: ImageVector by lazy {
+        icon("visible") {
+            stroke {
+                moveTo(2.6f, 12f)
+                curveTo(6.0f, 6.4f, 18.0f, 6.4f, 21.4f, 12f)
+                curveTo(18.0f, 17.6f, 6.0f, 17.6f, 2.6f, 12f)
+                close()
+            }
+            fill { circle(12f, 12f, 2.9f) }
+        }
+    }
+
+    /**
+     * The same eye with a line through it.
+     *
+     * A struck-through icon rather than a dimmed one: the row it sits on is
+     * already dimmed when the sheet is hidden, and two ways of saying the same
+     * thing leaves neither of them legible.
+     */
+    val hidden: ImageVector by lazy {
+        icon("hidden") {
+            stroke {
+                moveTo(2.6f, 12f)
+                curveTo(6.0f, 6.4f, 18.0f, 6.4f, 21.4f, 12f)
+                curveTo(18.0f, 17.6f, 6.0f, 17.6f, 2.6f, 12f)
+                close()
+                moveTo(4.2f, 20.4f)
+                lineTo(19.8f, 3.6f)
+            }
+        }
+    }
+
+    /** A plus. New sheet. */
+    val add: ImageVector by lazy {
+        icon("add") {
+            stroke {
+                moveTo(12f, 5.2f)
+                lineTo(12f, 18.8f)
+                moveTo(5.2f, 12f)
+                lineTo(18.8f, 12f)
+            }
+        }
+    }
+
+    /** Two sheets, one behind the other. Duplicate. */
+    val duplicate: ImageVector by lazy {
+        icon("duplicate") {
+            stroke {
+                rect(3.4f, 3.4f, 15.0f, 15.0f)
+                rect(9.0f, 9.0f, 20.6f, 20.6f)
+            }
+        }
+    }
+
+    /** A chevron up, for moving a sheet one place toward the top. */
+    val up: ImageVector by lazy {
+        icon("up") {
+            stroke {
+                moveTo(5.6f, 14.8f)
+                lineTo(12f, 8.4f)
+                lineTo(18.4f, 14.8f)
+            }
+        }
+    }
+
+    /** See [up]. */
+    val down: ImageVector by lazy {
+        icon("down") {
+            stroke {
+                moveTo(5.6f, 9.2f)
+                lineTo(12f, 15.6f)
+                lineTo(18.4f, 9.2f)
             }
         }
     }

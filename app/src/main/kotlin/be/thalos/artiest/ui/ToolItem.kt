@@ -159,6 +159,16 @@ enum class ToolItem(
      */
     ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER),
 
+    /**
+     * The layers panel, as a button that opens it.
+     *
+     * One slot and a panel, for the reason [COLOUR] is one slot and a panel:
+     * the list is as long as the drawing has sheets, it needs thumbnails, names
+     * and a slider, and none of that fits in a bar. What a toolbar can usefully
+     * show about layers at a glance is nothing, so it shows a way in.
+     */
+    LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

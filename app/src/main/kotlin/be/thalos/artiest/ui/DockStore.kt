@@ -35,8 +35,52 @@ class DockStore(context: Context) {
      * already knows and the new room appears at the end.
      */
     fun load(): DockLayout {
-        val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null)) ?: return DockLayout.DEFAULT
-        return stored.resized { dock -> maxOf(stored.bar(dock).slotCount, dock.defaultSlots) }
+        val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null))
+            ?: return introduce(DockLayout.DEFAULT)
+        val widened = stored.resized { dock -> maxOf(stored.bar(dock).slotCount, dock.defaultSlots) }
+        return introduce(widened)
+    }
+
+    /**
+     * Put newly shipped controls on the bars, once each.
+     *
+     * The same problem the widening above solves, one step further on. Widening
+     * makes *room* for a new control; it does not put one anywhere, so a user
+     * who arranged their bars before a release finds the new tool only if they
+     * happen to open Arrange and read the chooser. That is how a feature ships
+     * invisibly, and a layers panel is not a thing anyone would go looking for a
+     * way to add.
+     *
+     * **Once each, recorded by id.** A control the user has deliberately
+     * removed must stay removed, so what is recorded is what has been *offered*
+     * rather than what is present: offered-then-deleted and offered-then-kept
+     * look identical from here, and neither comes back.
+     *
+     * The preferred dock is a suggestion. If it is full the item goes wherever
+     * it fits, and if nothing fits it is simply not placed — the chooser still
+     * has it, and bars arranged to be full were meant to be full.
+     */
+    private fun introduce(layout: DockLayout): DockLayout {
+        val offered = prefs.getString(KEY_OFFERED, null)
+            ?.split(',')?.filter { it.isNotEmpty() }?.toMutableSet()
+            ?: mutableSetOf()
+        var out = layout
+        var changed = false
+        for ((item, preferred) in NEW_ITEMS) {
+            if (!offered.add(item.id)) continue
+            changed = true
+            if (item in out) continue
+            for (dock in listOf(preferred) + Dock.entries.filter { it != preferred }) {
+                val slot = out.firstFit(dock, item) ?: continue
+                out = out.place(dock, item, slot)
+                break
+            }
+        }
+        if (changed) {
+            prefs.edit().putString(KEY_OFFERED, offered.joinToString(",")).apply()
+            save(out)
+        }
+        return out
     }
 
     fun save(layout: DockLayout) {
@@ -98,6 +142,18 @@ class DockStore(context: Context) {
         private const val KEY_FLOAT_X = "dock.float.x"
         private const val KEY_FLOAT_Y = "dock.float.y"
         private const val KEY_RECENT = "colour.recent"
+        private const val KEY_OFFERED = "toolbar.offered"
+
+        /**
+         * Controls that did not exist when someone's bars were arranged, and
+         * where each would like to go. Append to this list when a tool ships;
+         * never remove from it, because an id that leaves the list is an id
+         * that gets offered a second time.
+         */
+        private val NEW_ITEMS: List<Pair<ToolItem, Dock>> = listOf(
+            ToolItem.LAYERS to Dock.RIGHT,
+            ToolItem.ERASER_SIZE to Dock.BOTTOM,
+        )
 
         /** Clear of the left tools and above the bottom sliders, on a first run. */
         private const val DEFAULT_FLOAT_X = 0.32f

@@ -163,7 +163,7 @@ class DockLayoutTest {
         // drops rather than complains — so the counts are asserted here or
         // nowhere.
         val starter = DockLayout.STARTER
-        assertEquals(14, starter.all().size)
+        assertEquals(16, starter.all().size)
         assertEquals(starter.all().size, starter.all().map { it.item }.toSet().size)
 
         // The grouping is the feature, so it is pinned rather than left to
@@ -175,6 +175,8 @@ class DockLayoutTest {
         assertEquals(Dock.TOP, starter.locate(ToolItem.UNDO)?.dock)
         assertEquals(Dock.TOP, starter.locate(ToolItem.REDO)?.dock)
         assertEquals(Dock.RIGHT, starter.locate(ToolItem.ZOOM_IN)?.dock)
+        assertEquals(Dock.RIGHT, starter.locate(ToolItem.LAYERS)?.dock)
+        assertEquals(Dock.BOTTOM, starter.locate(ToolItem.ERASER_SIZE)?.dock)
         assertEquals(Dock.RIGHT, starter.locate(ToolItem.FIT)?.dock)
         assertEquals(Dock.BOTTOM, starter.locate(ToolItem.SIZE)?.dock)
         assertEquals(Dock.BOTTOM, starter.locate(ToolItem.GRAIN)?.dock)

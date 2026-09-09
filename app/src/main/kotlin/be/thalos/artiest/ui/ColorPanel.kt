@@ -180,13 +180,17 @@ private fun ColourPanel(
 /**
  * Below the button if there is room, and always on the screen.
  *
+ * `internal` rather than file-private because the layers panel wants exactly
+ * the same rule and for exactly the same reason: it opens from a button that
+ * can be docked to any of five edges.
+ *
  * The button that opens this can be docked to any of five places, so there is
  * no fixed side that is right — a panel that always opens to the right is off
  * the screen from the right edge. Below-and-centred is the guess, and the clamp
  * is what makes the guess safe: a panel that would hang off any edge is slid
  * back in rather than being placed somewhere clever.
  */
-private class PanelPosition(private val gap: Int) : PopupPositionProvider {
+internal class PanelPosition(private val gap: Int) : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,
