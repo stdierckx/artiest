@@ -4,8 +4,13 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
+import be.thalos.artiest.engine.ink.StrokeBuilder
+import be.thalos.artiest.engine.input.PenSample
+import be.thalos.artiest.engine.input.ToolType
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -182,5 +187,102 @@ class EraserTest {
         dab(s2, 255)
         s2.compositeInto(Canvas(full), 1f, null, erase = true)
         assertEquals(0, Color.alpha(full.getPixel(32, 32)), "the eraser left ink behind")
+    }
+
+    // ---- the eraser's own width, end to end ---------------------------------
+
+    private val docW = 300
+    private val docH = 160
+
+    /**
+     * One horizontal stroke through the whole path — builder, rasterizer,
+     * scratch, composite — and how many rows of it came out.
+     *
+     * The whole path and not the width arithmetic, because the arithmetic is
+     * already checked in `:engine` and what this file has to know is whether a
+     * wider *number* becomes a wider *band of cleared pixels*. Between the two
+     * sit the dab spacing, the stamp cache's mask size and the scratch buffer's
+     * extent, any of which could quietly cap it.
+     */
+    private fun strokeRows(brush: Brush, erasing: Boolean): Int {
+        val builder = StrokeBuilder(brush)
+        builder.begin(Color.BLACK)
+        var x = 40f
+        var t = 0L
+        while (x <= docW - 40f) {
+            builder.add(
+                PenSample(
+                    x = x, y = docH / 2f, pressure = 1f, tilt = 0f, orientation = 0f,
+                    distance = 0f, toolType = ToolType.STYLUS, buttonState = 0,
+                    eventTimeNanos = t, source = PenSample.Source.CURRENT,
+                ),
+            )
+            x += 2f
+            t += 3_107_855L
+        }
+        val stroke = builder.end()
+
+        val target = Bitmap.createBitmap(docW, docH, Bitmap.Config.ARGB_8888)
+        if (erasing) {
+            // Something to take away. A full sheet of ink, so the cleared band
+            // is measured against a background that was uniformly there.
+            val fill = Paint()
+            fill.color = Color.BLACK
+            Canvas(target).drawRect(0f, 0f, docW.toFloat(), docH.toFloat(), fill)
+        }
+
+        val rasterizer = DabRasterizer(docW, docH, StampCache())
+        rasterizer.hardness = brush.hardness
+        rasterizer.solid = erasing
+        val scratch = ScratchLayer()
+        scratch.begin(stroke.bounds)
+        rasterizer.drawDry(scratch.canvasInDocSpace()!!, stroke)
+        scratch.compositeInto(
+            Canvas(target),
+            if (erasing) 1f else brush.opacity,
+            null,
+            erase = erasing,
+        )
+
+        var rows = 0
+        for (y in 0 until docH) {
+            val a = Color.alpha(target.getPixel(docW / 2, y))
+            val hit = if (erasing) a < 249 else a > 6
+            if (hit) rows++
+        }
+        return rows
+    }
+
+    /**
+     * The user's report: "the eraser may be a bit bigger, it may also be
+     * adjustable". Both halves are one property — the eraser has a width of its
+     * own — and this is that property seen from the pixels.
+     */
+    @Test
+    fun `the eraser clears a wider band than the brush paints`() {
+        val brush = BrushPreset.PENCIL.create()
+        brush.sizeMax = 48f
+        brush.eraseSizeMax = 96f
+        val painted = strokeRows(brush, erasing = false)
+        brush.erase = true
+        val cleared = strokeRows(brush, erasing = true)
+        assertTrue(painted > 0, "the control stroke painted nothing")
+        assertTrue(
+            cleared > painted * 1.6f,
+            "a 2x eraser cleared $cleared rows where the brush painted $painted",
+        )
+    }
+
+    /** And the slider reaches the pixels: a bigger number is a bigger band. */
+    @Test
+    fun `raising the eraser's width widens what it takes`() {
+        val brush = BrushPreset.PENCIL.create()
+        brush.sizeMax = 48f
+        brush.erase = true
+        brush.eraseSizeMax = 48f
+        val small = strokeRows(brush, erasing = true)
+        brush.eraseSizeMax = 150f
+        val big = strokeRows(brush, erasing = true)
+        assertTrue(big > small * 2f, "48px cleared $small rows and 150px cleared $big")
     }
 }

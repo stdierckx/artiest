@@ -229,6 +229,27 @@ class Brush {
      */
     var erase: Boolean = false
 
+    /**
+     * Diameter at full pressure **while [erase] is set**, in document pixels.
+     *
+     * A second number rather than a reuse of [sizeMax], because the two are
+     * different tools with different jobs. A pencil point is 3.5 mm laid over;
+     * a real eraser is the end of a stick, 7 mm or more, and nobody rubs out a
+     * passage with a 3.5 mm nib. Tying the two together also means the eraser
+     * changes size every time the pencil does, which is the opposite of what a
+     * user reaching for the eraser wants.
+     *
+     * It is a **scale on the same nib**, not a second brush: [sizeFor] takes
+     * the shape the brush would have made — the pressure curve, the tilt, the
+     * flattening, the onset floor — and multiplies the diameter by
+     * `eraseSizeMax / sizeMax`. So the eraser is still elliptical when the pen
+     * is laid over, still smaller at a light touch, and still spaced by the
+     * same fraction of its own width. What it is not is a different response.
+     *
+     * 96 doc px is about 7 mm on this tablet at a fitted page.
+     */
+    var eraseSizeMax: Float = 96f
+
     /** Passed to `Stabilizer` at `StrokeBuilder` construction. */
     var stabilization: Float = 0.15f
 
@@ -281,7 +302,7 @@ class Brush {
     fun sizeFor(pressure: Float, elapsedMillis: Float): Float {
         val curved = sizeCurve.evaluate(pressure)
         val lift = onsetLift(elapsedMillis)
-        return size.valueForFraction(if (curved > lift) curved else lift)
+        return size.valueForFraction(if (curved > lift) curved else lift) * modeScale()
     }
 
     /**
@@ -295,7 +316,22 @@ class Brush {
     fun sizeFor(c: DabContext): Float {
         val combined = size.combined(c)
         val lift = onsetLift(c.elapsedMillis)
-        return size.valueForFraction(if (combined > lift) combined else lift)
+        return size.valueForFraction(if (combined > lift) combined else lift) * modeScale()
+    }
+
+    /**
+     * 1 while inking, and the ratio that takes [sizeMax] to [eraseSizeMax]
+     * while erasing. See [eraseSizeMax].
+     *
+     * Guarded against a zero or negative [sizeMax] because the ratio is the
+     * only thing standing between a slider dragged to its floor and a division
+     * that returns infinity into a dab radius.
+     */
+    private fun modeScale(): Float {
+        if (!erase) return 1f
+        val s = sizeMax
+        if (!(s > 0f)) return 1f
+        return eraseSizeMax / s
     }
 
     /**
@@ -401,6 +437,7 @@ class Brush {
         it.grain = grain
         it.burnish = burnish
         it.erase = erase
+        it.eraseSizeMax = eraseSizeMax
         copyOption(aspect, it.aspect)
         copyOption(rotation, it.rotation)
         copyOption(scatter, it.scatter)

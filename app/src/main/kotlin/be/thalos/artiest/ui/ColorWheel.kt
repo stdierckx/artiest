@@ -5,7 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -206,7 +206,14 @@ fun ColorWheel(
  */
 @Composable
 private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
-    BoxWithConstraints(modifier.aspectRatio(1f)) {
+    // A plain Box since the raster left this composable. It was a
+    // `BoxWithConstraints` because the disc used to rasterise itself at
+    // whatever size it was handed, so it had to know that size before it could
+    // build anything; the cache builds one raster at a fixed resolution and the
+    // Canvas scales it, so the constraints are not read any more. Lint catches
+    // exactly this -- an unused BoxWithConstraints scope is a subcomposition
+    // being paid for and thrown away.
+    Box(modifier.aspectRatio(1f)) {
         // From the process-wide cache, which is almost always already warm --
         // see [DiscRaster]. Building it here, per opening, is what made the
         // panel slow to appear.

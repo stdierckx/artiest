@@ -65,6 +65,7 @@ import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
+import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.DockHost
@@ -325,6 +326,15 @@ private fun CanvasScreen(
     // not see a change and a stroke could see half of one.
     var ink by remember { mutableIntStateOf(PALETTE.first()) }
     var sizeMax by remember { mutableFloatStateOf(DEFAULT_SIZE_MAX) }
+
+    /**
+     * The eraser's width, in document pixels, held apart from [sizeMax].
+     *
+     * See `Brush.eraseSizeMax`: the rubber is a different width from the point,
+     * and a user reaching for the eraser does not want the pencil resized on
+     * the way back.
+     */
+    var eraserSize by remember { mutableFloatStateOf(DEFAULT_ERASER_SIZE) }
     var smoothing by remember { mutableFloatStateOf(DEFAULT_SMOOTHING) }
 
     // W7. Both default to 1, which is Phase 1's opaque nib exactly, so nothing
@@ -345,6 +355,19 @@ private fun CanvasScreen(
 
     /** W11. Whether that tool is currently taking ink out instead of putting it in. */
     var eraser by remember { mutableStateOf(false) }
+
+    /**
+     * Where the pen is hovering, in view pixels, or `Unspecified` when it is
+     * not over the glass.
+     *
+     * A `MutableState` held by hand rather than a `by remember` delegate,
+     * because the hover callback below writes it from outside the composition
+     * and the ring reads it inside a draw lambda. Written at whatever rate the
+     * digitizer hovers — a few hundred a second — and read nowhere that
+     * recomposes, so the cost is one draw-phase invalidation per sample. See
+     * [BrushCursor].
+     */
+    val cursorAt = remember { mutableStateOf(Offset.Unspecified) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -395,6 +418,7 @@ private fun CanvasScreen(
             v.pen.erase = false
             brushStore.save(v.pen, preset)
             sizeMax = v.pen.sizeMax
+            eraserSize = v.pen.eraseSizeMax
             smoothing = v.pen.stabilization
             opacity = v.pen.opacity
             flow = v.pen.flow
@@ -422,19 +446,22 @@ private fun CanvasScreen(
             pen.onsetPressure = b.onsetPressure
             pen.grain = b.grain
             pen.erase = b.erase
+            pen.eraseSizeMax = b.eraseSizeMax
             preset.applyToShapeOnly(v.pen)
         }
         sizeMax = v.pen.sizeMax
+        eraserSize = v.pen.eraseSizeMax
         smoothing = v.pen.stabilization
         opacity = v.pen.opacity
         flow = v.pen.flow
         grain = v.pen.grain.strength
     }
 
-    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
+    LaunchedEffect(surface, ink, sizeMax, eraserSize, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
         v.pen.sizeMax = sizeMax
+        v.pen.eraseSizeMax = eraserSize
         v.pen.stabilization = smoothing
         // These two are what turn the indirect path on. Both at 1 is Phase 1's
         // opaque nib and takes the direct path; anything less routes the stroke
@@ -501,9 +528,25 @@ private fun CanvasScreen(
                 // window, and the two differ by the system bars at minimum.
                 InkSurfaceView(ctx, document).also {
                     surface = it
+                    it.onHover = { inRange, x, y ->
+                        cursorAt.value = if (inRange) Offset(x, y) else Offset.Unspecified
+                    }
                     onView(it)
                 }
             },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Above the canvas and below the chrome, which is the order it has to
+        // be in: the ring belongs over the paper, and a toolbar with a hover
+        // ring drawn on top of its buttons is a toolbar that looks broken.
+        BrushCursor(
+            at = { cursorAt.value },
+            diameterPx = {
+                val v = surface
+                if (v == null) 0f else v.cursorDiameterDocPx * v.transform.scale
+            },
+            erasing = { surface?.pen?.erase == true || eraser },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -598,6 +641,7 @@ private fun CanvasScreen(
                         p.applyTo(v.pen)
                         preset = p
                         sizeMax = v.pen.sizeMax
+                        eraserSize = v.pen.eraseSizeMax
                         smoothing = v.pen.stabilization
                         opacity = v.pen.opacity
                         flow = v.pen.flow
@@ -637,6 +681,8 @@ private fun CanvasScreen(
                     onInk = { ink = it },
                     sizeMax = sizeMax,
                     onSizeMax = { sizeMax = it },
+                    eraserSize = eraserSize,
+                    onEraserSize = { eraserSize = it },
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
                     opacity = opacity,
@@ -662,6 +708,7 @@ private fun CanvasScreen(
                             p.applyTo(v.pen)
                             preset = p
                             sizeMax = v.pen.sizeMax
+                            eraserSize = v.pen.eraseSizeMax
                             smoothing = v.pen.stabilization
                             opacity = v.pen.opacity
                             flow = v.pen.flow
@@ -719,6 +766,8 @@ private fun ToolSlot(
     onInkCommitted: (Int) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
+    eraserSize: Float,
+    onEraserSize: (Float) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
     opacity: Float,
@@ -795,6 +844,11 @@ private fun ToolSlot(
             label = item.label,
             onClick = onEraser,
             selected = eraser,
+        )
+
+        ToolItem.ERASER_SIZE -> ToolSlider(
+            ToolIcons.eraser, item.label, eraserSize,
+            MIN_ERASER_SIZE, MAX_ERASER_SIZE, 0, axis, onEraserSize,
         )
 
         ToolItem.UNDO ->
@@ -1250,7 +1304,31 @@ private const val WET_TEST_ALPHA = 0.3f
 private const val ZOOM_STEP = 1.25f
 
 private const val MIN_SIZE_MAX = 2f
-private const val MAX_SIZE_MAX = 48f
+
+/**
+ * The top of the size slider, in document pixels.
+ *
+ * It was 48, and 48 is exactly where the retuned pencil's default sits: the
+ * slider had a default pinned to its own ceiling and no way to make anything
+ * wider. 120 doc px is about 8.8 mm at a fitted page, a fat carpenter's pencil,
+ * which is a width worth being able to ask for.
+ */
+private const val MAX_SIZE_MAX = 120f
+
+/** `Brush.eraseSizeMax`'s default, mirrored so the slider starts where the tool is. */
+private const val DEFAULT_ERASER_SIZE = 96f
+
+/**
+ * The eraser slider's ends, in document pixels: about 1 mm to about 22 mm at a
+ * fitted page.
+ *
+ * The floor is a nib-sized eraser for picking a stray line out of a hatch; the
+ * ceiling is a block rubber for clearing a passage. Below the floor an eraser
+ * is indistinguishable from a fingernail and above the ceiling the Clear button
+ * is quicker.
+ */
+private const val MIN_ERASER_SIZE = 14f
+private const val MAX_ERASER_SIZE = 300f
 
 /**
  * Where the instruments start, measured off the docks rather than guessed.

@@ -1217,12 +1217,46 @@ class InkSurfaceView(
         return handled
     }
 
+    /**
+     * Where the pen is hovering, and whether it is in range at all.
+     *
+     * A callback and not Compose state on this class, deliberately: the view is
+     * the render path and knows nothing about Compose, and a `MutableState`
+     * field here would put a recomposition scope on a class whose whole design
+     * is that the UI thread does not touch it while a stroke is live. The
+     * chrome installs a listener, keeps the state on its own side, and reads it
+     * in a draw lambda — so a hover at 200 Hz redraws a ring and recomposes
+     * nothing.
+     *
+     * View pixels, because that is what the ring is drawn in. Converting to
+     * document space here and back in the overlay would be two conversions to
+     * arrive at the number the event already carried.
+     */
+    var onHover: ((inRange: Boolean, x: Float, y: Float) -> Unit)? = null
+
     override fun onHoverEvent(event: MotionEvent): Boolean {
         router.onHoverEvent(event)
+        // Exit is the one action whose coordinates are meaningless -- the pen
+        // has left, and the last position it reports is where it left from,
+        // which would leave a ring stranded at the edge of the screen.
+        val inRange = event.actionMasked != MotionEvent.ACTION_HOVER_EXIT
+        onHover?.invoke(inRange, event.x, event.y)
         // The framework's own hover handling still runs: the router took a
         // presence reading, it did not consume the event.
         return super.onHoverEvent(event)
     }
+
+    /**
+     * The widest mark the brush in the hand can make, in **document** pixels.
+     *
+     * The full-drive diameter and not the diameter at the pressure of the
+     * moment, because the ring is a reach indicator: the question it answers is
+     * "if I press, what does this cover", and an outline that shrank as the pen
+     * approached the page would answer a question nobody asked. For the eraser
+     * that is exactly the rubbed-out area at a full press.
+     */
+    val cursorDiameterDocPx: Float
+        get() = if (pen.erase) pen.eraseSizeMax else pen.sizeMax
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)

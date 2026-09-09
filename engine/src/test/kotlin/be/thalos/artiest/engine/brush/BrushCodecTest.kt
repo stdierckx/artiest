@@ -180,6 +180,20 @@ class BrushCodecTest {
      * response where the preset asked for `p^1.6`. So the response itself is
      * compared, at both ends and in the middle.
      */
+    /**
+     * The eraser's width is a slider like the brush's, so it has to survive a
+     * restart like the brush's. Left out of the format it would come back at
+     * the default every time the app started, which is the same defect the
+     * missing `flowMin` line was.
+     */
+    @Test
+    fun `the eraser's own width survives a round trip`() {
+        val before = BrushPreset.PENCIL.create()
+        before.eraseSizeMax = 173.5f
+        val after = assertNotNull(BrushCodec.decode(BrushCodec.encode(before)))
+        assertEquals(173.5f, after.eraseSizeMax)
+    }
+
     @Test
     fun `a saved pencil keeps its tilt-to-width and pressure-to-darkness`() {
         val before = BrushPreset.PENCIL.create()

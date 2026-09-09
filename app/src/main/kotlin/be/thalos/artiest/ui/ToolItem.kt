@@ -147,6 +147,18 @@ enum class ToolItem(
      */
     ERASER("eraser", "Eraser", "Erase", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
+    /**
+     * The eraser's own width, in document pixels, separate from [SIZE].
+     *
+     * A second size slider rather than a reuse of the first, for the reason
+     * `Brush.eraseSizeMax` gives: a pencil point and a rubber are different
+     * widths, and tying them together means the eraser resizes itself every
+     * time the pencil does. It sits next to [ERASER] rather than in a settings
+     * panel because "the eraser is too small for this" is a thought you have
+     * mid-rub, with the pen already on the glass.
+     */
+    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

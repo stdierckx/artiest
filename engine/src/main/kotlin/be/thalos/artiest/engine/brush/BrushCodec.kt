@@ -45,6 +45,7 @@ object BrushCodec {
         b.append("stabilization ").append(brush.stabilization).append('\n')
         b.append("antialias ").append(if (brush.antiAlias) 1 else 0).append('\n')
         b.append("erase ").append(if (brush.erase) 1 else 0).append('\n')
+        b.append("eraseSize ").append(brush.eraseSizeMax).append('\n')
         b.append("onset ").append(brush.onsetMillis).append(' ').append(brush.onsetPressure)
             .append('\n')
         val g = brush.grain
@@ -115,6 +116,7 @@ object BrushCodec {
             "stabilization" -> f(p, 1)?.let { brush.stabilization = it }
             "antialias" -> brush.antiAlias = p.getOrNull(1) != "0"
             "erase" -> brush.erase = p.getOrNull(1) == "1"
+            "eraseSize" -> f(p, 1)?.let { brush.eraseSizeMax = it }
             "onset" -> if (p.size >= 3) {
                 f(p[1])?.let { brush.onsetMillis = it }
                 f(p[2])?.let { brush.onsetPressure = it }

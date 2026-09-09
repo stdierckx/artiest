@@ -244,6 +244,62 @@ class BrushTest {
         assertTrue(brush.sizeFor(early) > brush.sizeMin, "the onset floor did not apply")
     }
 
+    // ---- the eraser's own width ---------------------------------------------
+
+    /**
+     * The user's report was that the eraser is too small, and the fix has to be
+     * a *second* width rather than the same one: a pencil point at 3.5 mm and a
+     * rubber at 7 mm are two tools, and one slider cannot be both.
+     */
+    @Test
+    fun `erasing swaps the width for the eraser's own`() {
+        val brush = Brush()
+        brush.sizeMax = 48f
+        brush.eraseSizeMax = 96f
+        val hard = DabContext().apply { pressure = 1f; elapsedMillis = 1000f }
+        val inking = brush.sizeFor(hard)
+        brush.erase = true
+        assertEquals(inking * 2f, brush.sizeFor(hard), 1e-3f)
+    }
+
+    /**
+     * A scale on the same nib and not a different response. Whatever the
+     * pressure curve, the tilt and the onset floor were doing to the width,
+     * they go on doing it — every point of the response is multiplied by the
+     * same ratio.
+     */
+    @Test
+    fun `the eraser keeps the brush's response and only changes its scale`() {
+        val brush = Brush()
+        brush.sizeMax = 40f
+        brush.eraseSizeMax = 120f
+        brush.size.drive(Sensor.PRESSURE, ResponseCurve.CUBIC)
+        for (p in floatArrayOf(0f, 0.2f, 0.5f, 0.8f, 1f)) {
+            val c = DabContext().apply { pressure = p; elapsedMillis = 1000f }
+            brush.erase = false
+            val ink = brush.sizeFor(c)
+            brush.erase = true
+            assertEquals(ink * 3f, brush.sizeFor(c), 1e-3f, "pressure $p")
+        }
+    }
+
+    /**
+     * The size slider's floor reaches this method as a divisor. A brush whose
+     * `sizeMax` has been dragged to zero must produce a dab radius, not an
+     * infinity that arrives at `MutableBounds.add` as a rectangle covering the
+     * universe.
+     */
+    @Test
+    fun `a zero brush width cannot make the eraser infinite`() {
+        val brush = Brush()
+        brush.sizeMin = 0f
+        brush.sizeMax = 0f
+        brush.eraseSizeMax = 96f
+        brush.erase = true
+        val c = DabContext().apply { pressure = 1f; elapsedMillis = 1000f }
+        assertTrue(brush.sizeFor(c).isFinite(), "an eraser width of ${brush.sizeFor(c)}")
+    }
+
     @Test
     fun `copy is deep, so one preset's slider cannot move another's`() {
         val a = Brush()

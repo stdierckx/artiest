@@ -50,6 +50,7 @@ object ToolIcons {
         ToolItem.PEN -> pen
         ToolItem.PENCIL -> pencil
         ToolItem.ERASER -> eraser
+        ToolItem.ERASER_SIZE -> eraser
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.

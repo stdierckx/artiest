@@ -296,6 +296,7 @@ enum class BrushPreset(val label: String) {
         brush.isotropicSpacing = d.isotropicSpacing
         brush.grain = d.grain
         brush.burnish = d.burnish
+        brush.eraseSizeMax = d.eraseSizeMax
         for (o in listOf(brush.aspect, brush.rotation, brush.scatter, brush.sizeJitter)) {
             o.clearInputs()
         }
