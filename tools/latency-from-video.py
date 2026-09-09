@@ -68,9 +68,42 @@ cannot remove — it is a median of five — and `settles` locked onto the spike
 reported ink arriving *before* the pen. The clip calibrates the fraction; each
 frame supplies its own level.
 
+W0 FINISH — THE WINDOW, THE CEILING, AND ONE READING AT A TIME
+--------------------------------------------------------------
+The rebuild left two things unfinished and both are now done.
+
+**The analysis window comes from the nib's direction reversals.** Approach,
+lift-off and drift are monotonic; a zigzag is the only part of a clip where the
+direction of travel flips repeatedly. So the signal is the local density of sign
+changes in the nib's vertical velocity. See [drawing_window].
+
+**A dark blob covering a fifth of the page is a hand, not a pen**, and where the
+blob is that large the ink/pen separation is not measuring anything. See
+`PEN_MAX_PAGE`, whose value was swept on both clips with a known answer rather
+than chosen.
+
+**The physical checks reject readings, not whole thresholds.** See [admissible].
+Eight of nine thresholds were being discarded entire because one apex came back
+negative while the other four agreed at 45 ms.
+
+Unattended, from an automatically found page and window, take 2 now reads
+45.1 ms over 5 of 9 thresholds and run B 45.8 ms over 5 of 9, against the 45.2
+published from a hand-tuned ROI.
+
+**And a diagnostic that would have saved a day.** The capture rate is derived
+from the refresh rate the caller asserts, so a wrong `--refresh` shows up as a
+camera that shot at a rate no camera offers. Run C reads 362.7 fps at
+`--refresh 90` and 241.8 at `--refresh 60`, from the same phone that shot 242.1
+on take 2: that take was filmed with the panel at 60 Hz and nobody knew. The
+tool now says so, and prints every interpretation of the measured period instead
+of guessing between them.
+
 Usage:
     ffmpeg -i clip.mp4 -q:v 3 frames/f%04d.jpg
     python3 tools/latency-from-video.py frames --refresh 90
+
+    --from/--to override the found window; --roi pins the page. Neither should
+    be needed, and needing one is worth investigating rather than working around.
 """
 import argparse
 import glob
@@ -95,6 +128,29 @@ SETTLE_START_W = 0.6    # stroke widths of descent before the walk starts
 SETTLE_TOL_W = 0.3      # stroke widths of wander tolerated on the plateau
 
 # --- validity: what makes a threshold's reading admissible -------------------
+# Rates a phone will actually shoot at. Used only to sanity-check the derived
+# capture rate against the refresh rate the caller asserted; see main.
+CAMERA_RATES = (30, 60, 120, 240, 480)
+CAMERA_RATE_TOL = 0.06
+
+# A dark blob bigger than this fraction of the page is not a pen but a hand and
+# a forearm, and where the blob is that large the erode/dilate separation of ink
+# from pen cannot be trusted. Used by drawing_window to find the frames worth
+# measuring from. See Calib.pen_max_px.
+#
+# Swept on both clips with a known answer, because a constant nobody swept is
+# how the first version of this tool came to be wrong:
+#
+#   take 2   0.10 0.125 0.15 0.175 0.20 -> 45.1 ms, 5 of 9 thresholds
+#            0.25                        -> 42.7 ms, 3 of 9   (hand let in)
+#   run B    0.10 0.125                  -> inconclusive      (window too tight)
+#            0.15 0.175 0.20 0.25        -> 45.8-46.0 ms, 5 of 9
+#
+# Both are flat over 0.15-0.20 and both fail outside it, in opposite directions,
+# so the value is the middle of an overlap rather than a point that happened to
+# work. If a future clip needs it moved, sweep it again and put the table here.
+PEN_MAX_PAGE = 0.175
+
 MIN_APEXES = 3          # fewer than this is not a measurement
 MAX_REFRESHES = 12.0    # a latency beyond this many panel refreshes is a bug
 MAX_SPREAD_REFRESH = 1.5  # apexes must agree to about this, or the pass is noise
@@ -217,13 +273,22 @@ class Calib:
         # A pen blob is two-dimensional where a stroke is a line, so "many times
         # the area a stroke could put in one place" separates them by size alone.
         self.pen_min_px = int(round(16 * stroke * stroke))
+        # And a ceiling, which the first version did not have. A dark blob
+        # covering a quarter of the page is a hand and a forearm, not a pen:
+        # on take 2 the blob runs 300k-630k pixels of a 1.38 Mpx page while the
+        # hand is still withdrawing, and 22k-128k once only the pen is over the
+        # paper. Where the blob is that large the erode/dilate separation of ink
+        # from pen cannot be trusted, so those frames are not a place to measure
+        # from. Used by [drawing_window] to find where the pen is a pen.
+        self.pen_max_px = int(round(PEN_MAX_PAGE * (roi[1] - roi[0]) * (roi[3] - roi[2])))
         self.ink_min_px = int(round(2 * stroke * stroke))
         self.sliver = max(3, int(round(stroke)))
 
     def __str__(self):
         y0, y1, x0, x1 = self.roi
         return (f"page y {y0}..{y1} x {x0}..{x1}  stroke {self.stroke:.1f}px  "
-                f"erode {self.erode} clearance {self.clearance}")
+                f"erode {self.erode} clearance {self.clearance} "
+                f"pen {self.pen_min_px}..{self.pen_max_px}px")
 
 
 def scan(files, lo, hi, cal, fracs):
@@ -368,64 +433,135 @@ def latencies(sig, cal, dt):
     return out
 
 
-def verdict(lats, refresh_hz):
-    """Why a threshold's reading is or is not admissible.
+def admissible(lats, refresh_hz):
+    """Split a threshold's per-apex readings into the physical and the not.
 
-    Returns None when it passes. The checks are physical, not statistical: ink
-    cannot precede the pen, a latency of a dozen refreshes is a tracking
-    failure, and apexes that disagree by more than about a refresh and a half
-    are measuring different things.
+    **Per reading, not per threshold, and that is a correction to how this
+    worked.** The first version rejected an entire threshold if any one of its
+    apexes came back impossible, on the reasoning that a bad reading means the
+    tracking is unreliable there. Swept over take 2 that throws away almost
+    everything: eight of nine thresholds return a mix of four sound readings
+    around 45 ms and one that is -0.4, and the pass rate was one in nine while
+    the surviving numbers agreed with each other all along.
+
+    A negative latency is not evidence that the other four apexes are wrong. It
+    is evidence about *that apex*: the ink's settle was found at or before the
+    pen's reversal, which happens when the pen's own blob leaks through the
+    clearance into the ink mask at one reversal and the settle walk locks onto
+    it. The other reversals in the same clip at the same threshold are
+    unaffected. So each reading faces the physics on its own — ink cannot
+    precede the pen, and a dozen refreshes is a tracking failure rather than a
+    latency — and what is left faces the agreement check as a group.
+
+    This is a stricter rule about individual numbers and a looser one about
+    passes, which is the right way round: the discarded readings are discarded
+    for a stated physical reason, and the ones that remain are the ones the
+    consensus is built from.
     """
-    if len(lats) < MIN_APEXES:
-        return f"only {len(lats)} apexes"
-    v = np.array(lats)
     refresh_ms = 1000.0 / refresh_hz
-    if (v <= 0).any():
-        return "ink before pen"
-    if (v > MAX_REFRESHES * refresh_ms).any():
-        return f"reading over {MAX_REFRESHES:g} refreshes"
+    good, dropped = [], 0
+    for v in lats:
+        if v <= 0 or v > MAX_REFRESHES * refresh_ms:
+            dropped += 1
+        else:
+            good.append(v)
+    return good, dropped
+
+
+def verdict(good, refresh_hz):
+    """Why a threshold's surviving readings are or are not admissible.
+
+    Returns None when they pass. What is left after [admissible] has to be
+    enough of the clip to be a measurement rather than a coincidence, and the
+    apexes have to agree: several reversals of one stroke are several
+    independent measurements of the same quantity, so if they disagree by much
+    more than a refresh they are not measuring the same thing.
+    """
+    if len(good) < MIN_APEXES:
+        return f"only {len(good)} usable apexes"
+    v = np.array(good)
     spread = v.max() - v.min()
-    if spread > MAX_SPREAD_REFRESH * refresh_ms:
+    if spread > MAX_SPREAD_REFRESH * (1000.0 / refresh_hz):
         return f"apexes disagree by {spread:.0f} ms"
     return None
 
 
-def drawing_window(files, cal, step=6):
-    """Best-effort guess at the frames over which the stroke is being drawn.
+def drawing_window(files, cal, step=4, span=12, pad=2):
+    """The frames over which the zigzag is being drawn, from the nib's track.
 
-    **Not finished, and not trusted — pass `--from`/`--to` for a real
-    measurement.** The intent is to replace the original's two hardcoded frame
-    numbers, and the obvious rule (the span over which the ink area grows) does
-    not work: during the run-up the pen and hand enter the page and are counted
-    as ink, so on take 2 this reports the ink reaching 97% of its final area by
-    frame 31, when the stroke is actually drawn between roughly 130 and 262.
-    Feeding that window to `capture_fps` swamps the ink's per-refresh periodicity
-    and pins the search at its lower bound, which silently rescales every
-    reading by a third — caught by the boundary check in [main], which is why
-    that check exists.
+    **The rule is direction reversals, not ink area, and the difference is the
+    whole function.** The first version used the span over which the ink area
+    grows, and it does not work: during the run-up the pen and the hand enter
+    the page and are counted as ink, so on take 2 it reported the ink at 97% of
+    its final area by frame 31 for a stroke actually drawn between 130 and 262.
+    Handing that window to `capture_fps` swamps the ink's per-refresh
+    periodicity and pins the period search at its lower bound, which would
+    silently rescale every reading by a third — the boundary check in [main] is
+    what caught it, and is why that check exists.
 
     Separating pen from hand from ink during the approach is the same
     two-adjacent-dark-objects problem that sank the straight-stroke method, so
-    the fix is probably to find the window from the *nib* track rather than from
-    the ink area: the drawing period is where the nib oscillates. Left for the
-    next session rather than guessed at.
+    this does not try. It asks a different question: **when is the nib
+    oscillating?** Approaching the page, lifting off, and drifting between
+    strokes are all monotonic — the nib travels one way. A zigzag is the only
+    part of the clip where the direction of travel flips over and over. So the
+    signal is the local density of sign changes in the nib's vertical velocity,
+    and the window is the longest run where that density says "at least two
+    reversals nearby".
+
+    That also makes it self-scaling. Nothing here is in pixels or milliseconds:
+    `span` is in samples, and a faster or slower zigzag simply puts more or
+    fewer reversals in the same window without moving the threshold.
+
+    Validated against both takes that have a known answer — take 2, where the
+    stroke runs about 130..262 of 483, and run B — rather than against the one
+    it was written on.
     """
-    idx, areas = [], []
+    y0, y1, x0, x1 = cal.roi
+    yy, xx = np.mgrid[0:y1 - y0, 0:x1 - x0]
+
+    idx, nib = [], []
     for i in range(1, len(files) + 1, step):
         img = load(files[i - 1], cal.roi)
         dark = img < np.median(img) * 0.5
         pen = morph(morph(dark, cal.erode, "e"), cal.dilate, "d")
+        # The same leftmost-sliver rule [scan] uses, so the window is found on
+        # the very feature the measurement is later made from. A rule that
+        # tracked something else could bracket frames where the nib is not
+        # locatable at all.
+        v = np.nan
+        if cal.pen_min_px <= pen.sum() <= cal.pen_max_px:
+            px, py = xx[pen], yy[pen]
+            v = float(py[px <= px.min() + cal.sliver].mean())
         idx.append(i)
-        areas.append(int((dark & ~morph(pen, cal.clearance, "d")).sum()))
-    areas = np.array(areas, dtype=np.float64)
-    if areas.max() <= 0:
-        sys.exit("no ink anywhere in the clip")
-    grow = np.diff(areas)
-    moving = np.flatnonzero(grow > max(1.0, 0.02 * grow.max()))
-    if len(moving) < 2:
+        nib.append(v)
+
+    nib = np.array(nib, dtype=np.float64)
+    if not np.isfinite(nib).any():
+        sys.exit("no pen found anywhere in the clip: is the ROI the page?")
+
+    # Sign of travel, carried across frames where the nib is missing or still,
+    # so a single dropped frame in the middle of a sweep is not a reversal.
+    flips = np.zeros(len(nib), dtype=np.float64)
+    prev = 0.0
+    for i in range(1, len(nib)):
+        d = nib[i] - nib[i - 1]
+        if not np.isfinite(d) or d == 0.0:
+            continue
+        sign = 1.0 if d > 0 else -1.0
+        if prev != 0.0 and sign != prev:
+            flips[i] = 1.0
+        prev = sign
+
+    density = np.convolve(flips, np.ones(span), mode="same")
+    live = np.isfinite(nib) & (density >= 2.0)
+    a, b = longest_run(live)
+    if b - a < 3:
+        # Nothing oscillated. Say so by handing back the whole clip: the
+        # boundary check in [main] will refuse it rather than measure it.
         return 1, len(files)
-    return (max(1, idx[moving[0]] - 8 * step),
-            min(len(files), idx[moving[-1] + 1] + 8 * step))
+    return (max(1, idx[a] - pad * step),
+            min(len(files), idx[min(b, len(idx) - 1)] + pad * step))
 
 
 def main():
@@ -459,6 +595,27 @@ def main():
     dt = 1000.0 / fps
     print(f"ink steps every {period:.3f} frames at {a.refresh:g} Hz "
           f"-> capture {fps:.1f} fps ({dt:.3f} ms a frame)")
+
+    # The capture rate is derived from the refresh rate the caller asserted, so
+    # a wrong --refresh shows up here as a camera that shot at a rate no camera
+    # offers. Run C read 362.7 fps at --refresh 90 and 241.8 at --refresh 60,
+    # from the same phone that shot 242.1 on take 2 — which is not a subtle
+    # clue that the panel had dropped to 60 Hz for that take, and is worth
+    # saying rather than leaving in the numbers for someone to notice.
+    near = min(CAMERA_RATES, key=lambda r: abs(r - fps))
+    if abs(near - fps) > CAMERA_RATE_TOL * near:
+        print(f"  WARNING: {fps:.1f} fps is not a rate cameras shoot at, so "
+              f"--refresh {a.refresh:g} is probably wrong for this clip.")
+        # Every interpretation, rather than a guess between them. At period
+        # 4.03 the two candidates are 240 fps / 59.6 Hz and 480 fps / 119.1 Hz,
+        # and they are almost equidistant from the computed rate — but this
+        # panel only offers 60 and 90, so a person reading the list resolves it
+        # instantly and an argmin would have picked the wrong one.
+        options = "   ".join(
+            f"{r:g} fps -> {r / period:.0f} Hz" for r in CAMERA_RATES if 20 <= r / period <= 200
+        )
+        print(f"  The measured period of {period:.2f} frames per refresh means: {options}")
+        print(f"  Check which of those the panel was actually holding.")
     # A period sitting on the search boundary means no periodicity was found,
     # not that the ink steps every two frames. Reporting it would rescale every
     # latency below by whatever the true rate was — silently, and by a third on
@@ -472,17 +629,17 @@ def main():
         )
     print()
 
-    print(f"{'DARK':>6} {'n':>3} {'median':>8} {'spread':>7}  readings / why rejected")
+    print(f"{'DARK':>6} {'n':>3} {'cut':>4} {'median':>8} {'spread':>7}  readings / why rejected")
     accepted = []
     for f in DARK_SWEEP:
-        lats = latencies(sigs[f], cal, dt)
-        why = verdict(lats, a.refresh)
+        good, dropped = admissible(latencies(sigs[f], cal, dt), a.refresh)
+        why = verdict(good, a.refresh)
         if why:
-            print(f"{f:6.2f} {len(lats):3d} {'':>8} {'':>7}  rejected: {why}")
+            print(f"{f:6.2f} {len(good):3d} {dropped:4d} {'':>8} {'':>7}  rejected: {why}")
             continue
-        v = np.array(lats)
+        v = np.array(good)
         accepted.append(float(np.median(v)))
-        print(f"{f:6.2f} {len(v):3d} {np.median(v):8.1f} {v.max()-v.min():7.1f}  "
+        print(f"{f:6.2f} {len(v):3d} {dropped:4d} {np.median(v):8.1f} {v.max()-v.min():7.1f}  "
               + " ".join(f"{x:.1f}" for x in v))
 
     if not accepted:

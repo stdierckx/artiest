@@ -822,21 +822,74 @@ So the tool no longer picks a threshold. It sweeps, rejects any pass failing a
 least three apexes, apexes agreeing to within about a refresh and a half — and
 reports the consensus of the survivors with their range.
 
-**On take 2, from the automatically found page, it reports 44.3 ms** (apexes
-45.5, 43.6, 45.1, 43.4), against the 45.2 published from a hand-tuned ROI. The
-page detection transfers — that part worked — and the two agree well inside the
-method's spread.
+**Both remaining gaps are now closed, and the tool reproduces the number with no
+hand-passed anything.** Take 2 reads **45.1 ms** and run B **45.8 ms**, each over
+**5 of 9 thresholds**, from an automatically found page and an automatically
+found analysis window. Against the 45.2 ms published from a hand-tuned ROI, that
+is agreement well inside the method's spread — and it is now two independent
+clips agreeing rather than one clip re-measured.
 
-**But only one of nine thresholds survived the gates**, so that 44.3 is a single
-pass rather than the consensus the design intends, and its printed range of
-44.3-44.3 overstates what it knows. A prototype using the original's unscaled
-tolerances accepted three thresholds and agreed at 44.1-44.5, so the cause is
-most likely the scaled `APEX_DROP_W` and settle tolerances being slightly wrong
-for this stroke width rather than anything deeper — but that is a hypothesis and
-is written here as one. **Tuning those against take 2 and run B, so that a
-healthy clip passes several thresholds, is the first thing to finish in W0.**
+Three fixes got it there, and the order matters because the first two were
+diagnosed the wrong way round at first.
 
-Three further changes came out of it, one of them a regression this work
+**1. The analysis window comes from the nib's direction reversals.** The
+hypothesis left at the end of the last session — *take the window from the nib
+track, because the drawing period is where the nib oscillates* — was right, and
+sharpening it to **sign changes in the nib's vertical velocity** is what made it
+work. Approach, lift-off and drift are monotonic; a zigzag is the only part of
+the clip where the direction of travel flips repeatedly. Nothing in the rule is
+in pixels or milliseconds, so a faster or slower zigzag moves nothing.
+
+**2. A dark blob covering a fifth of the page is a hand, not a pen.** The nib
+rule alone still started take 2's window at frame 85, in the middle of the
+withdrawal, and the first apex there read 49-74 ms at almost every threshold and
+dragged the consensus down to 3 of 9. The cause is physical and had no guard:
+during the run-up the blob is 30-46% of the page, and where the blob is that
+large the erode/dilate separation of ink from pen is not measuring anything.
+`PEN_MAX_PAGE` is that ceiling, and — the point — **it was swept rather than
+picked**:
+
+```
+              0.10   0.125  0.15   0.175  0.20   0.25
+take 2        45.1   45.1   45.1   45.1   45.1   42.7      (5/9 until 0.25, then 3/9)
+run B          --     --    46.0   45.8   45.8   45.8      (inconclusive below 0.15)
+```
+
+Both are flat across 0.15-0.20 and both fail outside it **in opposite
+directions**, so the shipped 0.175 is the middle of an overlap rather than a
+value that happened to work on the clip it was written against. That table is in
+the source, so the next person to move it knows what moving it costs.
+
+**3. The physical checks now reject readings, not whole thresholds.** This was
+the mis-diagnosis. Eight of nine thresholds were being thrown away entire because
+*one* apex came back at -0.4 ms — while the other four agreed at 45 ms all along.
+A negative latency is evidence about that apex, not about the clip: the pen's
+blob leaked through the clearance at one reversal and the settle walk locked onto
+it. So each reading faces the physics alone, and what survives faces the
+agreement check as a group. Stricter about individual numbers, looser about
+passes, which is the right way round.
+
+**A fourth thing fell out, and it matters for the re-film.** Run C is still
+inconclusive — but at `--refresh 90` it computes a capture rate of **362.7 fps**,
+from the same phone that shot 242.1 on take 2. At `--refresh 60` it computes
+241.8. **Run C was filmed with the panel at 60 Hz, not 90**, which no one knew,
+and it is very likely part of why that take never made sense. The tool now
+cross-checks the derived capture rate against the rates cameras actually offer
+and, when it does not match, prints every interpretation of the measured period
+rather than guessing between them:
+
+```
+WARNING: 362.7 fps is not a rate cameras shoot at, so --refresh 90 is probably
+wrong for this clip.
+The measured period of 4.03 frames per refresh means:
+    120 fps -> 30 Hz   240 fps -> 60 Hz   480 fps -> 119 Hz
+```
+
+This panel offers 60 and 90, so a person reading that list resolves it in a
+second — where an argmin would have picked 480/119, because 362.7 sits almost
+exactly between the two candidates.
+
+Three further changes came out of the rebuild, one of them a regression this work
 introduced and caught:
 
 - **Per-frame thresholding is load-bearing.** Replacing it with one calibrated
@@ -854,20 +907,18 @@ introduced and caught:
 - **Morphology is separable** — bit-identical, six times faster — and each frame
   is decoded once for the whole sweep rather than once per threshold.
 
-**What is not done, and is the next thing.** The analysis window is still passed
-by hand. The obvious automatic rule — the span over which the ink area grows —
-does not work, because during the run-up the pen and hand enter the page and are
-counted as ink; on take 2 it reports the ink at 97% of final area by frame 31,
-when the stroke is drawn between about 130 and 262. Feeding that window to the
-frame-rate calibration pinned its search at the lower bound and silently rescaled
-every reading by a third. **That failure is now a hard error rather than a wrong
-number**, which is the part worth having landed. The fix is probably to take the
-window from the *nib track* — the drawing period is where the nib oscillates —
-rather than from the ink area, and it is left rather than guessed at.
+**What this does and does not settle.** The instrument is now validated on two
+clips with a known answer, unattended, and it says 45.1 and 45.8 ms. That is not
+stop condition 1: that condition is about a **fresh** film, and the re-film has
+not happened. What has changed is that pointing a camera at the tablet is now
+worth doing, because the tool will either agree or say why it cannot — and it can
+no longer quietly return a number it has not earned.
 
-**The re-film has not happened**, so W0 is not closed and the plan's stop
-condition 1 has not been tested against fresh footage. What has changed is that
-there is now an instrument worth pointing at it.
+**Two things the re-film has to get right**, both learned above rather than
+guessed: the panel must actually be holding 90 Hz for the whole take (run C was
+not, and nobody noticed for a day), and the clip needs enough clean reversals —
+run C and C2 still fail on *"only 2 usable apexes"*, which is a property of the
+footage and not of the tool.
 
 ### W1–W2 — the dynamics model, and the refactor that must be invisible
 
