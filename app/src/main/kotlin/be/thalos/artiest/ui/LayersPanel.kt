@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,13 +36,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -326,20 +334,45 @@ private fun LayerRow(
             // A raw text field rather than an `OutlinedTextField`, which is
             // 56dp tall on its own and would make every row in the list jump
             // when one of them is being renamed.
-            var text by remember(info.id) { mutableStateOf(info.name) }
+            // A `TextFieldValue` and not a `String`, so the old name can start
+            // out **selected**. Without the selection the cursor sits at
+            // position zero and the first thing typed lands in front of what is
+            // already there: renaming "Layer 1" to "Sketch" produced
+            // "SketchLayer 1" on the tablet. Selected, the field behaves the
+            // way every rename box does -- type to replace, tap to place a
+            // cursor and edit.
+            var text by remember(info.id) {
+                mutableStateOf(
+                    TextFieldValue(info.name, selection = TextRange(0, info.name.length)),
+                )
+            }
+            // Focused the moment it appears, and the keyboard with it. Without
+            // this the field opens, shows the old name, and swallows every key
+            // -- which is exactly what it did on the tablet: a text box that
+            // looks editable and is not. A rename that needs a second tap on
+            // the thing you just tapped is a rename nobody finishes.
+            val focus = remember(info.id) { FocusRequester() }
+            LaunchedEffect(info.id) { focus.requestFocus() }
             BasicTextField(
                 value = text,
                 onValueChange = { text = it },
                 singleLine = true,
                 textStyle = TextStyle(color = scheme.onSurface, fontSize = 13.sp),
                 cursorBrush = SolidColor(scheme.primary),
+                // Done rather than Enter, because a layer name is one line and
+                // the keyboard's own action is the closest thing to hand once
+                // the keyboard is up. The tick beside it does the same job for
+                // a pen.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onRenamed(text.text) }),
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(focus)
                     .clip(RoundedCornerShape(6.dp))
                     .background(scheme.surface)
                     .padding(horizontal = 6.dp, vertical = 4.dp),
             )
-            RowAction(ToolIcons.check, "Done", true) { onRenamed(text) }
+            RowAction(ToolIcons.check, "Done", true) { onRenamed(text.text) }
         } else {
             Text(
                 text = info.name,
