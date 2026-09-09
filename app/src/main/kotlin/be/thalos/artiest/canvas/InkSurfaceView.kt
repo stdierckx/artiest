@@ -15,7 +15,7 @@ import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
-import be.thalos.artiest.engine.ink.RoundPen
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.input.PenSample
@@ -84,12 +84,12 @@ class InkSurfaceView(
     /**
      * The brush.
      *
-     * A `val` holding a mutable `RoundPen` rather than a reassignable field:
+     * A `val` holding a mutable `Brush` rather than a reassignable field:
      * `StrokeBuilder` captures the instance at construction, so replacing it
      * here would leave the builder drawing with the old one and nothing would
-     * fail. `RoundPen`'s own settings are `var`, so W15's sliders move those.
+     * fail. `Brush`'s own settings are `var`, so W15's sliders move those.
      */
-    val pen: RoundPen = RoundPen()
+    val pen: Brush = Brush()
 
     /** Ink colour. W15 gives it a swatch; until then it is black. */
     var inkColorArgb: Int = Color.BLACK
@@ -895,7 +895,7 @@ class InkSurfaceView(
         /** The pointer this stroke belongs to, for asking the predictor. */
         private var strokePointerId = -1
 
-        /** Stroke start, for the tail's elapsed time. See `RoundPen.sizeFor`. */
+        /** Stroke start, for the tail's elapsed time. See `Brush.sizeFor`. */
         private var downTimeNanos = 0L
 
         /** The last real sample in document space, for the lead measurement. */
@@ -953,7 +953,7 @@ class InkSurfaceView(
          *
          * A `PenSample` carries what `MotionEvent` reported, which is **view**
          * coordinates. Everything downstream — the stabilizer's time constant,
-         * the resampler's arc-length spacing, `RoundPen`'s radii, the layer
+         * the resampler's arc-length spacing, `Brush`'s radii, the layer
          * bitmap, `Bounds` — is document space. Feeding view coordinates
          * straight to the builder is not a coordinate mix-up that shows up as a
          * crash: it draws a stroke scaled by the zoom factor and offset by the
@@ -1194,7 +1194,7 @@ class InkSurfaceView(
      * That is the whole of "predicted dabs go to the front buffer only". The
      * committed `Stroke` is built from real samples, so the layer never sees a
      * guess, and the `DabEmitter` seam is what makes the two paths able to
-     * share `RoundPen`'s sizing and spacing without sharing a destination.
+     * share `Brush`'s sizing and spacing without sharing a destination.
      */
     private inner class TailEmitter : DabEmitter {
         var batch: DabBatch? = null

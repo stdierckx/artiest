@@ -73,7 +73,7 @@ class Stabilizer(val strength: Float) {
      * Smoothed for the same reason as position and with the same time constant:
      * pressure drives dab radius, so pressure jitter is width jitter, and a
      * stroke whose width flickers reads as a rendering fault rather than as a
-     * noisy sensor. Filtering it here rather than in `RoundPen` keeps the
+     * noisy sensor. Filtering it here rather than in `Brush` keeps the
      * single time constant that makes the rate-invariance argument above hold
      * for the whole stage.
      */

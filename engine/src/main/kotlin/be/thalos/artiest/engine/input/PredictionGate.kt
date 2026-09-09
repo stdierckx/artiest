@@ -202,7 +202,7 @@ class PredictionGate(
          * Movements below this, in document pixels, carry no heading.
          *
          * 0.01 doc px is a hundredth of the smallest dab spacing
-         * (`RoundPen.MIN_SPACING_DOC`), so nothing that could produce ink is
+         * (`Brush.MIN_SPACING_DOC`), so nothing that could produce ink is
          * discarded by it.
          */
         const val DEGENERATE_MOVE: Float = 0.01f

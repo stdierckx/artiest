@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.ink
 
+import be.thalos.artiest.engine.brush.Brush
 import kotlin.math.ceil
 import kotlin.math.sqrt
 
@@ -10,13 +11,13 @@ import kotlin.math.sqrt
  * The return value is what keeps the whole stage allocation-free without
  * threading a brush through the geometry. Spacing depends on dab radius,
  * radius depends on pressure, and pressure is only known at the moment a dab
- * is placed — so either the resampler learns about `RoundPen`, or the sink
+ * is placed — so either the resampler learns about `Brush`, or the sink
  * answers the one question the resampler has. This is the second.
  *
  * **The return must be strictly positive.** A zero or negative spacing is an
  * infinite loop inside [CatmullRomResampler.add] — not a wrong picture, a hung
- * UI thread with the pen still on the glass. [RoundPen.spacingFor] floors it at
- * [RoundPen.MIN_SPACING_DOC] for that reason, and the resampler checks the
+ * UI thread with the pen still on the glass. [Brush.spacingFor] floors it at
+ * [Brush.MIN_SPACING_DOC] for that reason, and the resampler checks the
  * returned value rather than trusting it.
  */
 fun interface DabEmitter {

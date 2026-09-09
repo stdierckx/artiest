@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.ink
 
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.Stabilizer
 import be.thalos.artiest.engine.input.ToolType
@@ -74,7 +75,7 @@ class StrokeBuilderTest {
 
     @Test
     fun `radii are the pen's curve applied to the interpolated pressure`() {
-        val pen = RoundPen()
+        val pen = Brush()
         val b = StrokeBuilder(pen)
         b.begin(0xFF112233.toInt())
         drag(b, 40, pressure = 0.6f)
@@ -130,7 +131,7 @@ class StrokeBuilderTest {
 
     @Test
     fun `dabs stay evenly spaced across the whole stroke`() {
-        val pen = RoundPen()
+        val pen = Brush()
         val b = StrokeBuilder(pen)
         b.begin(0)
         drag(b, 300, step = 12f, pressure = 1f)
@@ -199,7 +200,7 @@ class StrokeBuilderTest {
 
     @Test
     fun `moving the stabilization slider takes effect on the next stroke`() {
-        val pen = RoundPen().apply { stabilization = 0f }
+        val pen = Brush().apply { stabilization = 0f }
         val b = StrokeBuilder(pen)
         b.begin(0)
         // With no smoothing, a hard corner stays a hard corner.
@@ -231,7 +232,7 @@ class StrokeBuilderTest {
         // 150,000 px jump between two samples arrives at the spline as a
         // 60,000 px one and the path is shorter than the samples suggest. Any
         // test that reasons about raw sample positions has to turn it off.
-        val pen = RoundPen().apply {
+        val pen = Brush().apply {
             sizeMin = 0f
             sizeMax = 0f
             onsetMillis = 0f
@@ -250,7 +251,7 @@ class StrokeBuilderTest {
 
     @Test
     fun `antiAlias and colour are frozen at pen down`() {
-        val pen = RoundPen()
+        val pen = Brush()
         val b = StrokeBuilder(pen)
         b.begin(0xFF203040.toInt())
         drag(b, 20)
@@ -268,7 +269,7 @@ class StrokeBuilderTest {
         // must therefore be one code path and not two that agree today: this
         // compares raw bits, so a divergence of one ulp fails here rather than
         // showing up as a golden that only moves on the tablet.
-        val pen = RoundPen()
+        val pen = Brush()
         val viaSample = StrokeBuilder(pen)
         val viaParts = StrokeBuilder(pen)
         viaSample.begin(0x11223344)
@@ -300,7 +301,7 @@ class StrokeBuilderTest {
         // the next real sample runs through, and the ink would lean toward
         // wherever the predictor had been guessing — a bias with no symptom
         // except that the line is subtly wrong.
-        val pen = RoundPen()
+        val pen = Brush()
         val b = StrokeBuilder(pen)
         b.begin(0xFF000000.toInt())
         for (i in 0 until 20) b.add(sample(100f + i * 6f, 200f, 0.6f, i))
@@ -323,7 +324,7 @@ class StrokeBuilderTest {
 
         // And the next real sample lands exactly where it would have without
         // the fork ever existing.
-        val control = StrokeBuilder(RoundPen())
+        val control = StrokeBuilder(Brush())
         control.begin(0xFF000000.toInt())
         for (i in 0 until 20) control.add(sample(100f + i * 6f, 200f, 0.6f, i))
         b.add(sample(220f, 200f, 0.6f, 20))
@@ -380,7 +381,7 @@ class StrokeBuilderTest {
      * is behind the last sample pushed, expressed as time.
      */
     private fun tipLagMs(strength: Float, rateHz: Float): Float {
-        val pen = RoundPen().apply { stabilization = strength }
+        val pen = Brush().apply { stabilization = strength }
         val builder = StrokeBuilder(pen)
         builder.begin(0)
         val dtNanos = (1e9f / rateHz).toLong()

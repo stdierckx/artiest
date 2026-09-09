@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.ink
 
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.input.PenSample
 import java.lang.management.ManagementFactory
 
@@ -79,7 +80,7 @@ object DabLoopBench {
         // One builder for the whole measurement, as the app has one per stroke
         // in flight. After the first iteration its dab array is grown and stays
         // grown, which is exactly the steady state being measured.
-        val b = StrokeBuilder(RoundPen())
+        val b = StrokeBuilder(Brush())
 
         repeat(WARMUP) {
             b.begin(BLACK)

@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.ink
 
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.Stabilizer
 
@@ -47,7 +48,7 @@ import be.thalos.artiest.engine.input.Stabilizer
  *
  * Not thread-safe. One instance, UI thread, for the life of the app.
  */
-class StrokeBuilder(val pen: RoundPen = RoundPen()) : DabEmitter {
+class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
     /**
      * Rebuilt in [begin] when the toolbar has moved `pen.stabilization` since
@@ -253,7 +254,7 @@ class StrokeBuilder(val pen: RoundPen = RoundPen()) : DabEmitter {
      *
      * The cap is a loud failure on purpose, and the arithmetic is what makes
      * that defensible. The tightest spacing any dab can ask for is
-     * [RoundPen.MIN_SPACING_DOC], half a document pixel, so [MAX_DABS] dabs is
+     * [Brush.MIN_SPACING_DOC], half a document pixel, so [MAX_DABS] dabs is
      * 262,144 document pixels of unbroken path — 121 full traverses of a
      * 2160 px document without the pen leaving the glass. No hand does that.
      * Reaching it means a spacing or a transform is wrong, and a `check` that

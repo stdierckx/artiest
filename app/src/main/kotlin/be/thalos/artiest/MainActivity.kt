@@ -283,7 +283,7 @@ private fun CanvasScreen(
     var panelStatus by remember { mutableStateOf("") }
 
     // The brush settings live here as Compose state and are pushed into the
-    // pen, not read back out of it. `RoundPen`'s fields are plain vars on the
+    // pen, not read back out of it. `Brush`'s fields are plain vars on the
     // render path — deliberately, they are read once per stroke — so making
     // them the source of truth for a slider would mean a recomposition could
     // not see a change and a stroke could see half of one.
@@ -589,7 +589,7 @@ private fun Swatch(colour: Int, selected: Boolean, onClick: () -> Unit) {
  *
  * The number is shown because these two are the only controls in the app whose
  * effect is invisible until the next stroke: a smoothing change does nothing to
- * the ink already down, and `RoundPen.sizeMax` is the *upper* end of a pressure
+ * the ink already down, and `Brush.sizeMax` is the *upper* end of a pressure
  * curve, so at a light touch moving it changes nothing at all. Without the
  * readout that reads as a broken slider.
  */
@@ -969,10 +969,10 @@ private fun r(v: Float, places: Int): String {
 
 private fun gib(bytes: Long): String = r(bytes / (1024f * 1024f * 1024f), 2)
 
-/** `RoundPen.sizeMax`'s default, mirrored so the slider starts where the pen is. */
+/** `Brush.sizeMax`'s default, mirrored so the slider starts where the pen is. */
 private const val DEFAULT_SIZE_MAX = 24f
 
-/** `RoundPen.stabilization`'s default. The plan's number, on the plan's slider. */
+/** `Brush.stabilization`'s default. The plan's number, on the plan's slider. */
 private const val DEFAULT_SMOOTHING = 0.15f
 
 /**

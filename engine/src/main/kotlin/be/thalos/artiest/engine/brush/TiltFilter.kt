@@ -24,7 +24,7 @@ import kotlin.math.sin
  * with `atan2`. Near the wrap it does the right thing by construction, and
  * there is no special case to get wrong.
  *
- * **Time-based, not sample-based**, for the reason `RoundPen.onsetMillis`
+ * **Time-based, not sample-based**, for the reason [Brush.onsetMillis]
  * spells out at length: this device samples at 246.85 Hz against a 60 Hz panel
  * and 321.75 Hz against 90 Hz, so a per-sample coefficient changes the filter's
  * time constant by a third when the refresh rate changes. The coefficient is

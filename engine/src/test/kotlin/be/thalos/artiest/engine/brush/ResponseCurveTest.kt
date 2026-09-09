@@ -16,7 +16,7 @@ class ResponseCurveTest {
      * path, the goldens move and this says why before the diff does.
      */
     @Test
-    fun `the cubic is bit-identical to the multiply RoundPen used`() {
+    fun `the cubic is bit-identical to the multiply Brush used`() {
         var p = 0f
         while (p <= 1f) {
             assertEquals(p * p * p, ResponseCurve.CUBIC.evaluate(p), "p=$p")
@@ -69,7 +69,7 @@ class ResponseCurveTest {
     }
 
     /**
-     * The clamp `RoundPen.sizeFor` documents: a negative input became a
+     * The clamp `Brush.sizeFor` documents: a negative input became a
      * negative radius and reached MutableBounds as an inverted rectangle.
      */
     @Test

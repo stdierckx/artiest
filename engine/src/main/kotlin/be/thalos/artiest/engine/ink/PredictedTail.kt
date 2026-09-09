@@ -44,7 +44,7 @@ class PredictedTail(private val emitter: DabEmitter) {
      *
      * Pressure is interpolated across the tail so the width does not step at
      * the join. [elapsedMillis] is not: the tail spans at most one frame, and
-     * the only thing that reads it is `RoundPen`'s onset ramp, which is a
+     * the only thing that reads it is `Brush`'s onset ramp, which is a
      * 12 ms effect at the very start of a stroke where the predictor has no
      * history to work from anyway.
      *

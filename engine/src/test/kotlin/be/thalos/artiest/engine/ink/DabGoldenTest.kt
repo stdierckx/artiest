@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.ink
 
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.input.PenSample
 import java.io.File
 import kotlin.test.Test
@@ -48,7 +49,7 @@ class DabGoldenTest {
 
     private fun corpus(): Map<String, List<PenSample>> = StrokeCorpus.all()
 
-    private fun render(samples: List<PenSample>, pen: RoundPen = RoundPen()): Stroke {
+    private fun render(samples: List<PenSample>, pen: Brush = Brush()): Stroke {
         val b = StrokeBuilder(pen)
         b.begin(0xFF000000.toInt())
         for (s in samples) b.add(s)
@@ -60,7 +61,7 @@ class DabGoldenTest {
      * the numbers, so a diff says *why* before it says what — and then one line
      * per dab, `Float.toString` throughout.
      */
-    private fun serialize(name: String, pen: RoundPen, samples: Int, s: Stroke): String {
+    private fun serialize(name: String, pen: Brush, samples: Int, s: Stroke): String {
         val sb = StringBuilder()
         sb.append("# artiest dab golden v1\n")
         sb.append("# stroke=").append(name).append(" samples=").append(samples).append('\n')
@@ -88,7 +89,7 @@ class DabGoldenTest {
         val write = System.getProperty("artiest.golden.write") == "true"
         val missing = ArrayList<String>()
         for ((name, samples) in corpus()) {
-            val pen = RoundPen()
+            val pen = Brush()
             val text = serialize(name, pen, samples.size, render(samples, pen))
             val file = goldenFile(name)
             if (write) {
@@ -132,20 +133,20 @@ class DabGoldenTest {
     @Test
     fun `every stage the goldens are supposed to cover actually moves them`() {
         val strokes = corpus()
-        fun renderAll(pen: () -> RoundPen): String =
+        fun renderAll(pen: () -> Brush): String =
             strokes.entries.joinToString("\n") { (n, s) ->
                 val p = pen()
                 serialize(n, p, s.size, render(s, p))
             }
 
-        val baseline = renderAll { RoundPen() }
+        val baseline = renderAll { Brush() }
 
-        assertNotEquals(baseline, renderAll { RoundPen().apply { spacing = 0.13f } }, "arc walk")
-        assertNotEquals(baseline, renderAll { RoundPen().apply { sizeMax = 24.5f } }, "size curve")
-        assertNotEquals(baseline, renderAll { RoundPen().apply { pressureCurve = 2.9f } }, "pressure curve")
-        assertNotEquals(baseline, renderAll { RoundPen().apply { onsetMillis = 11f } }, "onset ramp")
-        assertNotEquals(baseline, renderAll { RoundPen().apply { onsetPressure = 0.26f } }, "onset lift")
-        assertNotEquals(baseline, renderAll { RoundPen().apply { stabilization = 0.16f } }, "stabilizer")
+        assertNotEquals(baseline, renderAll { Brush().apply { spacing = 0.13f } }, "arc walk")
+        assertNotEquals(baseline, renderAll { Brush().apply { sizeMax = 24.5f } }, "size curve")
+        assertNotEquals(baseline, renderAll { Brush().apply { pressureCurve = 2.9f } }, "pressure curve")
+        assertNotEquals(baseline, renderAll { Brush().apply { onsetMillis = 11f } }, "onset ramp")
+        assertNotEquals(baseline, renderAll { Brush().apply { onsetPressure = 0.26f } }, "onset lift")
+        assertNotEquals(baseline, renderAll { Brush().apply { stabilization = 0.16f } }, "stabilizer")
     }
 
     @Test

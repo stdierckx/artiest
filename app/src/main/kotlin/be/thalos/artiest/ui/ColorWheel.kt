@@ -70,7 +70,7 @@ private val PUCK_RADIUS = 9.dp
  * under the finger through black, through white, and back out again.
  *
  * **What this deliberately does not have.** No alpha slider — the app's ink is
- * opaque by construction and `RoundPen` says why that is load-bearing rather
+ * opaque by construction and `Brush` (Phase 1's `RoundPen`) says why that is load-bearing rather
  * than incidental. No hex field, no eyedropper, no recent-colours row. This is
  * the wheel; the panel that will hold it is Phase 4's job.
  *

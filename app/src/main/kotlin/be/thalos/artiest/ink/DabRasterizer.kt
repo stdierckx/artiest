@@ -17,7 +17,7 @@ import be.thalos.artiest.engine.ink.Stroke
  * Antialiased filled circles, which is `:spike`'s dab exactly — `Paint(
  * Paint.ANTI_ALIAS_FLAG)`, `Style.FILL` — because `:spike` is the measured A/B
  * control and a candidate that rasterizes differently is not being compared to
- * it. Hardness, opacity and the second blend mode are Phase 2, and `RoundPen`
+ * it. Hardness, opacity and the second blend mode are Phase 2, and `Brush`
  * carries the tripwire comment saying why none of them may ship before the
  * scratch buffer does.
  */

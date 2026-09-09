@@ -64,7 +64,7 @@ object StrokeCorpus {
 
         // Pressure climbing from the measured minimum to ordinary drawing
         // force over ~20 ms. This is the stroke that pins the onset ramp; if
-        // RoundPen's lift or its release shape changes, it moves and nothing
+        // Brush's lift or its release shape changes, it moves and nothing
         // else does.
         "onset" to (0 until 40).map {
             sample(400f + it * 3f, 900f, min(0.45f, 0.00208f + 0.022f * it), it)

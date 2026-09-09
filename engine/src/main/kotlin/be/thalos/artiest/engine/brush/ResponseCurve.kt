@@ -16,7 +16,7 @@ import kotlin.math.pow
  * exactly. A three-point curve does not reproduce a cubic; it replaces it.
  *
  * So the cubic stays a cubic — [power] evaluates `p*p*p` by multiplication, not
- * `pow`, so it is bit-identical to what `RoundPen` did — and [ofPoints] exists
+ * `pow`, so it is bit-identical to what Phase 1's `RoundPen` did — and [ofPoints] exists
  * beside it for the authored curves the brush format needs. The goldens hold
  * because nothing about the default pen's arithmetic changed.
  *
@@ -46,7 +46,7 @@ class ResponseCurve private constructor(
     /**
      * The response at [t], with [t] clamped to 0..1 first.
      *
-     * Clamped rather than required in range for the reason `RoundPen.sizeFor`
+     * Clamped rather than required in range for the reason `Brush.sizeFor`
      * gives: pressure arrives interpolated along a Catmull-Rom segment, and a
      * negative input here becomes a negative dab radius, which reaches
      * `MutableBounds.add` as a rectangle inverted around the dab centre. The

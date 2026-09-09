@@ -89,7 +89,7 @@ class StrokeStress(private val view: InkSurfaceView) {
          * Constant pressure, or null to sweep the full range.
          *
          * The two are different measurements and neither alone is the answer.
-         * Sweeping is the worst case by a wide margin, because `RoundPen`
+         * Sweeping is the worst case by a wide margin, because `Brush`
          * spaces dabs at a fraction of the *diameter* and clamps the result at
          * `MIN_SPACING_DOC`: a feather-light dab is 0.5 doc px from its
          * neighbour where a full-press one is 3.0, so the same movement emits
@@ -227,7 +227,7 @@ class StrokeStress(private val view: InkSurfaceView) {
         c.clear()
         c.x = viewPoint[0]
         c.y = viewPoint[1]
-        // Pressure sweeps the full range and back, so RoundPen's curve, the
+        // Pressure sweeps the full range and back, so Brush's curve, the
         // onset ramp and the spacing that follows from radius are all covered.
         c.pressure = constantPressure ?: (0.05f + 0.95f * (0.5f - 0.5f * cos(t * TWO_PI * 2f)))
         c.size = 1f

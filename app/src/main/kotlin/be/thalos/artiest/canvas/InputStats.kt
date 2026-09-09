@@ -218,7 +218,7 @@ class InputStats(val capacity: Int = DEFAULT_CAPACITY) {
      *
      * An event's cost is not a constant: it is roughly linear in the dabs the
      * resampler emitted, and that count swings by an order of magnitude with
-     * pressure, because `RoundPen`'s spacing is a fraction of the *diameter*
+     * pressure, because `Brush`'s spacing is a fraction of the *diameter*
      * and a feather-light dab is 30x closer to its neighbour than a full-press
      * one. A per-event budget with no dab count beside it is therefore a number
      * about the stroke that was drawn, not about the code.

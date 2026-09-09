@@ -373,7 +373,7 @@ class RejectionStress(private val view: InkSurfaceView) {
         MotionEvent.TOOL_TYPE_STYLUS,
         view.width * 0.3f + t * view.width * 0.4f,
         view.height * 0.45f,
-        // Firm and constant. The control has to commit dabs, and RoundPen's
+        // Firm and constant. The control has to commit dabs, and Brush's
         // onset ramp plus a pressure sweep would make "few dabs" a plausible
         // outcome of a correct run.
         0.8f,

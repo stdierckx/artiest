@@ -235,7 +235,7 @@ class CatmullRomResamplerTest {
         cr.begin()
         // Pressure swinging hard between samples: a spline fit through these
         // would undershoot below zero, and a negative pressure is a negative
-        // radius by the time RoundPen is done with it.
+        // radius by the time Brush is done with it.
         val ps = listOf(0.9f, 0.02f, 0.95f, 0.01f, 0.99f, 0.02f)
         for ((i, p) in ps.withIndex()) cr.add(i * 20f, 0f, p, i * 3.1f)
         cr.end()

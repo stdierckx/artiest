@@ -1,4 +1,4 @@
-package be.thalos.artiest.engine.ink
+package be.thalos.artiest.engine.brush
 
 import kotlin.math.abs
 import kotlin.test.Test
@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Every number in `RoundPen`'s documentation, checked. The class is almost all
+ * Every number in `Brush`'s documentation, checked. The class is almost all
  * comment and the comments are almost all arithmetic, so this file exists so
  * that the arithmetic cannot quietly stop being true.
  *
@@ -14,9 +14,9 @@ import kotlin.test.assertTrue
  * from both sides: a firm press must be untouched by it, and a press so light
  * the floor outlives it must ease rather than step.
  */
-class RoundPenTest {
+class BrushTest {
 
-    private val pen = RoundPen()
+    private val pen = Brush()
 
     /** Well past the 24 ms ramp, so the bare curve is what is measured. */
     private val settled = 100f
@@ -111,7 +111,7 @@ class RoundPenTest {
 
     @Test
     fun `onsetMillis zero is bit exactly the bare curve`() {
-        val off = RoundPen().apply { onsetMillis = 0f }
+        val off = Brush().apply { onsetMillis = 0f }
         for (p in listOf(0f, 0.00208f, 0.1f, 0.5f, 1f)) {
             for (t in listOf(0f, 1f, 6f, 12f, 23f, 100f)) {
                 assertEquals(
@@ -125,7 +125,7 @@ class RoundPenTest {
 
     @Test
     fun `pressure is clamped rather than trusted`() {
-        val bare = RoundPen().apply { onsetMillis = 0f }
+        val bare = Brush().apply { onsetMillis = 0f }
         assertEquals(bare.sizeFor(0f, settled), bare.sizeFor(-0.5f, settled), 0f)
         assertEquals(bare.sizeFor(0f, settled), bare.sizeFor(Float.NEGATIVE_INFINITY, settled), 0f)
         assertEquals(bare.sizeFor(0f, settled), bare.sizeFor(Float.NaN, settled), 0f)
@@ -146,14 +146,14 @@ class RoundPenTest {
         // A full-pressure nib: radius 12, diameter 24, an eighth is 3.
         assertEquals(3f, pen.spacingFor(12f), 1e-6f)
         // The sizeMin nib: radius 0.75, an eighth of 1.5 is 0.1875, floored.
-        assertEquals(RoundPen.MIN_SPACING_DOC, pen.spacingFor(0.75f), 0f)
+        assertEquals(Brush.MIN_SPACING_DOC, pen.spacingFor(0.75f), 0f)
         // The crossover, where an eighth of the diameter is exactly the floor.
-        assertEquals(RoundPen.MIN_SPACING_DOC, pen.spacingFor(2f), 1e-6f)
+        assertEquals(Brush.MIN_SPACING_DOC, pen.spacingFor(2f), 1e-6f)
     }
 
     @Test
     fun `spacing is strictly positive for every radius a broken brush could ask for`() {
-        val broken = RoundPen().apply { sizeMin = 0f; sizeMax = 0f; spacing = 0f }
+        val broken = Brush().apply { sizeMin = 0f; sizeMax = 0f; spacing = 0f }
         for (r in listOf(0f, -1f, 1e-30f, 1e9f, Float.NaN)) {
             val s = broken.spacingFor(r)
             assertTrue(s > 0f && s.isFinite(), "spacingFor($r) was $s; the dab walk would hang")
@@ -162,9 +162,96 @@ class RoundPenTest {
 
     @Test
     fun `a linear curve is available and takes the fast path`() {
-        val linear = RoundPen().apply { pressureCurve = 1f; onsetMillis = 0f }
+        val linear = Brush().apply { pressureCurve = 1f; onsetMillis = 0f }
         assertEquals(12.75f, linear.sizeFor(0.5f, settled), 1e-4f)
-        val other = RoundPen().apply { pressureCurve = 2f; onsetMillis = 0f }
+        val other = Brush().apply { pressureCurve = 2f; onsetMillis = 0f }
         assertEquals(1.5f + 22.5f * 0.25f, other.sizeFor(0.5f, settled), 1e-4f)
+    }
+
+    // ---- W2: the surface that replaced RoundPen ------------------------------
+
+    /**
+     * The factory is a name, not a configuration. If it ever has to set a field
+     * to reproduce Phase 1, the defaults have drifted -- and the dab goldens
+     * will have said so before this does.
+     */
+    @Test
+    fun `pen is the defaults, so the factory sets nothing`() {
+        val a = Brush.pen()
+        val b = Brush()
+        assertEquals(b.sizeMin, a.sizeMin)
+        assertEquals(b.sizeMax, a.sizeMax)
+        assertEquals(b.spacing, a.spacing)
+        assertEquals(b.sizeCurve, a.sizeCurve)
+        assertEquals(b.onsetMillis, a.onsetMillis)
+        assertEquals(b.onsetPressure, a.onsetPressure)
+        assertEquals(b.stabilization, a.stabilization)
+        assertEquals(1f, a.opacity, "the tripwire: opacity is fixed at 1 until W6")
+        assertEquals(1f, a.flow, "and so is flow")
+    }
+
+    /** sizeMin and sizeMax are the CurveOption's range, not a second copy of it. */
+    @Test
+    fun `the size fields are views onto the size option`() {
+        val brush = Brush()
+        brush.sizeMin = 4f
+        brush.sizeMax = 40f
+        assertEquals(4f, brush.size.min)
+        assertEquals(40f, brush.size.max)
+        brush.size.max = 8f
+        assertEquals(8f, brush.sizeMax)
+    }
+
+    @Test
+    fun `pressureCurve round-trips through the curve it sets`() {
+        val brush = Brush()
+        assertEquals(3f, brush.pressureCurve)
+        brush.pressureCurve = 1f
+        assertEquals(ResponseCurve.LINEAR, brush.sizeCurve)
+        assertEquals(0.5f, brush.sizeCurve.evaluate(0.5f))
+    }
+
+    /**
+     * A table curve has no exponent, and saying 1 would let a round-trip
+     * through the brush format silently flatten an authored curve.
+     */
+    @Test
+    fun `pressureCurve is NaN for a curve that is not a power law`() {
+        val brush = Brush()
+        brush.sizeCurve = ResponseCurve.of(0f to 0f, 1f to 1f)
+        assertTrue(brush.pressureCurve.isNaN())
+    }
+
+    /**
+     * The empty-sensor case documented on CurveOption, seen from the brush: a
+     * size option with nothing attached is the constant max, which is why the
+     * pen uses sizeFor(pressure, elapsed) and not this overload.
+     */
+    @Test
+    fun `sizeFor a context with no sensors attached is the constant max`() {
+        val brush = Brush()
+        val c = DabContext().apply { pressure = 0f; elapsedMillis = 1000f }
+        assertEquals(brush.sizeMax, brush.sizeFor(c))
+    }
+
+    @Test
+    fun `sizeFor a context follows an attached sensor and still honours the onset floor`() {
+        val brush = Brush()
+        brush.size.drive(Sensor.PRESSURE, ResponseCurve.CUBIC)
+        val late = DabContext().apply { pressure = 0.5f; elapsedMillis = 1000f }
+        assertEquals(brush.sizeFor(0.5f, 1000f), brush.sizeFor(late), 1e-6f)
+        val early = DabContext().apply { pressure = 0f; elapsedMillis = 0f }
+        assertTrue(brush.sizeFor(early) > brush.sizeMin, "the onset floor did not apply")
+    }
+
+    @Test
+    fun `copy is deep, so one preset's slider cannot move another's`() {
+        val a = Brush()
+        val b = a.copy()
+        b.sizeMax = 99f
+        b.size.drive(Sensor.TILT)
+        assertEquals(24f, a.sizeMax)
+        assertEquals(0, a.size.inputCount)
+        assertEquals(99f, b.sizeMax)
     }
 }
