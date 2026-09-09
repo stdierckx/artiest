@@ -7,6 +7,12 @@
 > every number below marked *predicted* should be read as a claim awaiting
 > refutation. See **Stop conditions**, which is the part of this document most
 > likely to matter.
+>
+> **Revised 2026-09-09.** Open questions 1 and 2 are answered — the repo is
+> private and the graphite reference is named — and measuring that reference
+> moved W6 and W7 ahead of W8 as the phase's primary mechanism. A new fact
+> arrived with them: the app is intended to be sold, which tightened the licence
+> rule rather than relaxing it.
 
 ## The decision
 
@@ -31,7 +37,9 @@ one, and it is why GL is W14 here instead of W1.
 **The bar is felt quality again, and it has a specific name: the pencil must
 read as graphite, not as a grey pen.** That is the whole phase in one sentence.
 Everything below is either a mechanism that serves it or scaffolding that lets
-us tell whether it worked.
+us tell whether it worked. Since the first draft the bar has acquired a named
+reference and a measurement — see **The bar, measured** — and measuring it moved
+the phase's centre of gravity from texture to translucency.
 
 **The brush model is where the prior art is worth the most, and the render path
 is where it is worth the least.** Krita's dab loop, dab cache, sensor/curve
@@ -96,15 +104,95 @@ v1 rather than sink more weeks into it. See **Stop conditions**.
 
 - **We write and maintain a brush engine.** Krita has a dozen; we will have two
   and it will still be the largest single piece of code in the project.
-- **We inherit the texture-authoring problem.** A pencil that reads as graphite
-  needs a grain image, and that image has to come from somewhere we are allowed
-  to use. Ink ships stock textures; we do not.
+- **We inherit the texture-authoring problem** — though it shrank once the
+  reference was measured. Ink ships stock textures and we do not, so a grain has
+  to come from somewhere we may legally sell. The reference's grain turns out to
+  be stochastic rather than a repeating scanned tooth, so procedural noise is
+  likely sufficient and no asset need be sourced at all. Likely, not proven.
 - **We keep the 36 ms.** Nothing in this plan moves it. If the compositor term
   turns out to be the thing that ruins the feel at some future point, this plan
   has not addressed it and says so.
 - **Dab goldens will move.** W3's per-dab spacing change is a deliberate,
   measured break of W7's golden corpus. Any golden diff that is *not* explained
   by that item is a defect.
+
+## The bar, measured
+
+Phase 2's open question 2 asked for a graphite reference to be named before W8,
+so that "reads as graphite" would be falsifiable. **It is answered:**
+`docs/reference/graphite-target.png` — a page of figure studies drawn by the user
+in Wacom Canvas on this tablet, 1336x2096, exported with the background removed.
+Committed here because the repo is private; it would not have been committed
+otherwise, since it is the user's own artwork.
+
+Naming it turned out to be worth more than a target. **Measuring it changes the
+plan's priorities**, and this section is the evidence.
+
+### What the reference actually contains
+
+Two distinct marks, not one:
+
+1. **A narrow contour and hatching pencil.** Strong pressure response — the same
+   brush produces near-black contours and ghost-grey construction lines. Its
+   edges are *ragged and granular* rather than cleanly antialiased, and there is
+   visible longitudinal streaking inside a single stroke, like graphite catching
+   on paper tooth. Strokes taper in and out.
+2. **A broad, very low-opacity shader with flat, chisel-like ends and hard
+   lateral edges.** It lays down bands whose overlaps visibly stack into tone.
+   This is not a round nib — it is an elliptical or flat dab.
+
+### The numbers, and the one that reframes the phase
+
+Alpha distribution over every inked pixel:
+
+```
+p10   0.055        p75   0.510
+p25   0.118        p90   0.737
+p50   0.271        p99   0.953
+                   max   1.000
+fully opaque pixels:  12  out of 2,800,256   (0.0004%)
+broad shader patch:   mean alpha 0.051
+```
+
+**The median inked pixel is 27% opaque, and twelve pixels in the whole drawing
+are solid.** The entire mass of this distribution is in the middle.
+
+**Phase 1's brush can only produce 0.0 or 1.0.** Our current engine sits at
+exactly the two ends of a distribution that has essentially nothing at either
+end. That is the sharpest available statement of what Phase 2 is for, and it
+means **the primary mechanism of "graphite" is translucency and build-up, not
+grain.**
+
+The plan as first written bills W8 (texture) as "the graphite item — the whole
+point", and W6/W7 (scratch buffer, opacity and flow) as the plumbing that unlocks
+a slider. **That ordering is wrong and is corrected here.** W6 and W7 are the
+larger half of the bar; W8 is the second half and still necessary, because the
+ragged edges and internal streaks in the reference are unmistakably texture and
+no amount of correct opacity produces them.
+
+### Grain is stochastic, and that is a licensing gift
+
+A lateral autocorrelation of a flat mid-tone shaded band finds **no periodic
+peak** out to 60 px. The reference's grain is fine and stochastic, not a
+repeating scanned tooth.
+
+Two consequences. **Procedural noise is likely sufficient for W8**, which removes
+almost all of the asset-licensing risk described above — no image needs to be
+sourced at all. And the grain we are matching is *subtler* than a real graphite
+scan, which makes W8 easier than it was scoped, not harder.
+
+### The acceptance test W10 now has
+
+Draw a comparable page with the shipped presets, export it, and run the same
+measurement. **Targets:** inked-pixel alpha median 0.20-0.35, p90 0.65-0.80,
+fully-opaque pixels under 0.01%, and a broad shading pass averaging 0.04-0.07.
+
+This does not replace the felt judgement — W10 is still decided on the tablet, by
+eye, in the user's words, the way W1 and W16 were. It replaces the situation
+where a disagreement about whether the pencil "reads as graphite" has no evidence
+either side can point at. If the numbers match and it still looks wrong, that is
+a real and interesting finding; if the numbers are nowhere near, there is nothing
+to discuss yet.
 
 ## What Phase 1 settled, and what it did not
 
@@ -150,15 +238,49 @@ Still unknown, and honestly unknown:
 
 ## Prior art, and the rule that governs it
 
-**The rule first, because the repo is public.** `github.com/stdierckx/artiest`
-is public, and Phase 1's open question 3 — is that intended? — is **still
-unanswered**. Krita and GIMP are GPL-3.0. Until that question is answered, the
-standing rule is **read-and-reimplement**: architecture and technique may be
-learned from and are recorded below in our own words; no source, no assets, no
-brush data files, and no verbatim structure. (libmypaint is believed to be
-permissively licensed, unlike the MyPaint application — *unverified*, and it does
-not matter unless we ever want to vendor rather than reimplement, at which point
-it must be verified properly.)
+**The rule first, and it got stricter rather than looser.** Phase 1's open
+question 3 is answered: **the repo is private** (verified 2026-09-09 — it already
+was, so the plan's premise was stale). And a second fact arrived with the answer:
+**the app is intended to be sold, for about €1.**
+
+The intuition is that a private repo frees us to read GPL code. It does not, and
+the selling plan is why. GPL obligations trigger on **distribution**, not on
+publication of a repository. Shipping a paid app *is* distribution. If the app
+contained or derived from Krita's or GIMP's GPL-3.0 code, the whole app would
+have to be released under GPL-3.0 with source offered to every buyer — who could
+then redistribute it freely, for free. Private hosting changes nothing about
+that; it only means nobody can see the problem before shipping.
+
+So the standing rule stands and tightens:
+
+- **Do not read Krita or GIMP source at all.** Reading and then reimplementing
+  creates a derivative-work question that is expensive to disprove and impossible
+  to disprove cheaply. Work from documentation, published architecture
+  descriptions, and the prior-art summary in this document — which was written
+  from architectural knowledge, not from a checkout.
+- **libmypaint is the one possible exception and needs a real check.** It is
+  believed to be permissively licensed (ISC), unlike the MyPaint *application*
+  and unlike MyPaint's brush packs, which are separate works with separate terms.
+  If that verifies, it is legitimately usable in a paid app with attribution —
+  and it is the only legal shortcut to a mature brush model. Verify properly
+  before relying on it; do not rely on this sentence.
+- **Every dependency is already clean.** Kotlin, AndroidX and
+  `androidx.graphics:graphics-core` are Apache-2.0: commercial use, no source
+  obligation, attribution in the app's licences screen.
+
+**Assets are now the sharper risk than code.** A paper-grain image "found online"
+is very often not licensed for redistribution inside a paid app, and "free to
+download" is not "free to sell". In preference order: **(a) generate the grain
+procedurally** — zero licence surface, and the measurement below says this is
+probably sufficient; **(b) photograph your own paper** with the tablet — free,
+clean, authentic, and unambiguously yours; **(c) CC0 only**, with the source URL
+and a saved copy of the licence page committed alongside the asset. Never a
+"free for personal use" texture.
+
+Two smaller consequences of selling, recorded so they are not discovered late: a
+paid Play listing needs a privacy policy even for an app that collects nothing,
+and the app needs an open-source-licences screen for its Apache-2.0
+dependencies. Neither is Phase 2 work; both are cheap and easy to forget.
 
 What transfers, and the judgement on each:
 
@@ -294,12 +416,12 @@ New package: `engine/src/main/kotlin/be/thalos/artiest/engine/brush/`.
 
 ```
 Brush
-  mask:     MaskSpec        (shape, aspect, softness falloff)
+  mask:     MaskSpec        (shape, aspect ratio, angle, softness falloff)
   size:     CurveOption     (min, max, sensors, curve)
   opacity:  CurveOption
   flow:     CurveOption
   hardness: CurveOption
-  rotation: CurveOption
+  rotation: CurveOption     (fixed angle, or locked to stroke direction)
   scatter:  CurveOption
   spacing:  SpacingSpec     (fraction of diameter, isotropic flag, min doc px)
   texture:  TextureSpec?    (grain, strength, cutoff)  — null for the pen
@@ -357,9 +479,9 @@ it is the direct consequence of the 36 ms finding.
 | 3 | Per-dab spacing recompute, spacing from the dab just laid, isotropic option. **Goldens move here, once, by a predicted amount** | `:engine` | Med | 2 | 1 |
 | 4 | `AlphaMask`, `MaskSpec`, procedural generators, `MaskCache` with quantised keys | `:engine` | Med | 2 | 2 |
 | 5 | Stamp renderer: `drawBitmap` of an `ALPHA_8` mask with a colour filter, replacing `drawCircle`. A/B'd against Phase 1 on device | `:app` | **High** | 4 | 1.5 |
-| 6 | Indirect paint path + scratch buffer; `ARGB_8888` vs `RGBA_F16` decided by measurement | `:app` | **High** | 5 | 2 |
-| 7 | Opacity and flow as real sliders — **the tripwire is paid here and not before** | both | Low | 6 | 0.5 |
-| 8 | Canvas-space texture: grain, strength, cutoff. **The graphite item** | both | **High** | 6 | 2 |
+| 6 | Indirect paint path + scratch buffer; `ARGB_8888` vs `RGBA_F16` decided by measurement. **The larger half of the graphite bar** | `:app` | **High** | 5 | 2 |
+| 7 | Opacity and flow as real sliders — **the tripwire is paid here**, and the reference's median 0.27 alpha becomes reachable | both | Low | 6 | 0.5 |
+| 8 | Canvas-space texture: grain, strength, cutoff. **The second half of the bar** — ragged edges and streak, which opacity alone cannot make | both | Med | 6 | 2 |
 | 9 | Scatter, per-dab size jitter, rotation — all through W1's machinery | `:engine` | Low | 4 | 1 |
 | 10 | Three presets — pen, pencil, marker — judged on device, by eye, by the person who will use it | both | Med | 8, 9 | 1.5 |
 | 11 | Eraser: barrel-button mapping (4 / 32 / 64) + a real erase blend through the indirect path | both | Med | 6 | 1 |
@@ -378,7 +500,8 @@ code until they are not), then **W14** (which is gated anyway), then **W11**'s
 button mapping reduced to a toolbar toggle. **Do not cut W0** — Phase 1's
 strongest lesson is that a measurement harness with no review pass produces
 confident wrong answers, and run C proved the film tool is not yet trustworthy.
-**Do not cut W8** — it is the phase.
+**Do not cut W6, W7 or W8** — between them they are the phase, and the
+reference measurement says W6 and W7 are the larger half of it.
 
 ### W0 — the before-picture, and why it is first
 
@@ -480,8 +603,12 @@ felt-quality judgements worked because the bar was stated first.
 ### W10 — three presets, judged the way W16 was judged
 
 Pen (opaque, hard, direct path — Phase 1's brush, unchanged and still fast),
-pencil (textured, scattered, low flow, indirect, F16), marker (translucent,
-soft-edged, wide, indirect, flat pressure response). Judged on the tablet with
+pencil (textured, scattered, low flow, indirect, F16, strong pressure response),
+and — **changed from "marker" after measuring the reference** — a **broad chisel
+shader**: elliptical dab, hard lateral edges, flat ends, very low flow, whose
+whole purpose is that overlaps stack into tone. The reference contains exactly
+these two drawing marks and no marker, and it is a page of figure studies, which
+is the actual use case: sketching and hatching, not painting. Judged on the tablet with
 the pen by the person who will use it, in the user's own words, recorded in the
 plan the way W1's and W16's verdicts were.
 
@@ -536,26 +663,38 @@ and it was the most valuable thing that happened.
 3. **W5 costs more than 2× W9's p50 per event with the cache warm.** Stop
    building features; W14's gate has opened and the next item is the engine, not
    the eighth brush parameter.
-4. **W8 and W10 land and the pencil still reads as a grey pen.** This is the
+4. **W7 lands and the alpha distribution is still bimodal.** Draw a page with
+   the pencil preset and measure it against `docs/reference/graphite-target.png`.
+   If the inked-pixel median is not in 0.20-0.35 and fully-opaque pixels are not
+   under 0.01%, the indirect path is not accumulating the way the reference
+   builds, and no amount of texture in W8 will rescue it. Fix W6 before W8.
+5. **W8 and W10 land and the pencil still reads as a grey pen.** This is the
    androidx.ink kill criterion from `analysis.html` §04, and it fires here. The
    response is to fall back to Ink for v1 — accepting its document model,
    rewriting export and undo around immutable strokes — rather than spending more
    weeks proving the point. Judged by the user, in the user's words, on the
-   tablet.
+   tablet, with the reference measurement beside the verdict rather than instead
+   of it.
 
 ## Open questions that need a human answer
 
-1. **Does the repo stay public?** Carried from Phase 1 unanswered, and it now has
-   teeth: it decides whether Krita/GIMP source may be read at all, and it decides
-   where W8's grain image can come from. One-line answer, real consequences.
-2. **What is the graphite reference?** W8 needs a target named before it starts —
-   a photo of real pencil on paper, or a screenshot from an app whose pencil the
-   user likes. Without it, "reads as graphite" is unfalsifiable and W10's verdict
-   is unarguable in both directions.
-3. **Is 61 Hz still out of scope?** Phase 1's question 1 was never answered
+1. ~~**Does the repo stay public?**~~ **Answered 2026-09-09: private, and it
+   already was.** It does *not* unlock GPL source, because the app is also
+   intended to be sold — see the licence rule, which tightened rather than
+   relaxed. What it does unlock is committing the reference artwork.
+2. ~~**What is the graphite reference?**~~ **Answered 2026-09-09:**
+   `docs/reference/graphite-target.png`. Measuring it reordered W6-W8; see
+   **The bar, measured**.
+3. **New, and it arrived with the answer to 1: the app is to be sold for about
+   €1.** That is a change of project constraints, not just of licensing, and it
+   deserves its own decision at some point — a paid app implies a Play listing, a
+   privacy policy, an open-source-licences screen, a support address, and a
+   quality bar set by strangers rather than by its author. None of it is Phase 2
+   work. All of it is cheaper to plan for now than to discover at submission.
+4. **Is 61 Hz still out of scope?** Phase 1's question 1 was never answered
    either. It matters more now: dab spacing, scatter randomness and flow build-up
    all interact with the sample rate, and tuning them at 90 Hz and 321.75 Hz
    makes them wrong at 61 Hz and 246.85 Hz.
-4. **Own brush format, or aim at an existing one?** W12 can ship a format we
+5. **Own brush format, or aim at an existing one?** W12 can ship a format we
    define in an afternoon, or target something interchangeable. Only worth the
    second if brushes are ever meant to be shared.
