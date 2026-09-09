@@ -189,6 +189,24 @@ class Brush {
      */
     val sizeJitter: CurveOption = CurveOption(0f, 0f)
 
+    /**
+     * Whether this stroke removes ink instead of adding it. W11.
+     *
+     * **A blend mode, not a white brush.** Painting in the paper's colour looks
+     * identical on a white page and is wrong everywhere it matters: the layer
+     * is alpha-carrying by design — `Document`'s invariant is that the paper is
+     * never in the layer — so a white "eraser" fills transparent pixels with
+     * opaque white, and the export, the next layer down, and any change of
+     * paper colour all show it. Erasing lowers alpha, which only a replacing or
+     * subtracting blend can do.
+     *
+     * An eraser beads exactly as a translucent brush does, in reverse: eight
+     * overlapping dabs at 30% each take out 94% where one should take out 30%.
+     * So it goes through the scratch buffer for the same reason, and
+     * `InkSurfaceView.indirectNeeded` says so.
+     */
+    var erase: Boolean = false
+
     /** Passed to `Stabilizer` at `StrokeBuilder` construction. */
     var stabilization: Float = 0.15f
 
@@ -359,6 +377,7 @@ class Brush {
         it.onsetPressure = onsetPressure
         it.isotropicSpacing = isotropicSpacing
         it.grain = grain
+        it.erase = erase
         copyOption(aspect, it.aspect)
         copyOption(rotation, it.rotation)
         copyOption(scatter, it.scatter)

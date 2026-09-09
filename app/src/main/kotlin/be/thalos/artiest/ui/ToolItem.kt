@@ -96,6 +96,14 @@ enum class ToolItem(
     PEN("pen", "Pen", "Pen", 2, ToolGroup.DRAW),
     PENCIL("pencil", "Pencil", "Pencil", 2, ToolGroup.DRAW),
 
+    /**
+     * W11. A toggle, not a third tool: it changes how the brush in the hand
+     * composites, so the pencil erases with the pencil's shape and the pen with
+     * the pen's. The barrel button does the same thing momentarily and does not
+     * move this toggle.
+     */
+    ERASER("eraser", "Eraser", "Erase", 2, ToolGroup.DRAW),
+
     ZOOM_IN("zoom_in", "Zoom in", "+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "\u2212", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

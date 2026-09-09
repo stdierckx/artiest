@@ -305,6 +305,9 @@ private fun CanvasScreen(
     /** W10. Which of the two tools is in the hand. */
     var preset by remember { mutableStateOf(BrushPreset.PEN) }
 
+    /** W11. Whether that tool is currently taking ink out instead of putting it in. */
+    var eraser by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -423,6 +426,12 @@ private fun CanvasScreen(
                     onFlow = { flow = it },
                     grain = grain,
                     onGrain = { grain = it },
+                    eraser = eraser,
+                    onEraser = {
+                        eraser = !eraser
+                        surface?.eraserTool = eraser
+                        generation++
+                    },
                     preset = preset,
                     onPreset = { p ->
                         // The preset writes the whole brush, then the sliders
@@ -586,6 +595,8 @@ private fun ToolSlot(
     onGrain: (Float) -> Unit,
     preset: BrushPreset,
     onPreset: (BrushPreset) -> Unit,
+    eraser: Boolean,
+    onEraser: () -> Unit,
     exporting: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -627,6 +638,8 @@ private fun ToolSlot(
         ToolItem.PENCIL -> SlotButton(item.short, enabled = preset != BrushPreset.PENCIL) {
             onPreset(BrushPreset.PENCIL)
         }
+
+        ToolItem.ERASER -> SlotButton(if (eraser) "Erase \u25cf" else item.short, onClick = onEraser)
 
         ToolItem.UNDO -> SlotButton(item.short, enabled = canUndo, onClick = onUndo)
         ToolItem.REDO -> SlotButton(item.short, enabled = canRedo, onClick = onRedo)
@@ -909,7 +922,8 @@ private fun readout(
         "${surface.predictedDabs} dabs   " +
         "lead mean ${r(surface.predictLeadMeanDoc, 2)} max ${r(surface.predictLeadMaxDoc, 2)} doc px\n" +
         "gate     ${surface.gateAllowed} allowed   ${surface.gateSuppressed} suppressed\n" +
-        "brush    ${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
+        "brush    ${if (surface.pen.erase) "ERASING" else "painting"}   " +
+        "${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
         "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +
         "shaped ${surface.pen.hasShapeDynamics}\n" +
         "grain    ${r(surface.pen.grain.strength, 2)} strength   " +

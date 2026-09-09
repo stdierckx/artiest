@@ -330,7 +330,7 @@ class InkSurfaceView(
                 scratch.ensureCovers(stroke.bounds)
             ) {
                 document.layer.write {
-                    scratch.compositeInto(it, pen.opacity, grainShader())
+                    scratch.compositeInto(it, pen.opacity, grainShader(), pen.erase)
                 }
                 return
             }
@@ -344,7 +344,9 @@ class InkSurfaceView(
                 return
             }
             rasterizer.drawDry(sc, stroke, flowOverride = pen.flow)
-            document.layer.write { scratch.compositeInto(it, pen.opacity, grainShader()) }
+            document.layer.write {
+                scratch.compositeInto(it, pen.opacity, grainShader(), pen.erase)
+            }
         }
 
         override fun onClear() {
@@ -464,7 +466,8 @@ class InkSurfaceView(
      * beading case wearing a different hat.
      */
     private fun indirectNeeded(): Boolean =
-        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f || pen.grain.isActive
+        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f ||
+            pen.grain.isActive || pen.erase
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -528,9 +531,56 @@ class InkSurfaceView(
         canvas.clipRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
         paperPaint.color = document.paperColor
         canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
-        document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
-        scratch.drawOnto(canvas, pen.opacity, grainShader())
+        if (pen.erase) {
+            // The ink has to be taken out of the *layer*, not out of the frame.
+            // Applied straight to the canvas, DST_OUT would cut a hole through
+            // the paper as well and the stroke would read as a window onto the
+            // desk. An offscreen layer scopes the subtraction to the ink.
+            val ink = canvas.saveLayer(
+                wetRect[0], wetRect[1], wetRect[2], wetRect[3], null,
+            )
+            document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+            scratch.drawOnto(canvas, pen.opacity, grainShader(), erase = true)
+            canvas.restoreToCount(ink)
+        } else {
+            document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+            scratch.drawOnto(canvas, pen.opacity, grainShader())
+        }
         canvas.restoreToCount(save)
+    }
+
+    /**
+     * Whether the toolbar's eraser is selected. Written from the UI thread.
+     *
+     * The barrel button is the *other* way in, and the two are an `or`: holding
+     * a barrel button erases for that stroke whatever the toolbar says, and
+     * releasing it does not switch the tool back. That is the behaviour a
+     * pencil with an eraser end has, and it is the reason the button is a
+     * momentary override rather than a toggle.
+     */
+    @Volatile
+    var eraserTool: Boolean = false
+
+    private var eraseDecided = false
+
+    /**
+     * Fix this stroke's erase mode from the first sample's buttons.
+     *
+     * Once per stroke, and never revisited: a button released mid-stroke must
+     * not turn the second half of an erase into ink, because the two composite
+     * differently and the stroke is a single composite.
+     *
+     * `buttonState` is stamped onto every sample in a batch from the event's
+     * *current* state — `MotionEvents` explains why the framework leaves no
+     * choice — so it can be backdated by up to about four samples. That is
+     * harmless here: it is read once, at the start, from the batch that opened
+     * the stroke.
+     */
+    private fun applyEraseFor(sample: PenSample) {
+        if (eraseDecided) return
+        eraseDecided = true
+        val barrel = (sample.buttonState and BARREL_BUTTONS) != 0
+        pen.erase = eraserTool || barrel
     }
 
     /** The grain shader anchored to the scratch's current origin, or null. */
@@ -663,13 +713,27 @@ class InkSurfaceView(
             canvas.concat(dryMatrix)
             paperPaint.color = document.paperColor
             canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
-            document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
             // A stroke still in flight lives on the scratch, not in the layer,
             // so a redraw that ignored it would blank the wet ink for a frame
             // every time the transform changed. Pinching mid-stroke is not a
             // gesture anyone makes on purpose, but the same redraw is what
             // `redrawDry` schedules after a zoom button.
-            if (scratch.isOpen) scratch.drawOnto(canvas, pen.opacity, grainShader())
+            //
+            // Erasing has to happen inside an offscreen layer, or DST_OUT cuts
+            // through the paper as well and the wet stroke reads as a window
+            // onto the desk. That is also why the layer blit is inside the
+            // branch: it has to be the thing being subtracted from.
+            if (scratch.isOpen && pen.erase) {
+                val ink = canvas.saveLayer(
+                    0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), null,
+                )
+                document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+                scratch.drawOnto(canvas, pen.opacity, grainShader(), erase = true)
+                canvas.restoreToCount(ink)
+            } else {
+                document.layer.read { canvas.drawBitmap(it, 0f, 0f, blitPaint) }
+                if (scratch.isOpen) scratch.drawOnto(canvas, pen.opacity, grainShader())
+            }
             canvas.restoreToCount(save)
         }
     }
@@ -1143,6 +1207,12 @@ class InkSurfaceView(
             }
             frozen = transform
             strokeEpoch++
+            // The barrel decision is deferred to the first sample: the router
+            // announces a stroke by pointer id and nothing in that signature
+            // carries a button. Erasing is a property of the whole stroke, so
+            // it must be fixed before any dab is laid, which is what
+            // [applyEraseFor] does on the first sample and never again.
+            eraseDecided = false
             builder.begin(inkColorArgb)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
@@ -1171,6 +1241,7 @@ class InkSurfaceView(
             // Indexed, not `for (s in samples)`: an ArrayList iterator is an
             // allocation per event on the path with a per-sample budget.
             val n = samples.size
+            if (n > 0) applyEraseFor(samples[0])
             seen += n
             totalSamples += n
             val dabsBefore = builder.dabCount
@@ -1481,6 +1552,15 @@ class InkSurfaceView(
         Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() ?: 0L
 
     companion object {
+
+        /**
+         * The stylus barrel buttons, as `MotionEvent` reports them:
+         * `BUTTON_SECONDARY` (4), `BUTTON_STYLUS_PRIMARY` (32) and
+         * `BUTTON_STYLUS_SECONDARY` (64). The Pro Pen 3 addresses all three
+         * individually; any of them erases, because a user who has pressed *a*
+         * button while drawing has not asked for a menu.
+         */
+        const val BARREL_BUTTONS = 4 or 32 or 64
 
         /**
          * A dark neutral, so that white paper reads as a sheet rather than as

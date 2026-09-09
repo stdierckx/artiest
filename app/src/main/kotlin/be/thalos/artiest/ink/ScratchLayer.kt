@@ -170,8 +170,8 @@ class ScratchLayer(
      * [dst] must be in document space — the layer's own canvas is, because one
      * layer pixel is one document pixel.
      */
-    fun compositeInto(dst: Canvas, alpha: Float, grain: Shader? = null) {
-        drawOnto(dst, alpha, grain)
+    fun compositeInto(dst: Canvas, alpha: Float, grain: Shader? = null, erase: Boolean = false) {
+        drawOnto(dst, alpha, grain, erase)
         isOpen = false
     }
 
@@ -179,13 +179,19 @@ class ScratchLayer(
      * Paint the buffer onto [dst] without closing it. The wet pass, which has
      * to show the stroke so far on every frame and must not consume it.
      */
-    fun drawOnto(dst: Canvas, alpha: Float, grain: Shader? = null) {
+    fun drawOnto(dst: Canvas, alpha: Float, grain: Shader? = null, erase: Boolean = false) {
         val bmp = bitmap ?: return
         val a = (alpha.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        // DST_OUT subtracts the source's alpha from the destination's, which is
+        // what erasing is. It is set on the shared paint and cleared again
+        // below, because a leftover xfermode would turn the next ordinary
+        // stroke into an eraser -- a bug that looks like the undo being broken.
+        compositePaint.xfermode = if (erase) eraseMode else null
         if (grain == null) {
             compositePaint.shader = null
             compositePaint.alpha = a
             dst.drawBitmap(bmp, originX.toFloat(), originY.toFloat(), compositePaint)
+            compositePaint.xfermode = null
             return
         }
         // The stroke and the grain, multiplied. DST_IN keeps the stroke's
@@ -206,7 +212,10 @@ class ScratchLayer(
             compositePaint,
         )
         compositePaint.shader = null
+        compositePaint.xfermode = null
     }
+
+    private val eraseMode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
 
     private var selfShader: BitmapShader? = null
     private var selfShaderFor: Bitmap? = null
