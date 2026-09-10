@@ -361,6 +361,7 @@ class InkSurfaceView(
                 document.layers.touchActive()
                 return
             }
+            val stencil = document.selection.maskBitmap()
             // W6's indirect path. The dabs land on the scratch, which starts
             // empty, so the stroke's own overlaps composite against nothing;
             // the single composite at the end is what carries the opacity.
@@ -371,6 +372,11 @@ class InkSurfaceView(
             if (scratch.isOpen && scratchEpoch == strokeEpoch &&
                 scratch.ensureCovers(stroke.bounds)
             ) {
+                // Already masked by the wet pass, and `DST_IN` is idempotent,
+                // so this is belt to that braces -- and it is what covers the
+                // case where `ensureCovers` has just grown the buffer into
+                // ground the wet pass never masked.
+                if (stencil != null) scratch.maskBy(stencil)
                 document.layer.write {
                     scratch.compositeInto(
                         it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
@@ -385,8 +391,19 @@ class InkSurfaceView(
                 // The buffer could not be opened. Falling back to the direct
                 // path draws a beaded stroke, which is wrong but visible;
                 // dropping the stroke silently is wrong and invisible.
+                //
+                // The stencil still has to hold, and here a clip is the only
+                // tool left. `Layer`'s canvas is a software one, where Skia
+                // antialiases a path clip, so this costs nothing visible
+                // against the masked path -- which is exactly why it is safe
+                // here and wrong on the frame's `RenderNode` canvas.
                 armRasterizer()
-                document.layer.write { rasterizer.drawDry(it, stroke) }
+                document.layer.write {
+                    val save = it.save()
+                    document.selection.clipInto(it)
+                    rasterizer.drawDry(it, stroke)
+                    it.restoreToCount(save)
+                }
                 document.layers.touchActive()
                 return
             }
@@ -399,6 +416,7 @@ class InkSurfaceView(
             // squared and the darkest press it could reach was 0.72 of what
             // the preset asked for.
             rasterizer.drawDry(sc, stroke)
+            if (stencil != null) scratch.maskBy(stencil)
             document.layer.write {
                 scratch.compositeInto(
                     it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
@@ -407,9 +425,17 @@ class InkSurfaceView(
             document.layers.touchActive()
         }
 
+        /**
+         * Clear, which means *clear the stencil* when there is one.
+         *
+         * What every editor does, and what the request implies: a selection is
+         * for confining what you do to the page, and the most destructive thing
+         * on the bar is the last one that should ignore it.
+         */
         override fun onClear() {
             document.snapshotBeforeClear()
-            document.layer.blank()
+            val stencil = document.selection.maskBitmap()
+            if (stencil != null) document.layer.blank(stencil) else document.layer.blank()
             document.layers.touchActive()
         }
 
@@ -554,10 +580,18 @@ class InkSurfaceView(
      *
      * Hardness counts because a soft edge *is* a translucent rim, which is the
      * beading case wearing a different hat.
+     *
+     * **A live selection forces it, whatever the nib is.** The stencil is
+     * applied by masking the scratch buffer — see `ScratchLayer.maskBy` for why
+     * it is a mask on the pixels and not a clip on a canvas — so an opaque nib
+     * taking the direct path would be the one stroke in the app that could
+     * paint outside the selection. The cost is the scratch path, which is
+     * already shipped and already measured; the alternative is a second way of
+     * confining ink, which is a second way of getting it wrong.
      */
     private fun indirectNeeded(): Boolean =
         pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f ||
-            pen.grain.isActive || pen.erase
+            pen.grain.isActive || pen.erase || document.selection.active
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -793,6 +827,11 @@ class InkSurfaceView(
         // their own flow. Anything else here and the wet stroke would not
         // match the committed one, which is the one thing this path may not do.
         rasterizer.drawInto(sc, batch, 1f)
+        // Every batch, because `ensureCovers` may have grown the buffer into
+        // ground that has never been masked, and because `DST_IN` against a
+        // fixed mask is idempotent so re-masking what was already masked costs
+        // a blit and changes nothing.
+        document.selection.maskBitmap()?.let { scratch.maskBy(it) }
 
         val save = canvas.save()
         canvas.concat(docToView)
@@ -1441,6 +1480,25 @@ class InkSurfaceView(
     fun redo() {
         router.abandon()
         document.requestRedo()
+        redrawDry()
+    }
+
+    /**
+     * Change what is selected, and redraw.
+     *
+     * The same three lines as [clear] and [undo], and the open stroke is
+     * abandoned for a reason of this feature's own. The wet pass masks the
+     * scratch buffer with the stencil as it stands, and the commit masks it
+     * again at pen-up; a selection that landed between those two would make the
+     * ink visibly change shape as the pen lifted, which is precisely the defect
+     * the masked-buffer design exists to prevent. It is not a gesture anybody
+     * makes on purpose — the marquee is not the brush — but a Select All
+     * pressed with the other hand mid-stroke is reachable, and abandoning is
+     * cheaper than explaining.
+     */
+    fun select(op: be.thalos.artiest.doc.SelectOp) {
+        router.abandon()
+        document.requestSelect(op)
         redrawDry()
     }
 

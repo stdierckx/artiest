@@ -111,7 +111,16 @@ class Selection(
 
     private val scratchBounds = RectF()
 
-    /** Whether anything is selected at all. **Render thread.** */
+    /**
+     * Whether anything is selected at all.
+     *
+     * Written on the render thread and `@Volatile` because the UI thread reads
+     * it too: `Predictor` is suppressed while the ink is going through the
+     * scratch buffer, and a selection is one of the things that puts it there.
+     * A stale read costs one stroke of prediction, which is a small thing, and
+     * a `@Volatile` boolean costs less.
+     */
+    @Volatile
     var active: Boolean = false
         private set
 
@@ -204,6 +213,22 @@ class Selection(
      * which reads a sub-rectangle of it and never keeps it.
      */
     internal fun maskBitmap(): Bitmap? = if (active) mask else null
+
+    /**
+     * Clip [canvas] to the selection, if there is one. **Render thread.**
+     *
+     * The fallback the mask cannot serve. When the scratch buffer will not open
+     * — an allocation that failed on the render thread — the ink path draws
+     * straight into the sheet, and with a stencil on the page that stroke must
+     * still be confined. A clip is the only tool left there, and on `Layer`'s
+     * software canvas it is antialiased, so what it costs against the masked
+     * path is nothing visible. It is not used anywhere else, because the
+     * *frame's* canvas is a `RenderNode`'s and clips hard there; see
+     * `ScratchLayer.maskBy`.
+     */
+    internal fun clipInto(canvas: Canvas) {
+        if (active) canvas.clipPath(path)
+    }
 
     // ---- internals ----------------------------------------------------------
 

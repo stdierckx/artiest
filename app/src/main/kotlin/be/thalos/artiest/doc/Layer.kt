@@ -274,6 +274,29 @@ class Layer(
     fun blank(): Boolean = write { it.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR) }
 
     /**
+     * Back to transparent, but only where [mask] covers.
+     *
+     * What Clear means with a selection on the page: rub out the stencil's
+     * inside and leave the rest. `DST_OUT` subtracts the source's alpha from
+     * the destination's, so an `ALPHA_8` mask takes away exactly the coverage
+     * it carries — a soft selection edge leaves a soft edge on the ink rather
+     * than a cut one.
+     *
+     * A separate method rather than a nullable parameter on [blank], because
+     * the two are different operations and the null branch is the one that
+     * would be got wrong: `blank(null)` reads as "blank nothing".
+     */
+    fun blank(mask: Bitmap): Boolean =
+        write { it.drawBitmap(mask, 0f, 0f, subtractPaint) }
+
+    /** Shared, for the reason [replacePaint] is. Never mutated after construction. */
+    private val subtractPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+        isAntiAlias = false
+        isFilterBitmap = false
+    }
+
+    /**
      * **There is no `copyRegion` here, and that is deliberate.**
      *
      * A method returning a `Bitmap` — even a fresh copy that owes the layer

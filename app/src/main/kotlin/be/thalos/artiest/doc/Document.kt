@@ -283,18 +283,61 @@ class Document(
      */
     fun snapshotBeforeStroke(bounds: Bounds) {
         val active = layers.active
-        val patch = PixelPatch.capture(active.id, active.layer, bounds, widthPx, heightPx) ?: return
+        val patch = PixelPatch.capture(
+            active.id, active.layer, confined(bounds), widthPx, heightPx,
+        ) ?: return
         history.record(patch)
         publishHistory()
     }
 
-    /** Snapshot the whole page, before a Clear. **Render thread.** */
+    /**
+     * Snapshot what a Clear is about to remove. **Render thread.**
+     *
+     * The whole page, or the stencil's extent when there is one — because with
+     * a selection on the page a Clear removes only what is inside it.
+     */
     fun snapshotBeforeClear() {
         val active = layers.active
-        val patch = PixelPatch.captureAll(active.id, active.layer, widthPx, heightPx) ?: return
+        val patch = if (selection.active) {
+            PixelPatch.capture(
+                active.id, active.layer, boundsOf(selection.bounds), widthPx, heightPx,
+            )
+        } else {
+            PixelPatch.captureAll(active.id, active.layer, widthPx, heightPx)
+        } ?: return
         history.record(patch)
         publishHistory()
     }
+
+    /**
+     * [bounds], cut down to what the stencil could possibly have let through.
+     *
+     * A stroke that runs across the page with a small selection on it can only
+     * have changed pixels inside that selection, so the rectangle worth
+     * snapshotting is the overlap. Free, and it keeps the 48 MB history budget
+     * from being spent on rows that could not have moved.
+     *
+     * Returns [bounds] unchanged when nothing is selected, and when the two do
+     * not overlap returns something empty — which `PixelPatch.capture` turns
+     * into null, so the stroke records no undo step at all. That is right: a
+     * stroke entirely outside the stencil changed nothing.
+     */
+    private fun confined(bounds: Bounds): Bounds {
+        if (!selection.active || bounds.isEmpty) return bounds
+        val r = selection.bounds
+        val left = maxOf(bounds.left, r.left.toFloat())
+        val top = maxOf(bounds.top, r.top.toFloat())
+        val right = minOf(bounds.right, r.right.toFloat())
+        val bottom = minOf(bounds.bottom, r.bottom.toFloat())
+        // `Bounds.of` refuses an inverted rectangle rather than normalising it,
+        // and no overlap is exactly that. EMPTY is the answer the caller can
+        // use: it captures nothing and records nothing.
+        if (left > right || top > bottom) return Bounds.EMPTY
+        return Bounds.of(left, top, right, bottom)
+    }
+
+    private fun boundsOf(r: android.graphics.Rect): Bounds =
+        Bounds.of(r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat())
 
     /** **Render thread.** Returns false if there was nothing to undo. */
     fun applyUndo(): Boolean {
