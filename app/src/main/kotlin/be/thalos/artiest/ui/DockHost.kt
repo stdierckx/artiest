@@ -175,6 +175,16 @@ fun DockHost(
             val fitted = remember(layout, gridW, gridH) { layout.fittedTo(gridW, gridH) }
             val shown = fitted.layout
 
+            // What the instruments overlay reports. Written here rather than
+            // counted there, because only this scope knows what is on screen
+            // after the clamp -- see ChromeCounters for the number that decides
+            // whether the workspace system may ship.
+            SideEffect {
+                ChromeCounters.surfaces =
+                    shown.surfaces.count { !it.isEmpty || (arranging && it.dock.isEdge) }
+                ChromeCounters.cells = shown.all().size
+            }
+
             for (bar in shown.edges) {
                 BarView(
                     bar = bar,
@@ -323,6 +333,11 @@ private fun BarView(
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     if (bar.isEmpty && !arranging && overflow.isEmpty()) return
+
+    // The gate. While a stroke is being drawn this must not fire at all: a
+    // toolbar that recomposes with the pen down is work on the UI thread in the
+    // frames that matter most. See ChromeCounters.
+    SideEffect { ChromeCounters.composed() }
 
     // The furniture that sits beside the run rather than on it: a button
     // covering a cell is a cell nothing can be dropped into. The shape button

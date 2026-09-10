@@ -89,6 +89,7 @@ import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
 import be.thalos.artiest.ui.DockHost
 import be.thalos.artiest.ui.DockLayout
+import be.thalos.artiest.ui.ChromeCounters
 import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
 import be.thalos.artiest.ui.WorkspaceMenu
@@ -1593,6 +1594,9 @@ private fun readout(
         "p99 ${r(s.msPerSample(0.99f) * 1000f, 1)} us/sample   " +
         "of a 3108 us interval\n" +
         "alloc    $alloc\n" +
+        // The workspace system's own gate. `recompose N/s` must read 0 with the
+        // pen on the glass -- see ChromeCounters for why zero and not "small".
+        ChromeCounters.readout() + "\n" +
         "predict  ${if (surface.predictionEnabled) "ON" else "off"}   " +
         "${surface.predictor?.implementation ?: "-"}   " +
         "${surface.predictor?.availability ?: "-"}   " +

@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -128,6 +129,10 @@ internal fun ChromeSurface(
     // is stable as arrange mode comes and goes: a chip keeps its index, and
     // therefore its own state, when the empty targets appear beside it.
     val cells = remember(surface, arranging) { childCells(surface, arranging) }
+
+    // A shaped surface is drawn instead of a bar, not as well as one, so it
+    // does its own counting. See ChromeCounters.
+    SideEffect { ChromeCounters.composed() }
 
     Layout(
         content = {
