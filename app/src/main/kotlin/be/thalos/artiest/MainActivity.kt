@@ -657,6 +657,22 @@ private fun CanvasScreen(
         }
     }
 
+    // Turning the marquee on or off, in one place because three controls do it:
+    // the Select toggle, picking a shape in the panel, and picking a brush.
+    //
+    // Through the view rather than straight onto the field, because an open
+    // stroke has to be abandoned -- a mode switch with the pen already down
+    // would turn half a lasso into half a pencil line.
+    val setSelecting: (Boolean) -> Unit = { on ->
+        if (selecting != on) {
+            selecting = on
+            surface?.let {
+                it.selecting = on
+                it.abandonStroke()
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
@@ -696,6 +712,10 @@ private fun CanvasScreen(
                 surface?.let { outlineMatrix.setDocToView(it.transform) }
                 outlineMatrix
             },
+            // Recomposes when the answer moves, which is once per selection
+            // rather than once per frame -- and it is what stops the ants
+            // ticking over a page with nothing on it.
+            showing = selectionShape.active || selecting,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -901,15 +921,7 @@ private fun CanvasScreen(
                     },
                     selecting = selecting,
                     onSelecting = { on ->
-                        selecting = on
-                        // Through the view rather than straight onto the field,
-                        // because an open stroke has to be abandoned: a mode
-                        // switch with the pen already down would turn half a
-                        // lasso into half a pencil line.
-                        surface?.let {
-                            it.selecting = on
-                            if (!on) it.abandonStroke()
-                        }
+                        setSelecting(on)
                         generation++
                     },
                     marqueeShape = marqueeShape,
@@ -944,6 +956,9 @@ private fun CanvasScreen(
                     onEraser = {
                         eraser = !eraser
                         surface?.eraserTool = eraser
+                        // Reaching for the eraser is a statement that the pen
+                        // is drawing. See `onPreset`.
+                        setSelecting(false)
                         generation++
                     },
                     preset = preset,
@@ -956,6 +971,14 @@ private fun CanvasScreen(
                         surface?.let { v ->
                             p.applyTo(v.pen)
                             preset = p
+                            // Picking a brush turns the marquee off, the mirror
+                            // of picking a shape turning it on. Without it the
+                            // pen button and the Select button are lit at the
+                            // same time and the pen still selects -- two
+                            // mutually exclusive states both showing as
+                            // current, which is worse than either being wrong.
+                            // Found on the tablet, not in a test.
+                            setSelecting(false)
                             sizeMax = v.pen.sizeMax
                             eraserSize = v.pen.eraseSizeMax
                             smoothing = v.pen.stabilization
@@ -1107,32 +1130,36 @@ private fun ToolSlot(
         // Lit rather than disabled. The tool in the hand is a state worth
         // seeing from across the room, and a greyed-out Pen says "broken" at a
         // glance where a lit Pencil says "this one".
+        // `&& !selecting` on all three: while the marquee is in hand the pen
+        // does not draw, and a bar that lights the pencil *and* the Select
+        // button says two things are current when only one is. Found on the
+        // tablet, where the screenshot showed both lit at once.
         ToolItem.PEN -> IconToolButton(
             icon = ToolIcons.pen,
             label = item.label,
             onClick = { onPreset(BrushPreset.PEN) },
-            selected = preset == BrushPreset.PEN,
+            selected = preset == BrushPreset.PEN && !selecting,
         )
 
         ToolItem.PENCIL -> IconToolButton(
             icon = ToolIcons.pencil,
             label = item.label,
             onClick = { onPreset(BrushPreset.PENCIL) },
-            selected = preset == BrushPreset.PENCIL,
+            selected = preset == BrushPreset.PENCIL && !selecting,
         )
 
         ToolItem.MARKER -> IconToolButton(
             icon = ToolIcons.marker,
             label = item.label,
             onClick = { onPreset(BrushPreset.MARKER) },
-            selected = preset == BrushPreset.MARKER,
+            selected = preset == BrushPreset.MARKER && !selecting,
         )
 
         ToolItem.ERASER -> IconToolButton(
             icon = ToolIcons.eraser,
             label = item.label,
             onClick = onEraser,
-            selected = eraser,
+            selected = eraser && !selecting,
         )
 
         ToolItem.ERASER_SIZE -> ToolSlider(
