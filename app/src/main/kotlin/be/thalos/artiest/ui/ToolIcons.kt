@@ -535,6 +535,39 @@ object ToolIcons {
         }
     }
 
+    /**
+     * A screen with a bar down one side: a workspace, seen from far enough away
+     * to be a shape rather than a set of buttons.
+     *
+     * The same frame the shape presets and the dock targets use, because it is
+     * the same idea at a different scale — this is which *whole arrangement* you
+     * are in, and the arrangement is what the frame shows.
+     */
+    val workspace: ImageVector by lazy {
+        icon("workspace") {
+            stroke(1.5f) { rect(2.8f, 3.6f, 21.2f, 20.4f) }
+            fill { rect(5.0f, 5.8f, 8.2f, 18.2f) }
+            fill { rect(10.2f, 5.8f, 19.0f, 8.0f) }
+        }
+    }
+
+    /**
+     * A lens with a handle. What finds a control the workspace does not offer.
+     *
+     * It is the one glyph in this file that is deliberately the conventional
+     * one: the search box is an escape hatch, and an escape hatch has to be
+     * recognised without being learned.
+     */
+    val search: ImageVector by lazy {
+        icon("search") {
+            stroke {
+                circle(10.4f, 10.4f, 6.4f)
+                moveTo(15.1f, 15.1f)
+                lineTo(20.6f, 20.6f)
+            }
+        }
+    }
+
     /** Three lines pushed up against a rule: everything, closed up. */
     val tidy: ImageVector by lazy {
         icon("tidy") {

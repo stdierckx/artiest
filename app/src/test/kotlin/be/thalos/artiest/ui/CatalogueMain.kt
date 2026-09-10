@@ -27,6 +27,14 @@ fun main(args: Array<String>) {
     val example = File(docs, "workspace-example.json")
     example.writeText(WorkspaceJson.encode(exampleWorkspace()))
     println("wrote ${example.path}")
+
+    val assets = File(args.getOrNull(1) ?: "app/src/main/assets/${ShippedWorkspaces.DIRECTORY}")
+    assets.mkdirs()
+    for (workspace in ShippedWorkspaces.all()) {
+        val file = File(assets, "${workspace.id}.json")
+        file.writeText(WorkspaceJson.encode(workspace))
+        println("wrote ${file.path}")
+    }
 }
 
 /**

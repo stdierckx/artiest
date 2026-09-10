@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
@@ -52,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,6 +62,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -123,6 +126,14 @@ fun DockHost(
      */
     filter: CatalogueFilter = CatalogueFilter.EVERYTHING,
     onFilter: (CatalogueFilter) -> Unit = {},
+    /**
+     * Anything else that belongs in arrange mode, drawn above the hint.
+     *
+     * A slot rather than a parameter, so that this file keeps knowing where a
+     * control goes and nothing about what a control is. The workspace switcher
+     * lives here, and this file has never heard of a workspace.
+     */
+    arrangeExtras: @Composable () -> Unit = {},
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -215,7 +226,11 @@ fun DockHost(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = Chrome.BAR_THICKNESS + Chrome.EDGE_INSET * 3),
             ) {
-                ArrangeHint(onReset = { onLayout(DockLayout.STARTER) })
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    arrangeExtras()
+                    Spacer(Modifier.height(8.dp))
+                    ArrangeHint(onReset = { onLayout(DockLayout.STARTER) })
+                }
             }
 
             ArrangeButton(
@@ -1193,8 +1208,28 @@ internal fun ToolChooser(
     onLayout: (DockLayout) -> Unit,
 ) {
     val occupant = bar.slots.covering(cell)
+    var query by remember { mutableStateOf("") }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        // The escape hatch, and it is not optional.
+        //
+        // A filter is a promise that what it hid was not needed, and the whole
+        // feature turns on that promise being recoverable in one tap. So this
+        // searches the **entire catalogue**, filter or no filter, and offering
+        // something adds it to filter.show — a decision the user made, recorded
+        // as one, rather than a hole punched in the rules. See CatalogueFilter.
+        ToolSearch(
+            query = query,
+            onQuery = { query = it },
+            layout = layout,
+            bar = bar,
+            cell = cell,
+            filter = filter,
+            onFilter = onFilter,
+            onLayout = onLayout,
+        )
+        if (query.isNotBlank()) return@DropdownMenu
+
         if (occupant != null) {
             Text(
                 "Move ${occupant.item.label} to",
@@ -1272,6 +1307,115 @@ internal fun ToolChooser(
         }
     }
 }
+
+/**
+ * Find any control there is, whatever this workspace offers.
+ *
+ * This is trap 2's mitigation, and the workspace plan called it *"not
+ * optional"*: **hiding a tool is a promise it was not needed**, and a promise
+ * you cannot take back is a promise nobody should make. One field, the whole
+ * catalogue, always there.
+ *
+ * A hit that the current filter does not offer is shown with *Add* beside it.
+ * Tapping it does two things and says so: the control goes in the cell, and its
+ * id goes into `filter.show`, so it is offered from then on. Adding to `show`
+ * rather than taking it out of `hide` is deliberate — see [CatalogueFilter]: it
+ * records a decision, and it survives a later change to the groups.
+ */
+@Composable
+private fun ToolSearch(
+    query: String,
+    onQuery: (String) -> Unit,
+    layout: DockLayout,
+    bar: Surface,
+    cell: Cell,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
+    onLayout: (DockLayout) -> Unit,
+) {
+    BasicTextField(
+        value = query,
+        onValueChange = onQuery,
+        singleLine = true,
+        textStyle = TextStyle(
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { field ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+            ) {
+                Icon(
+                    ToolIcons.search,
+                    null,
+                    Modifier.size(15.dp),
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier.padding(start = 8.dp)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            "Find any control",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    field()
+                }
+            }
+        },
+    )
+
+    if (query.isBlank()) return
+
+    val needle = query.trim().lowercase()
+    // The whole catalogue. That is the point of it.
+    val hits = ToolItem.entries.filter {
+        needle in it.label.lowercase() || needle in it.id || needle in it.short.lowercase()
+    }
+    if (hits.isEmpty()) {
+        Text(
+            "nothing called that",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 8.dp),
+        )
+        return
+    }
+
+    for (item in hits.take(MAX_HITS)) {
+        val offered = item in filter
+        val fits = layout.fits(bar.id, item, cell, ignoring = cell)
+        DropdownMenuItem(
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.label, fontSize = 13.sp)
+                    if (!offered) {
+                        Text(
+                            "  ·  add to this workspace",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            },
+            leadingIcon = { ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) } },
+            enabled = fits,
+            onClick = {
+                if (!offered) onFilter(filter.offering(item))
+                onLayout(layout.place(bar.id, item, cell))
+            },
+        )
+    }
+}
+
+/** A menu is a menu, not a list of everything. Refine the word instead. */
+private const val MAX_HITS = 8
 
 @Composable
 private fun DockTarget(dock: Dock, enabled: Boolean, onClick: () -> Unit) {

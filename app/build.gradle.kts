@@ -156,12 +156,17 @@ tasks.withType<Test>().configureEach {
 // passing would be a generator nobody could use.
 tasks.register<JavaExec>("catalogueJson") {
     group = "documentation"
-    description = "Writes docs/catalogue.json and docs/workspace-example.json."
+    description = "Writes the generated docs and the shipped workspace assets."
     dependsOn("compileDebugUnitTestKotlin")
     val unitTest = tasks.named<Test>("testDebugUnitTest")
     classpath = files(provider { unitTest.get().classpath })
     mainClass.set("be.thalos.artiest.ui.CatalogueMainKt")
     argumentProviders.add(
-        CommandLineArgumentProvider { listOf(rootProject.file("docs").absolutePath) }
+        CommandLineArgumentProvider {
+            listOf(
+                rootProject.file("docs").absolutePath,
+                file("src/main/assets/workspaces").absolutePath,
+            )
+        }
     )
 }

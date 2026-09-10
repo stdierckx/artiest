@@ -47,7 +47,52 @@ class WorkspaceStore(context: Context) {
     private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val files = WorkspaceFiles(File(app.filesDir, DIRECTORY))
 
-    /** Every workspace, by name, with the built-in ones first. */
+    init {
+        seed()
+    }
+
+    /**
+     * Put the shipped workspaces on disk, once, if they are not there.
+     *
+     * They are read from `assets` **through the same decoder an import uses**,
+     * which makes the three of them a permanent test of that decoder: break it,
+     * and the app opens wrong on the first run rather than on the day somebody
+     * is sent a file.
+     *
+     * Only if absent. A user who has edited *Sketcher* keeps their edits, and a
+     * release that improves the shipped one does not arrive over the top of
+     * them — same rule, same reason, as the offered set in `DockStore`. [reset]
+     * is the way back.
+     */
+    private fun seed() {
+        for (id in ShippedWorkspaces.ids) {
+            if (files.exists(id)) continue
+            reset(id)
+        }
+    }
+
+    /** Put a shipped workspace back the way it came. Null for one that is not shipped. */
+    fun reset(id: String): Workspace? {
+        val text = asset(id) ?: return null
+        val fresh = WorkspaceJson.decode(text).workspace
+            // A shipped file that will not decode is a bug in this build, not
+            // in the user's data, so there is a compiled-in copy behind it. The
+            // app must still open.
+            ?: ShippedWorkspaces.byId(id)
+            ?: return null
+        return if (files.save(fresh)) fresh else null
+    }
+
+    private fun asset(id: String): String? = runCatching {
+        app.assets.open("${ShippedWorkspaces.DIRECTORY}/$id.json")
+            .bufferedReader()
+            .use { it.readText() }
+    }.getOrNull()
+
+    /** True for one of the three that came with the app. */
+    fun isShipped(id: String): Boolean = id in ShippedWorkspaces.ids
+
+    /** Every workspace, by name. */
     fun list(): List<WorkspaceFiles.Entry> = files.list()
 
     fun load(id: String): Workspace? = files.load(id)?.workspace
@@ -56,6 +101,20 @@ class WorkspaceStore(context: Context) {
 
     /** Which workspace is current. The default one when nothing has been chosen. */
     fun currentId(): String = prefs.getString(KEY_CURRENT, null) ?: DEFAULT_ID
+
+    /**
+     * The current workspace, whatever has happened to the files.
+     *
+     * Never null. A missing or unreadable file falls through to the shipped
+     * *Everything*, and if even that has gone the compiled-in copy answers. The
+     * app has to open; a drawing program that will not start is a drawing
+     * nobody can reach.
+     */
+    fun current(): Workspace =
+        load(currentId())
+            ?: load(DEFAULT_ID)
+            ?: ShippedWorkspaces.byId(DEFAULT_ID)
+            ?: Workspace(id = DEFAULT_ID, name = "Everything", layout = DockLayout.DEFAULT)
 
     fun switchTo(id: String) {
         prefs.edit().putString(KEY_CURRENT, id).apply()

@@ -78,6 +78,30 @@ data class Workspace(
         /** Straight and curly. A keyboard gives you whichever it feels like. */
         private const val APOSTROPHES = "'’ʼ"
 
+        /**
+         * A name for a copy that is not already on the list.
+         *
+         * *Sketcher* becomes *Sketcher 2*, and *Sketcher 2* becomes
+         * *Sketcher 3* rather than *Sketcher 2 2*. A number rather than the
+         * word "copy" because a list of *Sketcher copy copy copy* is a list
+         * nobody can read, and because the second one is usually the one you
+         * keep.
+         */
+        fun copyName(name: String, taken: Collection<String>): String {
+            val stem = name.trimEnd().removeTrailingNumber()
+            var n = 2
+            while ("$stem $n" in taken && n < MAX_COPIES) n++
+            return "$stem $n"
+        }
+
+        private fun String.removeTrailingNumber(): String {
+            val cut = trimEnd { it.isDigit() }.trimEnd()
+            return if (cut.isEmpty() || cut == this) this else cut
+        }
+
+        /** Past this many copies of one name, the name is not the problem. */
+        private const val MAX_COPIES = 100
+
         /** What a workspace is called when the name it was given had nothing in it. */
         const val FALLBACK_SLUG = "workspace"
 

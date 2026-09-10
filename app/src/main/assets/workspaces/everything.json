@@ -1,0 +1,59 @@
+{
+  "artiest_workspace": 1,
+  "catalogue": 1,
+  "id": "everything",
+  "name": "Everything",
+  "description": "Every control there is, arranged the way it starts.",
+  "author": "artiest",
+  "revision": 1,
+  "filter": {"groups": null, "hide": [], "show": []},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": null},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil", "at": [0, 1]},
+        {"id": "eraser", "at": [0, 2]},
+        {"id": "colour", "at": [0, 4]}
+      ]
+    },
+    {
+      "id": "top",
+      "dock": "top",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "undo", "at": [0, 0]},
+        {"id": "redo", "at": [1, 0]},
+        {"id": "export", "at": [3, 0]},
+        {"id": "stats", "at": [4, 0]}
+      ]
+    },
+    {
+      "id": "right",
+      "dock": "right",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "zoom_in", "at": [0, 0]},
+        {"id": "zoom_out", "at": [0, 1]},
+        {"id": "fit", "at": [0, 2]}
+      ]
+    },
+    {
+      "id": "bottom",
+      "dock": "bottom",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "size", "at": [0, 0]},
+        {"id": "smoothing", "at": [4, 0]},
+        {"id": "grain", "at": [8, 0]}
+      ]
+    }
+  ]
+}

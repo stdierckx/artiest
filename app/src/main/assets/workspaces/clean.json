@@ -1,0 +1,46 @@
+{
+  "artiest_workspace": 1,
+  "catalogue": 1,
+  "id": "clean",
+  "name": "Clean",
+  "description": "The paper, and four controls in the corner.",
+  "author": "artiest",
+  "revision": 1,
+  "filter": {"groups": ["edit", "draw"], "hide": [], "show": []},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": null},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 2], [0, 2, 3, 1]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "eraser", "at": [0, 1]},
+        {"id": "colour", "at": [0, 2]},
+        {"id": "undo", "at": [1, 2]}
+      ]
+    },
+    {
+      "id": "top",
+      "dock": "top",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": []
+    },
+    {
+      "id": "right",
+      "dock": "right",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": []
+    },
+    {
+      "id": "bottom",
+      "dock": "bottom",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": []
+    }
+  ]
+}
