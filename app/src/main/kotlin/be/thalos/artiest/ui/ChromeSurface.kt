@@ -93,6 +93,8 @@ internal fun ChromeSurface(
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     modifier: Modifier = Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
@@ -138,6 +140,8 @@ internal fun ChromeSurface(
                     onLayout = onLayout,
                     arranging = arranging,
                     drag = drag,
+                    filter = filter,
+                    onFilter = onFilter,
                     slotContent = slotContent,
                 )
             }
@@ -186,6 +190,8 @@ private fun ShapedCell(
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     var chooser by remember { mutableStateOf(false) }
@@ -222,6 +228,8 @@ private fun ShapedCell(
                 layout = layout,
                 bar = surface,
                 cell = cell,
+                filter = filter,
+                onFilter = onFilter,
                 onDismiss = { chooser = false },
                 onLayout = { chooser = false; onLayout(it) },
             )

@@ -34,9 +34,9 @@ class DockStore(context: Context) {
      * absolute, so every existing item keeps the position the user's hand
      * already knows and the new room appears at the end.
      */
-    fun load(): DockLayout {
+    fun load(filter: CatalogueFilter = CatalogueFilter.EVERYTHING): DockLayout {
         val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null))
-            ?: return introduce(DockLayout.DEFAULT)
+            ?: return introduce(DockLayout.DEFAULT, filter)
         // Edges are widened to the current defaults; a floating surface keeps
         // the length it was made, because it was made to fit what is on it and
         // stretching it would put empty cells over the drawing.
@@ -61,7 +61,7 @@ class DockStore(context: Context) {
                 BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y),
             )
         }
-        return introduce(placed)
+        return introduce(placed, filter)
     }
 
     /**
@@ -82,8 +82,21 @@ class DockStore(context: Context) {
      * The preferred dock is a suggestion. If it is full the item goes wherever
      * it fits, and if nothing fits it is simply not placed — the chooser still
      * has it, and bars arranged to be full were meant to be full.
+     *
+     * **The filter decides where a tool is put, not whether it is recorded as
+     * offered.** A control the current workspace hides is marked offered and
+     * simply not placed, and switching to *Everything* later does not resurrect
+     * it. That looks harsh until you see what the alternative costs: the offered
+     * set is what protects a deliberate removal, and it cannot tell
+     * offered-then-deleted from offered-then-kept. If a hidden tool were left
+     * unoffered, every workspace switch would rain new buttons onto bars the
+     * user had already arranged — which is the bug this whole mechanism exists
+     * to prevent, arriving through the door marked *helpful*.
+     *
+     * The tool is not lost either way: it is one search away in the chooser,
+     * which is the escape hatch the filter is only safe because of.
      */
-    private fun introduce(layout: DockLayout): DockLayout {
+    private fun introduce(layout: DockLayout, filter: CatalogueFilter): DockLayout {
         val offered = prefs.getString(KEY_OFFERED, null)
             ?.split(',')?.filter { it.isNotEmpty() }?.toMutableSet()
             ?: mutableSetOf()
@@ -93,6 +106,7 @@ class DockStore(context: Context) {
             if (!offered.add(item.id)) continue
             changed = true
             if (item in out) continue
+            if (item !in filter) continue
             for (dock in listOf(preferred) + Dock.EDGES.filter { it != preferred }) {
                 val cell = out.firstFit(dock.id, item) ?: continue
                 out = out.place(dock.id, item, cell)

@@ -114,6 +114,15 @@ fun DockHost(
     arranging: Boolean,
     onArranging: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * What the chooser offers. **Only the chooser** — see [CatalogueFilter].
+     *
+     * A tool already on a bar but outside the filter keeps working and keeps
+     * its cell, which is what makes switching workspace safe rather than
+     * destructive.
+     */
+    filter: CatalogueFilter = CatalogueFilter.EVERYTHING,
+    onFilter: (CatalogueFilter) -> Unit = {},
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -153,6 +162,8 @@ fun DockHost(
                     arranging = arranging,
                     onDraw = { shaping = bar.id },
                     drag = drag,
+                    filter = filter,
+                    onFilter = onFilter,
                     modifier = Modifier
                         .align(bar.dock.alignment())
                         .padding(Chrome.EDGE_INSET)
@@ -184,6 +195,8 @@ fun DockHost(
                     arranging = arranging,
                     onDraw = { shaping = bar.id },
                     drag = drag,
+                    filter = filter,
+                    onFilter = onFilter,
                     hostWidth = hostWidth,
                     hostHeight = hostHeight,
                     slotContent = slotContent,
@@ -276,6 +289,8 @@ private fun BarView(
     arranging: Boolean,
     onDraw: () -> Unit,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     modifier: Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
@@ -287,14 +302,18 @@ private fun BarView(
 
     if (!bar.region.isStrip) {
         if (!arranging) {
-            ChromeSurface(bar, layout, onLayout, arranging, drag, modifier, slotContent)
+            ChromeSurface(
+                bar, layout, onLayout, arranging, drag, filter, onFilter, modifier, slotContent,
+            )
         } else {
             // Beside the shape rather than on it: a button covering a cell is a
             // cell nothing can be dropped into, and arrange mode is when
             // dropping happens.
             Row(verticalAlignment = Alignment.Top, modifier = modifier) {
                 shapeButton()
-                ChromeSurface(bar, layout, onLayout, arranging, drag, Modifier, slotContent)
+                ChromeSurface(
+                    bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
+                )
             }
         }
         return
@@ -307,16 +326,16 @@ private fun BarView(
             .padding(Chrome.BAR_PADDING),
     ) {
         if (!arranging) {
-            BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+            BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
         } else if (bar.axis == Axis.VERTICAL) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 shapeButton()
-                BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+                BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
             }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 shapeButton()
-                BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+                BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
             }
         }
     }
@@ -346,6 +365,8 @@ private fun BarRun(
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val vertical = bar.axis == Axis.VERTICAL
@@ -382,6 +403,8 @@ private fun BarRun(
                 onLayout = onLayout,
                 arranging = arranging,
                 drag = drag,
+                filter = filter,
+                onFilter = onFilter,
                 slotContent = slotContent,
             )
             slot += placed?.let { bar.spanOf(it) } ?: 1
@@ -434,6 +457,8 @@ private fun SlotCell(
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val vertical = bar.axis == Axis.VERTICAL
@@ -497,6 +522,8 @@ private fun SlotCell(
                 layout = layout,
                 bar = bar,
                 cell = cell,
+                filter = filter,
+                onFilter = onFilter,
                 onDismiss = { chooser = false },
                 onLayout = { chooser = false; onLayout(it) },
             )
@@ -745,6 +772,8 @@ private fun FloatingBarView(
     arranging: Boolean,
     onDraw: () -> Unit,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     hostWidth: Float,
     hostHeight: Float,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
@@ -813,9 +842,11 @@ private fun FloatingBarView(
         }
 
         if (shaped) {
-            ChromeSurface(bar, layout, onLayout, arranging, drag, Modifier, slotContent)
+            ChromeSurface(
+                bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
+            )
         } else {
-            BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+            BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
         }
 
         if (arranging) {
@@ -1156,6 +1187,8 @@ internal fun ToolChooser(
     layout: DockLayout,
     bar: Surface,
     cell: Cell,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     onDismiss: () -> Unit,
     onLayout: (DockLayout) -> Unit,
 ) {
@@ -1198,7 +1231,11 @@ internal fun ToolChooser(
         }
 
         for (group in ToolGroup.entries) {
-            val items = ToolItem.entries.filter { it.group == group }
+            // The filter belongs here and nowhere else. A tool already on a bar
+            // but outside it keeps working and keeps its cell -- see
+            // CatalogueFilter, and the rule that makes switching workspace a
+            // change of menu rather than a change of toolbar.
+            val items = ToolItem.entries.filter { it.group == group && it in filter }
             if (items.isEmpty()) continue
             Text(
                 group.label,
