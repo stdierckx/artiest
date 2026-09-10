@@ -15,6 +15,7 @@ import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
@@ -784,8 +785,6 @@ class InkSurfaceView(
         canvas.concat(docToView)
         canvas.clipRect(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
         canvas.clipRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
-        paperPaint.color = document.paperColor
-        canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
         // The whole stack and not just the active sheet, clipped to the dirty
         // rectangle two lines above. Painting only the active layer here would
         // make every sheet above the pen disappear inside the wet stroke's
@@ -796,68 +795,57 @@ class InkSurfaceView(
     }
 
     /**
-     * Every sheet, bottom to top, with the wet stroke in its place on the
-     * active one. Document space; the caller has already concatenated the
+     * Paper and every sheet, bottom to top, with the wet stroke in its place on
+     * the active one. Document space; the caller has already concatenated the
      * matrix and clipped.
      *
-     * [l], [t], [r] and [b] bound the offscreen layer this needs when the
-     * active sheet is translucent or is being erased. They are the dirty
-     * rectangle on the front-buffered path and the whole page on the dry one:
-     * a `saveLayer` costs its own area, so handing it the page when a dab is
-     * being erased would allocate 7.1 Mpx per batch.
+     * The loop itself is [StackCompositor]'s, and it is there rather than here
+     * because `PngExporter` had a second copy of it that already disagreed
+     * about where the paper goes. What is left in this file is the part that is
+     * genuinely the renderer's: what the wet stroke *is*.
      *
      * **The wet stroke belongs *inside* the stack, not on top of it.** Ink
      * going onto the third of five sheets must be hidden by the two above it
-     * while it is still wet, or the stroke jumps behind them at pen-up. That is
-     * also why erasing takes an offscreen layer: `DST_OUT` applied straight to
-     * the canvas would cut through the paper and every sheet already painted,
-     * and the stroke would read as a window onto the desk.
+     * while it is still wet, or the stroke jumps behind them at pen-up.
      */
     private fun compositeStack(canvas: Canvas, l: Float, t: Float, r: Float, b: Float) {
-        val stack = document.layers
-        val activeAt = stack.activePosition
-        val wet = scratch.isOpen
-        var painted = 0
-        for (i in 0 until stack.size) {
-            val entry = stack.entryAt(i)
-            if (!entry.visible) continue
-            val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-            // A sheet at zero opacity is not merely invisible, it is a full-page
-            // blit that cannot change a pixel.
-            if (alpha <= 0) continue
-            painted++
-            if (i != activeAt || !wet) {
-                layerPaint.alpha = alpha
-                entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
-                continue
-            }
-            // An offscreen layer only when it buys something: it is what scopes
-            // the erase, and it is what makes a translucent sheet fade the
-            // stroke *with* the ink under it rather than over it. An opaque
-            // sheet taking ink stays on the cheap path it was on before there
-            // was a stack at all.
-            val grouped = pen.erase || alpha < 255
-            val save = if (grouped) canvas.saveLayerAlpha(l, t, r, b, alpha) else -1
-            layerPaint.alpha = if (grouped) 255 else alpha
-            entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
+        compositor.compose(
+            canvas,
+            document.layers,
+            document.paperColor,
+            document.widthPx,
+            document.heightPx,
+            wetInk,
+            l, t, r, b,
+        )
+        drySheets = compositor.sheetsPainted
+    }
+
+    /**
+     * One per view. See [StackCompositor]'s threading note: its `Paint` is not
+     * shareable, and the export builds its own.
+     */
+    private val compositor = StackCompositor()
+
+    /**
+     * The open stroke, as the compositor sees it.
+     *
+     * An object rather than a lambda because it is read on the render thread
+     * every frame and a capturing lambda per frame is an allocation on the one
+     * path with a measured budget — the same reason `CommitQueue.Sink` is an
+     * interface.
+     */
+    private val wetInk = object : StackCompositor.Wet {
+        override val position: Int get() = document.layers.activePosition
+        override val isOpen: Boolean get() = scratch.isOpen
+        override val erases: Boolean get() = pen.erase
+        override fun draw(canvas: Canvas) {
             if (pen.erase) {
                 scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
             } else {
                 scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish)
             }
-            if (grouped) canvas.restoreToCount(save)
         }
-        drySheets = painted
-    }
-
-    /**
-     * The stack's blit paint. Separate from [blitPaint] because its alpha is
-     * rewritten per sheet, and a shared `Paint` whose alpha is left at whatever
-     * the last layer wanted is the classic way to make one drawing fade another.
-     */
-    private val layerPaint = Paint().apply {
-        isFilterBitmap = true
-        isAntiAlias = false
     }
 
     /**
@@ -963,9 +951,6 @@ class InkSurfaceView(
      * about the colour of the desk it is lying on.
      */
     var deskColorArgb: Int = DEFAULT_DESK_COLOR
-
-    /** The page rectangle's fill. One `Paint` for the view's life; see [blitPaint]. */
-    private val paperPaint = Paint()
 
     private val blitPaint = Paint().apply {
         isFilterBitmap = true
@@ -1083,8 +1068,9 @@ class InkSurfaceView(
         }
         val save = canvas.save()
         canvas.concat(dryMatrix)
-        paperPaint.color = document.paperColor
-        canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
+        // The paper is the compositor's now: it is the bottom of the stack, not
+        // a backdrop, and the export has to agree with this frame about that.
+        //
         // A stroke still in flight lives on the scratch, not in the layer,
         // so a redraw that ignored it would blank the wet ink for a frame
         // every time the transform changed. Pinching mid-stroke is not a

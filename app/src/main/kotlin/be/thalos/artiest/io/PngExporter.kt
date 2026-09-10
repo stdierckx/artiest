@@ -6,13 +6,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.StackCompositor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -28,13 +26,14 @@ import java.util.Locale
  * Four things happen here and the order between them is the design:
  *
  * 1. **Wait for the render thread**, briefly and with a bound. See [export].
- * 2. **Copy the layer on-lock**, into a bitmap allocated *before* the lock is
- *    taken, with nothing else inside the critical section.
- * 3. **Composite the paper off-lock**, under the ink rather than over it.
+ * 2. **Compose the stack through [StackCompositor]**, into a bitmap allocated
+ *    *before* any lock is taken, one sheet at a time and never two locks at
+ *    once.
+ * 3. **Say the result is opaque**, so the encoder writes 24-bit.
  * 4. **Encode and write off-lock**, through a stream whose failure is a result
  *    and not a shrug.
  *
- * **Step 2 is narrower than the plan specified, and deliberately.** The plan
+ * **Step 2 is narrower than the Phase 1 plan specified, and deliberately.** That plan
  * says the export "takes `layerLock`, allocates one transient document-sized
  * `Bitmap`, `drawColor(paperWhite)` then `drawBitmap(layer, …)`, releases the
  * lock". That puts a 27.2 MiB allocation, a full-canvas `drawColor` and a
@@ -60,13 +59,20 @@ import java.util.Locale
  * during an export waits for it, and the cost of pressing Save is at worst one
  * dropped frame at the next pen-up. 24 ms would be two.
  *
- * **Step 3 is `DST_OVER`, not `drawColor` then `drawBitmap`.** Same pixels —
- * `dst + src*(1 - dstA)` with an opaque `src` is `ink + paper*(1 - inkA)`,
- * which is what painting the ink over the paper computes — but it does not
- * need the paper to be down *first*, so the composite can happen after the
- * lock is released rather than inside it. The equality is not obvious enough to
- * leave as a comment: `PngExporterTest` builds the paper-first version longhand
- * and asserts the two agree pixel for pixel.
+ * **The paper used to go on last, and now it goes on first.** Until Phase 3
+ * this method slid it underneath at the end with `DST_OVER` — same pixels,
+ * because `dst + src*(1 - dstA)` with an opaque source is what painting ink
+ * over paper computes, and cheaper, because it did not need the paper down
+ * first. It stops being the same pixels the moment a sheet carries a blend
+ * mode: multiplying against transparency is not multiplying against paper. So
+ * the trick is gone and the paper is the bottom of the stack, which costs the
+ * 12.9-13.8 ms `drawColor` measured above, off-lock, out of an export that
+ * takes 450 ms.
+ *
+ * That is also why the sheet loop is no longer written out here. It was written
+ * twice — once for the screen and once for the file — and the two already
+ * disagreed about this. `PngExporterTest` asserts the file matches what
+ * `StackCompositor` produces, which is what the screen draws.
  *
  * **The layer is never touched.** Paper white is composited into the transient
  * copy and never into the document, which is [be.thalos.artiest.doc.Layer]'s
@@ -164,47 +170,38 @@ object PngExporter {
         try {
             val canvas = Canvas(out)
             val copyStartNs = System.nanoTime()
-            // SRC and not the default SRC_OVER. Onto a fresh transparent bitmap
-            // the two are identical — `src + 0*(1-a)` — so this is about what
-            // the line means rather than what it computes today: it is a copy,
-            // and it stays a copy if the destination is ever reused.
-            val copy = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
-            // Every sheet, bottom to top, at its own opacity, skipping the
-            // hidden ones -- the same picture the screen shows. Only the
-            // bottom-most visible sheet is copied with `SRC`; the ones above it
-            // composite over what is already there, which is what a stack
-            // means. Copying each one with `SRC` would export the top sheet
-            // alone, and on a drawing whose top sheet is nearly empty that is
-            // an export of a blank page.
-            val over = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
-            val stack = document.layers
-            var closed = false
-            var first = true
-            for (i in 0 until stack.size) {
-                val entry = stack.entryAt(i)
-                if (!entry.visible) continue
-                val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-                if (alpha <= 0) continue
-                val paint = if (first) copy else over
-                paint.alpha = alpha
-                // Each sheet under its own lock and never two at once. See
-                // `Layer`: the lock is a leaf, and a nested pair here would be
-                // a lock ordering nobody has designed -- for no gain, since the
-                // canvas is this thread's and the sheets are independent.
-                if (entry.layer.read { canvas.drawBitmap(it, 0f, 0f, paint) }) {
-                    first = false
-                } else {
-                    // The document was closed underneath the export. Not a
-                    // blank sheet: a torn-down one, which is the case the
-                    // LAYER_CLOSED result exists for.
-                    closed = true
-                }
-            }
-            // A document whose sheets are all hidden still exports. The paper
-            // goes down below and a blank page is a legitimate thing to save;
-            // what must not pass silently is a document that has gone away.
-            val read = !closed
+            // The screen's compositor, not a second copy of its loop. It draws
+            // the paper first and every visible sheet over it, at its own
+            // opacity, skipping the hidden ones -- which is what the file has
+            // to be a picture of. Its own instance, because the `Paint` inside
+            // it is not shareable with the render thread; see `StackCompositor`.
+            //
+            // Until Phase 3 this method had the loop written out again and slid
+            // the paper underneath at the end with `DST_OVER`, to save a
+            // full-canvas `drawColor` measured at 12.9-13.8 ms. That is the
+            // same image for source-over sheets and a different one the moment
+            // a sheet blends, so the saving has been given back deliberately:
+            // 13 ms, off-lock, out of an export that takes 450.
+            //
+            // Each sheet is read under its own lock and never two at once. See
+            // `Layer`: the lock is a leaf, and a nested pair would be a lock
+            // ordering nobody has designed.
+            val read = StackCompositor().compose(
+                canvas,
+                document.layers,
+                document.paperColor,
+                document.widthPx,
+                document.heightPx,
+                wet = null,
+                left = 0f,
+                top = 0f,
+                right = document.widthPx.toFloat(),
+                bottom = document.heightPx.toFloat(),
+            )
             val copyNs = System.nanoTime() - copyStartNs
+            // A document whose sheets are all hidden still exports: the paper
+            // is down and a blank page is a legitimate thing to save. What must
+            // not pass silently is a document that has gone away.
             if (!read) {
                 return@withContext ExportResult.Failed(
                     ExportStage.LAYER_CLOSED,
@@ -212,9 +209,6 @@ object PngExporter {
                 )
             }
 
-            // Off-lock from here. Paper under the ink; see the class header for
-            // why this is the same image as paper first.
-            canvas.drawColor(document.paperColor, PorterDuff.Mode.DST_OVER)
             // An opaque paper leaves every pixel at alpha 255, and saying so
             // makes the encoder write a 24-bit PNG instead of a 32-bit one with
             // a channel that is uniformly 0xff. Measured, because the obvious
