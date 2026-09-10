@@ -13,6 +13,13 @@
 > to draw in the selection (= an important tool / strategy for the artist).
 > Selection: transform, rotate. Layer blending options, layer transparency,
 > layer transform and rotate."*
+>
+> **Revised the same day**, once, on the user's reading of the plan: *"only
+> turning and moving a selection, it should update once every 120ms, so the user
+> knows where it is being dropped."* That answers the one thing this plan had no
+> device number for and had been prepared to solve badly. See **The float** —
+> the outline is free and tracks the pen, the pixels refresh on a 120 ms floor,
+> and the wireframe-only fallback the risk table was holding in reserve is gone.
 
 ## The decision
 
@@ -304,6 +311,39 @@ thumbnail lesson applied forward: a bilinear filter samples a 2×2 neighbourhood
 whatever the reduction, so a pencil line falls between the taps and disappears.
 Halve the float until the remaining scale is above 0.5, then do the final blit.
 
+**The outline follows the hand; the pixels catch up every 120 ms.** Decided by
+the user, and it settles what would otherwise have been the phase's most
+expensive open question. The two halves of the preview cost wildly different
+amounts and there is no reason to run them at the same rate:
+
+- **The box and the ants are free.** They are stroked in the Compose overlay,
+  which costs a draw pass and no `SurfaceControl` transaction at all, so they
+  track the pen at whatever rate the pen reports. The user always knows where
+  the selection *is*.
+- **The pixels are not.** Drawing the float means a dry render — the compositor
+  repaints the stack and resamples the float through its matrix — measured at
+  13.27 ms for a full page and 2.32 for a quarter, on top of the stack itself.
+  At 90 Hz that is a redraw asking for more than it can have.
+
+So the float's pixels refresh on a **120 ms floor**: about eight times a second,
+enough that the user can see what is landing where and correct before letting
+go, and about an eighth of the duty cycle even in the full-page worst case. It
+also throttles the stack repaint that comes with it, which is the larger half of
+the cost and the half this plan cannot yet put a device number on.
+
+`FLOAT_PREVIEW_MS = 120` is one constant, and the throttle is
+`GestureController`'s discipline with a floor added: at most one render in
+flight, coalesced onto the frame clock, and now also never sooner than 120 ms
+after the last one. Reusing that class's shape rather than inventing a second
+one matters, because the half of it that is hard-won is the
+`dryRenderInFlight` handshake — without it a slow render is followed
+immediately by another and the queue never drains.
+
+**Nothing about this changes the drop.** The 120 ms preview is a preview: it
+resamples from the float's original pixels every time, so eight refreshes a
+second cost nothing in quality, and the committed blit at drop is still the only
+one that writes.
+
 **The transform box lives in the Compose overlay and owns the pen while it is
 live.** Drag inside to move, corner handles to scale, a handle above the box to
 rotate. It is in the overlay rather than in `InputRouter` because there is
@@ -359,7 +399,7 @@ which is what a painter means by drawing on a multiply layer.
 | **S3** | **Confining the ink.** A selection forces the indirect path; the scratch is masked in place; clear and the eraser are confined; undo patches narrow. Pixel tests that ink outside the selection changes nothing and that the wet and dry edges are identical. | `:app` | **High** | S2 | 1.5 |
 | **S4** | **The marquee tools.** `SelectDriver` beside `StrokeDriver`, chosen once per stroke; rectangle, ellipse and lasso; add/subtract/intersect; select all, none, invert. Lasso simplification. | `:app` | Med | S2 | 1.5 |
 | **S5** | **Marching ants** in the overlay: view-space stroking, two passes, frame-clocked phase. | `:app` | Med | S2 | 1 |
-| **S6** | **The float.** `FloatingPixels`, the punch-out in the compositor, the transform box in the overlay, drop as one patch, halving below 0.5 scale, cancel. | `:app` | **High** | S1, S3 | 2 |
+| **S6** | **The float.** `FloatingPixels`, the punch-out in the compositor, the transform box in the overlay, drop as one patch, halving below 0.5 scale, cancel. The box tracks the pen; the pixels refresh on a 120 ms floor. | `:app` | **High** | S1, S3 | 2 |
 | **S7** | **Layer transform**, as the same float over a whole sheet. Should be small if S6 is right; if it is not small, S6 is wrong. | `:app` | Low | S6 | 0.5 |
 | **S8** | **Blend modes** in `StackCompositor` and a control on the layer row. | `:app` | Med | S1, S0 | 1 |
 | **S1b** | **GATED. The cached compositor**: everything below the active sheet in one bitmap, everything above in another. Entered **only** on an S0 measurement that names what it fixes. | `:app` | **High** | S0 | 2 |
@@ -414,7 +454,8 @@ sitting.**
 | The wet stroke's selection edge does not match the committed one | S3: a pixel test of the edge disagrees between the two paths, or the edge visibly snaps at pen-up on the tablet | This is the stop condition, not a tuning problem. The scratch mask is the design; if it does not hold, the design is wrong |
 | The ants cost a frame | S5: `dryRenderInFlight` rises, or the readout's frame times move while a selection is on screen | The ants must invalidate the draw phase only. If they cannot, draw a static outline and animate nothing |
 | A lasso produces a path `Path.op` chokes on | S4: a slow selection after a long free-hand loop | Simplify to 2 document pixels on the way in. The measurement is at 240 segments; a thousand is not measured |
-| The float's live preview cannot hold a usable frame rate | S6, on the tablet: dragging a large selection stutters | Clip the float's blit to its transformed bounds, which the bench says is where the cost is — a quarter page is 2.32 ms against 13.27 for a full one. Failing that, drag a wireframe box and resample at drop |
+| The float's preview cannot hold even 120 ms | S6, on the tablet: the pixels lag the outline by more than a beat, or the refresh eats the drop | Clip the float's blit to its transformed bounds, which the bench says is where the cost is — a quarter page is 2.32 ms against 13.27 for a full one. The outline is unaffected either way: it is in the overlay and free |
+| The outline and the pixels disagree by enough to mislead | S6: at 120 ms a fast drag puts the box a long way from the pixels under it | This is the trade the 120 ms buys and it is the right way round — the box is where the pixels *will* land. If it reads badly, raise the rate rather than dropping the box |
 | The drop hitches visibly | S6: 41 ms for a full page, measured, on the render thread inside a commit | Accept it for a whole-page transform and say so; it happens once, at the end of a deliberate gesture. If a quarter-page drop hitches, something else is wrong |
 | A scaled-down float loses thin lines | S6: the thumbnail bug again, in a new place | Halve until the residual scale is above 0.5. The code to copy is `LayerStack.buildThumbnail` |
 | The screen and the export disagree once blend modes exist | S8, after S1 was skipped or done badly | S1's pixel-identity test is the guard. If it is not written, this risk is a certainty rather than a risk |
