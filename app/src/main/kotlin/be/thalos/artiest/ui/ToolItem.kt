@@ -177,6 +177,28 @@ enum class ToolItem(
      */
     LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
 
+    /**
+     * The marquee: the pen selects instead of drawing.
+     *
+     * A toggle beside the brushes rather than a fourth brush, for the reason
+     * [ERASER] is a toggle: it does not change what the nib is, it changes what
+     * the pen is *for*. Everything about who may draw — palm rejection, the
+     * two-finger gesture, the cancel on focus loss — is about pointers and
+     * applies to a marquee word for word, so the pen's own path is the one that
+     * forks.
+     */
+    MARQUEE("marquee", "Select", "Select", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+
+    /**
+     * The selection panel: shape, what a gesture does to what is already
+     * selected, and select all / none / invert.
+     *
+     * One slot and a panel, the same shape [LAYERS] and [COLOUR] have. Three
+     * shapes, four combine modes and three commands is ten controls; a toolbar
+     * that carried them would be a toolbar with nothing else on it.
+     */
+    SELECTION("selection", "Selection", "Select", 1, ToolGroup.CANVAS),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

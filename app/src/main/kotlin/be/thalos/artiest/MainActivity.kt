@@ -71,7 +71,13 @@ import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
+import be.thalos.artiest.canvas.MarqueeShape
+import be.thalos.artiest.canvas.setDocToView
+import be.thalos.artiest.doc.SelectMode
+import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.ui.BrushCursor
+import be.thalos.artiest.ui.SelectionButton
+import be.thalos.artiest.ui.SelectionOverlay
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
@@ -392,6 +398,27 @@ private fun CanvasScreen(
     var activeLayer by remember { mutableIntStateOf(document.layers.activeId) }
     var layersOpen by remember { mutableStateOf(false) }
 
+    // The stencil, and the marquee being dragged over it.
+    //
+    // Three pieces of state and not one, because they change at three
+    // different rates and only one of them recomposes anything. `selecting`
+    // and `marqueeShape` are pressed by hand; `selectionShape` changes when the
+    // render thread republishes; `outlineTick` moves at the rate of a pan or a
+    // pen sample and is read *inside a draw lambda*, so it invalidates the
+    // draw phase and nothing else. That is the same arrangement `cursorAt`
+    // uses, and it is what makes an animated outline affordable.
+    var selecting by remember { mutableStateOf(false) }
+    var marqueeShape by remember { mutableStateOf(MarqueeShape.RECTANGLE) }
+    var marqueeMode by remember { mutableStateOf(SelectMode.NEW) }
+    var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
+    val outlineTick = remember { mutableIntStateOf(0) }
+
+    // Document-to-view, rebuilt only when the canvas actually moves. A `Matrix`
+    // is mutable native state and this one is written on the UI thread and read
+    // on the UI thread, in a draw lambda, so one instance is enough -- but it
+    // must not be the renderer's, which the render thread concatenates.
+    val outlineMatrix = remember { android.graphics.Matrix() }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -524,6 +551,26 @@ private fun CanvasScreen(
         }
     }
 
+    // The stencil, polled for the same reason `canUndo` is: the render thread
+    // is what applies a selection -- it arrives through the commit queue,
+    // behind whatever was drawn before it -- and it has no way to reach into a
+    // composition. Four times a second is fast enough for an outline that
+    // appears after a gesture the user has already finished.
+    //
+    // The tick is bumped as well as the snapshot swapped, because the outline
+    // is drawn from a lambda that reads the tick; swapping the snapshot alone
+    // would recompose and leave the draw phase believing nothing had moved.
+    LaunchedEffect(document) {
+        while (true) {
+            kotlinx.coroutines.delay(250)
+            val snap = document.selection.snapshot
+            if (snap !== selectionShape) {
+                selectionShape = snap
+                outlineTick.intValue++
+            }
+        }
+    }
+
     // Only while the panel is open, and faster than the undo poll, because
     // this one is watching the result of a press the user just made: a row that
     // takes half a second to light up reads as a button that did not work.
@@ -623,8 +670,32 @@ private fun CanvasScreen(
                     it.onHover = { inRange, x, y ->
                         cursorAt.value = if (inRange) Offset(x, y) else Offset.Unspecified
                     }
+                    // Both bump a counter read inside a draw lambda rather than
+                    // setting a value: a marquee at 200 Hz and a pan at 90 Hz
+                    // must not recompose the chrome.
+                    it.onMarqueeChanged = { outlineTick.intValue++ }
+                    it.onTransformChanged = { outlineTick.intValue++ }
                     onView(it)
                 }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Above the canvas and below the chrome, for the reason the ring is
+        // there: the outline belongs over the paper.
+        SelectionOverlay(
+            selection = {
+                outlineTick.intValue
+                selectionShape.path
+            },
+            marquee = {
+                outlineTick.intValue
+                surface?.liveMarquee?.takeIf { it.isOpen }?.path
+            },
+            docToView = {
+                outlineTick.intValue
+                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                outlineMatrix
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -819,6 +890,39 @@ private fun CanvasScreen(
                             surface?.redrawDry()
                         }
                     },
+                    selecting = selecting,
+                    onSelecting = { on ->
+                        selecting = on
+                        // Through the view rather than straight onto the field,
+                        // because an open stroke has to be abandoned: a mode
+                        // switch with the pen already down would turn half a
+                        // lasso into half a pencil line.
+                        surface?.let {
+                            it.selecting = on
+                            if (!on) it.abandonStroke()
+                        }
+                        generation++
+                    },
+                    marqueeShape = marqueeShape,
+                    onMarqueeShape = {
+                        marqueeShape = it
+                        surface?.marqueeShape = it
+                        generation++
+                    },
+                    marqueeMode = marqueeMode,
+                    onMarqueeMode = {
+                        marqueeMode = it
+                        surface?.marqueeMode = it
+                        generation++
+                    },
+                    hasSelection = selectionShape.active,
+                    onSelectOp = { op ->
+                        surface?.select(op)
+                        // Not waited for: the op is queued and the render
+                        // thread applies it behind whatever was drawn first.
+                        // The poll above is what notices.
+                        generation++
+                    },
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
                     opacity = opacity,
@@ -912,6 +1016,14 @@ private fun ToolSlot(
     onLayerAdd: () -> Unit,
     onLayerDuplicate: () -> Unit,
     onLayersOpen: (Boolean) -> Unit,
+    selecting: Boolean,
+    onSelecting: (Boolean) -> Unit,
+    marqueeShape: MarqueeShape,
+    onMarqueeShape: (MarqueeShape) -> Unit,
+    marqueeMode: SelectMode,
+    onMarqueeMode: (SelectMode) -> Unit,
+    hasSelection: Boolean,
+    onSelectOp: (SelectOp) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
     opacity: Float,
@@ -1009,6 +1121,22 @@ private fun ToolSlot(
         ToolItem.REDO ->
             IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
 
+        ToolItem.MARQUEE -> IconToolButton(
+            ToolIcons.marquee,
+            item.label,
+            { onSelecting(!selecting) },
+            selected = selecting,
+        )
+        ToolItem.SELECTION -> SelectionButton(
+            shape = marqueeShape,
+            mode = marqueeMode,
+            selecting = selecting,
+            hasSelection = hasSelection,
+            onShape = onMarqueeShape,
+            onMode = onMarqueeMode,
+            onOp = onSelectOp,
+            onSelecting = onSelecting,
+        )
         ToolItem.LAYERS -> LayersButton(
             layers = layerRows,
             activeId = activeLayer,

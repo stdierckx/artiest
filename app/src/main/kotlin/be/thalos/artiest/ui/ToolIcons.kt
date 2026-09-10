@@ -53,6 +53,8 @@ object ToolIcons {
         ToolItem.ERASER -> eraser
         ToolItem.ERASER_SIZE -> eraser
         ToolItem.LAYERS -> layers
+        ToolItem.MARQUEE -> marquee
+        ToolItem.SELECTION -> marquee
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.
@@ -451,6 +453,65 @@ object ToolIcons {
                 rect(6.0f, 6.0f, 19.2f, 17.2f)
             }
             fill { rect(8.6f, 8.6f, 21.8f, 19.8f) }
+        }
+    }
+
+    /**
+     * A dashed rectangle with a solid corner: the marquee.
+     *
+     * Dashes rather than a solid outline because that is what the thing itself
+     * looks like on the page — a selection is drawn as marching ants, and an
+     * icon that showed a plain box would be the crop tool. Drawn as eight short
+     * segments rather than with a dash effect, because `ImageVector` has no
+     * dash and the segments are the same eight lines either way.
+     */
+    val marquee: ImageVector by lazy {
+        icon("marquee") {
+            stroke(1.7f) {
+                // top
+                moveTo(3.5f, 3.5f); lineTo(8.2f, 3.5f)
+                moveTo(11.4f, 3.5f); lineTo(15.8f, 3.5f)
+                moveTo(19.0f, 3.5f); lineTo(20.5f, 3.5f)
+                // right
+                moveTo(20.5f, 3.5f); lineTo(20.5f, 5.0f)
+                moveTo(20.5f, 8.2f); lineTo(20.5f, 12.6f)
+                moveTo(20.5f, 15.8f); lineTo(20.5f, 20.5f)
+                // bottom
+                moveTo(20.5f, 20.5f); lineTo(15.8f, 20.5f)
+                moveTo(12.6f, 20.5f); lineTo(8.2f, 20.5f)
+                moveTo(5.0f, 20.5f); lineTo(3.5f, 20.5f)
+                // left
+                moveTo(3.5f, 20.5f); lineTo(3.5f, 15.8f)
+                moveTo(3.5f, 12.6f); lineTo(3.5f, 8.2f)
+                moveTo(3.5f, 5.0f); lineTo(3.5f, 3.5f)
+            }
+        }
+    }
+
+    /** An ellipse, for the round marquee. */
+    val marqueeOval: ImageVector by lazy {
+        icon("marquee-oval") {
+            stroke { circle(12f, 12f, 8.6f) }
+        }
+    }
+
+    /**
+     * A lasso: an open loop with a tail, which is the free-hand marquee.
+     *
+     * The loop is deliberately not closed at the top — a closed loop with a
+     * tail is a balloon, and an open one reads as something drawn by hand.
+     */
+    val marqueeLasso: ImageVector by lazy {
+        icon("marquee-lasso") {
+            stroke {
+                moveTo(13.4f, 4.6f)
+                curveTo(18.6f, 5.4f, 21.0f, 9.4f, 19.2f, 12.4f)
+                curveTo(17.4f, 15.4f, 11.0f, 16.4f, 6.8f, 14.4f)
+                curveTo(2.6f, 12.4f, 3.0f, 7.4f, 7.4f, 5.2f)
+                curveTo(9.0f, 4.4f, 11.0f, 4.3f, 12.4f, 4.5f)
+                moveTo(7.0f, 14.8f)
+                lineTo(6.2f, 20.4f)
+            }
         }
     }
 

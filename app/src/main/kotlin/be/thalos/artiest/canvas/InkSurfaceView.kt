@@ -15,6 +15,8 @@ import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.SelectMode
+import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
@@ -901,6 +903,68 @@ class InkSurfaceView(
     }
 
     /**
+     * Whether the pen draws or selects.
+     *
+     * A mode on the view rather than a second `InkInputSink`, and that is a
+     * deliberately small change. Every rule about *who* may draw —
+     * `StrokeExclusivity`'s palm rejection, its two-finger gesture, the
+     * cancel-on-focus-loss — is about pointers and applies to a marquee word
+     * for word. A second sink would have had to inherit all of it or lose it,
+     * and the tap recogniser and the gesture controller both keep state that
+     * would then need a home. So the stroke callbacks fork inside
+     * [StrokeDriver] and everything else is untouched.
+     *
+     * The fork is decided at pen-down and held for the gesture's life, the same
+     * shape [eraseDecided] has: a mode switch with the pen already on the glass
+     * must not turn half a lasso into half a pencil line.
+     */
+    @Volatile
+    var selecting: Boolean = false
+
+    /** What a marquee gesture draws. UI thread. */
+    var marqueeShape: MarqueeShape = MarqueeShape.RECTANGLE
+
+    /**
+     * What a finished marquee does to what is already selected. UI thread.
+     *
+     * The barrel button overrides it to [SelectMode.SUBTRACT] for one gesture,
+     * which is the same momentary shape the eraser already has on the brush:
+     * hold the button, take some away, let go, and the panel still says what it
+     * said. Chosen because there is no keyboard on this tablet and the hand is
+     * already on the barrel.
+     */
+    var marqueeMode: be.thalos.artiest.doc.SelectMode = be.thalos.artiest.doc.SelectMode.NEW
+
+    /**
+     * The marquee under the pen, or null when there is none.
+     *
+     * Read by the chrome inside a draw lambda. Both live on the UI thread, so
+     * there is no publication here and no copy: see [Marquee].
+     */
+    var liveMarquee: Marquee? = null
+        private set
+
+    /**
+     * Bumped whenever [liveMarquee] changes shape, so the overlay can redraw.
+     *
+     * A callback rather than Compose state on this class, for the reason
+     * [onHover] gives: the view is the render path and knows nothing about
+     * Compose, and a `MutableState` field here would put a recomposition scope
+     * on a class whose whole design is that the UI thread does not touch it
+     * while a stroke is live.
+     */
+    var onMarqueeChanged: (() -> Unit)? = null
+
+    /**
+     * Called after the canvas transform moves, so chrome drawn in document
+     * coordinates can follow it.
+     *
+     * The marching ants are stroked in view space from a document-space path,
+     * so a pan or a zoom moves them and nothing else tells Compose that.
+     */
+    var onTransformChanged: (() -> Unit)? = null
+
+    /**
      * Whether the toolbar's eraser is selected. Written from the UI thread.
      *
      * The barrel button is the *other* way in, and the two are an `or`: holding
@@ -1700,7 +1764,26 @@ class InkSurfaceView(
         private val tailEmitter = TailEmitter()
         private val tail = PredictedTail(tailEmitter)
 
+        /**
+         * The marquee this gesture is building, or null when it is drawing.
+         *
+         * Fixed at pen-down and never revisited, the same rule [eraseDecided]
+         * follows: switching tools with the pen already on the glass must not
+         * turn half a lasso into half a pencil line.
+         */
+        private var marquee: Marquee? = null
+
+        private val marqueeBuilder = Marquee()
+
+        private var marqueeMode = SelectMode.NEW
+        private var marqueeModeDecided = false
+
         override fun onStrokeBegin(pointerId: Int) {
+            if (selecting) {
+                beginMarquee(pointerId)
+                return
+            }
+            marquee = null
             emitted = 0
             seen = 0
             strokeTiltMaxRad = 0f
@@ -1745,6 +1828,11 @@ class InkSurfaceView(
          * it was found on the tablet rather than in a test.
          */
         override fun onStrokeSamples(samples: ArrayList<PenSample>) {
+            val marquee = this.marquee
+            if (marquee != null) {
+                extendMarquee(marquee, samples)
+                return
+            }
             // Indexed, not `for (s in samples)`: an ArrayList iterator is an
             // allocation per event on the path with a per-sample budget.
             val n = samples.size
@@ -1902,6 +1990,11 @@ class InkSurfaceView(
          * reads as the stroke snapping forward at pen-up.
          */
         override fun onStrokeEnd() {
+            val marquee = this.marquee
+            if (marquee != null) {
+                endMarquee(marquee)
+                return
+            }
             // The drag watermark is taken before end() runs, because end()
             // flushes the held-back segment and then allocates the Stroke, its
             // dab copy and its Bounds. Those are the commit's, on purpose, and
@@ -1940,12 +2033,108 @@ class InkSurfaceView(
         }
 
         override fun onStrokeCancel() {
+            val marquee = this.marquee
+            if (marquee != null) {
+                // A palm arriving, a second finger taking the gesture away, the
+                // window losing focus. Nothing is selected and nothing was:
+                // the shape never reached the queue.
+                marquee.cancel()
+                this.marquee = null
+                liveMarquee = null
+                strokeOpen = false
+                this@InkSurfaceView.strokeOpen = false
+                releaseTransform()
+                onMarqueeChanged?.invoke()
+                return
+            }
             gate.reset()
             builder.cancel()
             emitted = 0
             strokeOpen = false
             cancelStroke()
             releaseTransform()
+        }
+
+        // --- the marquee ----------------------------------------------------
+
+        /**
+         * A selection gesture, rather than a stroke.
+         *
+         * The transform is frozen here for the same reason a stroke freezes it:
+         * every sample is turned into document coordinates through it, and a
+         * pinch landing mid-gesture would put the second half of a lasso
+         * somewhere the first half is not. Unlike a stroke there is no wet ink
+         * to go wrong — the shape is rebuilt from its points at any zoom — but
+         * one mapping for one gesture is the rule the whole input path is built
+         * on and there is no reason to have a second answer here.
+         */
+        private fun beginMarquee(pointerId: Int) {
+            strokePointerId = pointerId
+            frozen = transform
+            marqueeModeDecided = false
+            marqueeMode = this@InkSurfaceView.marqueeMode
+            frozen.viewToDoc(0f, 0f, docPoint)
+            marquee = marqueeBuilder
+            liveMarquee = marqueeBuilder
+            marqueeBuilder.cancel()
+            strokeOpen = true
+            this@InkSurfaceView.strokeOpen = true
+            beganAtDown = false
+            onMarqueeChanged?.invoke()
+        }
+
+        /**
+         * Whether the marquee has had its first point yet.
+         *
+         * `onStrokeBegin` carries a pointer id and no coordinates — the
+         * decision that opens a stroke and the event that carries its position
+         * are separate bits in the same mask — so the shape cannot start until
+         * the first sample arrives. Without this the rectangle would be dragged
+         * from wherever the previous one ended.
+         */
+        private var beganAtDown = false
+
+        private fun extendMarquee(marquee: Marquee, samples: ArrayList<PenSample>) {
+            val n = samples.size
+            if (n == 0) return
+            if (!marqueeModeDecided) {
+                marqueeModeDecided = true
+                // The barrel button, as a momentary subtract. Same shape as the
+                // eraser's override on the brush: hold it, take some away, let
+                // go, and the panel still says what it said. There is no
+                // keyboard on this tablet and the hand is already on the barrel.
+                if ((samples[0].buttonState and BARREL_BUTTONS) != 0) {
+                    marqueeMode = SelectMode.SUBTRACT
+                }
+            }
+            var changed = false
+            var i = 0
+            while (i < n) {
+                val sample = samples[i]
+                frozen.viewToDoc(sample.x, sample.y, docPoint)
+                if (!beganAtDown) {
+                    beganAtDown = true
+                    marquee.begin(marqueeShape, docPoint[0], docPoint[1])
+                    changed = true
+                } else if (marquee.extend(docPoint[0], docPoint[1])) {
+                    changed = true
+                }
+                i++
+            }
+            if (changed) onMarqueeChanged?.invoke()
+        }
+
+        private fun endMarquee(marquee: Marquee) {
+            val shape = marquee.end()
+            this.marquee = null
+            liveMarquee = null
+            strokeOpen = false
+            this@InkSurfaceView.strokeOpen = false
+            releaseTransform()
+            onMarqueeChanged?.invoke()
+            // Copied into the op, which is what makes it safe to go on using
+            // this builder for the next gesture. See `SelectOp.Shape`.
+            select(SelectOp.Shape(shape, marqueeMode))
         }
 
         override fun onGestureBegin() {

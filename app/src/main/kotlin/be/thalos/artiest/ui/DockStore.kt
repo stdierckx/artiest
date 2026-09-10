@@ -155,6 +155,8 @@ class DockStore(context: Context) {
             ToolItem.MARKER to Dock.LEFT,
             ToolItem.IMPORT to Dock.TOP,
             ToolItem.ERASER_SIZE to Dock.BOTTOM,
+            ToolItem.MARQUEE to Dock.LEFT,
+            ToolItem.SELECTION to Dock.RIGHT,
         )
 
         /** Clear of the left tools and above the bottom sliders, on a first run. */

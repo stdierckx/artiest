@@ -264,7 +264,8 @@ class DockLayout private constructor(private val bars: Map<Dock, ToolbarLayout>)
                             Placement(ToolItem.PENCIL, 1),
                             Placement(ToolItem.MARKER, 2),
                             Placement(ToolItem.ERASER, 3),
-                            Placement(ToolItem.COLOUR, 5),
+                            Placement(ToolItem.MARQUEE, 4),
+                            Placement(ToolItem.COLOUR, 6),
                         ),
                     ),
                     Dock.TOP to ToolbarLayout.of(
@@ -284,6 +285,7 @@ class DockLayout private constructor(private val bars: Map<Dock, ToolbarLayout>)
                             Placement(ToolItem.ZOOM_OUT, 1),
                             Placement(ToolItem.FIT, 2),
                             Placement(ToolItem.LAYERS, 4),
+                            Placement(ToolItem.SELECTION, 5),
                         ),
                     ),
                     Dock.BOTTOM to ToolbarLayout.of(
