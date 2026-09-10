@@ -1261,6 +1261,13 @@ private fun readout(
         "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
         "${surface.grainBuilds} built\n" +
         "wetpass  ${r(surface.wetMeanMs, 3)} ms mean over ${surface.wetCalls} batches\n" +
+        "dryframe ${r(surface.dryLastMs, 2)} last   ${r(surface.dryMeanMs, 2)} mean   " +
+        "${r(surface.dryMaxMs, 2)} max ms   ${if (surface.dryHardware) "GPU" else "CPU"}   " +
+        "over ${surface.dryCalls} frames\n" +
+        "record   ${r(surface.compositeLastMs, 2)} last   ${r(surface.compositeMeanMs, 2)} mean   " +
+        "${r(surface.compositeMaxMs, 2)} max ms   ${surface.drySheets} sheets recorded\n" +
+        "gpuround ${r(surface.roundTripLastMs, 2)} last   ${r(surface.roundTripMeanMs, 2)} mean   " +
+        "${r(surface.roundTripMaxMs, 2)} max ms   over ${surface.roundTripCalls} round trips\n" +
         "figure   ${strokeTimes.ifEmpty { "not run" }}\n" +
         "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
         "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +

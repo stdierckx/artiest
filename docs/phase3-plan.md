@@ -130,6 +130,62 @@ CPU and pays them as written.
    the GPU. **It is measured in S0 and the cache is gated on the answer**, in
    the same way Phase 2 gated its GL rewrite and did not fire it.
 
+## S0 — what the tablet said, and the row of this plan it deletes
+
+**Done 2026-09-10, on the DTH-A116.** Four instruments were added to the
+readout — `dryframe`, `record`, `gpuround` — and the document was measured with
+one sheet and with eight, at fit zoom, with the layers panel closed.
+
+```
+1 sheet    dryframe 0.13 mean  0.63 max ms   GPU   over 18 frames
+           record   0.06 mean  0.28 max ms   1 sheet recorded
+           gpuround 4.05 mean 31.59 max ms   over 17 round trips
+
+8 sheets   dryframe 0.30 mean (0.32 last)    GPU
+           record   0.16 mean  0.27 max ms   8 sheets recorded
+           gpuround 3.0  mean (16 frames, computed from the running total)
+```
+
+**The canvas is hardware accelerated**, asked of `Canvas.isHardwareAccelerated`
+rather than inferred from the library's field names. So the `javap` reading was
+right, and the consequence is larger than it looks.
+
+**Two of the three clocks do not measure drawing, and that is the finding.** A
+`RenderNode`'s canvas *records* draw operations; the rasterizing happens
+afterwards, on the GPU. So `record` — 0.16 ms for eight full-page sheets — is
+the cost of writing down "blit these eight bitmaps" and says nothing at all
+about blitting them. Quoting it as the cost of a stack would have been a
+confident wrong answer of exactly the kind Phase 1's W2 produced, and the only
+honest instrument reachable from inside the app is the round trip: `redrawDry`
+out, `onMultiBufferedLayerRenderComplete` back, spanning the request, the
+recording, the GPU pass and the buffer handoff.
+
+**The round trip does not care how many sheets there are.** 4.05 ms at one
+sheet, 3.0 at eight, against an 11.1 ms budget at 90 Hz. The difference is
+inside the noise of a hand-run measurement and it is in the wrong direction to
+be a stack cost.
+
+**So `S1b` does not fire.** The cached compositor is not built, and the number
+that would have justified it — the host bench's 20.8 ms for eight sheets — is
+now known to overstate this device by roughly seventy times, because it was
+software Skia with no GPU under it. The bench's four CPU rows stand; its stack
+rows are retained in `CompositeBench` as what a *software* compositor pays,
+which is `PngExporter` and nothing else.
+
+**Blend modes inherit that.** The host says a MULTIPLY sheet costs about three
+and a half times a plain one; on a GPU that ratio has no reason to hold, and S8
+should re-read `gpuround` once it lands rather than assume either number.
+
+**One thing the tablet found that this plan was not looking for.** With the
+layers panel open, `dryframe` reads **21.57 ms mean over 9 frames** — two
+frames' worth, on the render thread, per frame. That is `refreshThumbnails`: a
+full-page read scaled down by repeated halving, which the code already throttles
+to one sheet per frame and only while the panel is open, and which nothing had
+ever timed. The throttle is doing its job and the drawing is not affected —
+nobody strokes while reading the panel — but 20 ms a thumbnail is now a measured
+number rather than an assumption, and it is what to point at if the panel ever
+feels slow. Not in this phase's scope; recorded so it is not rediscovered.
+
 ## What Phase 2 and the layers work left standing
 
 - **`CommitQueue` is the only crossing, and it is already a sealed hierarchy.**
@@ -393,7 +449,7 @@ which is what a painter means by drawing on a multiply layer.
 
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
-| **S0** | **The before-picture, on the tablet.** Port `CompositeBench` to a device path: is the dry canvas hardware-accelerated, what does a dry frame cost at 1, 4 and 8 sheets, what does one MULTIPLY sheet add, what does a quarter-page rotated blit into a `Layer` cost. Record it here. | `:app`, device | Low | — | 0.5 |
+| **S0** | **DONE.** The before-picture, on the tablet: the canvas is hardware, recording eight sheets costs 0.16 ms, the round trip is 3–4 ms whatever the stack holds, and a thumbnail costs 20. See **S0**. | `:app`, device | Low | — | 0.5 |
 | **S1** | **`StackCompositor`.** One loop, used by the screen and the export. Paper to the bottom of the stack in both. No visible change; a test that the two agree pixel for pixel. | `:app` | Low | — | 0.5 |
 | **S2** | **`Selection`** — path, mask, bounds — and `SelectOp` through `CommitQueue`. Model and tests only, no UI, no ink changes. The published `Path` is a copy. | `:app` | Low | — | 1 |
 | **S3** | **Confining the ink.** A selection forces the indirect path; the scratch is masked in place; clear and the eraser are confined; undo patches narrow. Pixel tests that ink outside the selection changes nothing and that the wet and dry edges are identical. | `:app` | **High** | S2 | 1.5 |
@@ -402,10 +458,10 @@ which is what a painter means by drawing on a multiply layer.
 | **S6** | **The float.** `FloatingPixels`, the punch-out in the compositor, the transform box in the overlay, drop as one patch, halving below 0.5 scale, cancel. The box tracks the pen; the pixels refresh on a 120 ms floor. | `:app` | **High** | S1, S3 | 2 |
 | **S7** | **Layer transform**, as the same float over a whole sheet. Should be small if S6 is right; if it is not small, S6 is wrong. | `:app` | Low | S6 | 0.5 |
 | **S8** | **Blend modes** in `StackCompositor` and a control on the layer row. | `:app` | Med | S1, S0 | 1 |
-| **S1b** | **GATED. The cached compositor**: everything below the active sheet in one bitmap, everything above in another. Entered **only** on an S0 measurement that names what it fixes. | `:app` | **High** | S0 | 2 |
+| **S1b** | ~~GATED. The cached compositor.~~ **DID NOT FIRE.** S0 measured the round trip at 4.05 ms with one sheet and 3.0 with eight — the stack is not a cost on this device. See **S0**. | `:app` | — | S0 | 0 |
 | **S9** | **Feel pass** on the tablet, by the person holding the pen. Reconcile this document against what was measured. | device, docs | Low | S7, S8 | 0.5 |
 
-**≈10 days if S1b does not fire, plus 2 if it does.** Same caveat every estimate
+**≈10 days.** S1b did not fire, so the 2 it would have cost is not spent. Same caveat every estimate
 in this repo has earned: the work happens in sittings, not days, and the items
 that run long will be the ones where this plan is wrong about the hardware.
 
@@ -460,7 +516,7 @@ sitting.**
 | A scaled-down float loses thin lines | S6: the thumbnail bug again, in a new place | Halve until the residual scale is above 0.5. The code to copy is `LayerStack.buildThumbnail` |
 | The screen and the export disagree once blend modes exist | S8, after S1 was skipped or done badly | S1's pixel-identity test is the guard. If it is not written, this risk is a certainty rather than a risk |
 | The published `Path` is mutated under the UI thread | A shape that flickers or tears while the ants animate | Copy on publish. Stated in S2 and it is the one new threading rule in the phase |
-| Blend modes make a dry frame unaffordable | S0/S8: a pinch with a multiply layer drops frames on the tablet | S1b, gated. The cache is the answer the bench already priced at three blits |
+| Blend modes make a dry frame unaffordable | S8: `gpuround` rises with a multiply layer on screen | Much less likely after S0 — the blits are the GPU's and the round trip does not grow with the stack. Re-read `gpuround` when S8 lands rather than trusting the host's 3.5x ratio |
 | Memory | 8 sheets 217.5 MiB + mask 6.80 MiB + float up to 27.19 + a drop patch up to 27.19 | ≈279 MiB worst case against 4.4 GiB measured free in W0. Stated so it is arithmetic rather than a hope |
 
 ## Stop conditions
@@ -477,9 +533,11 @@ sitting.**
 3. **S6 needs the two-finger gesture.** Stop. The canvas owns two fingers, and
    Phase 1 paid for `StrokeExclusivity` precisely so that ownership is not
    re-argued per feature.
-4. **S0 says the dry canvas is *software*.** Then this plan's stack numbers are
-   the app's real numbers, eight sheets already cost two frames at 90 Hz, and
-   **S1b stops being gated and becomes the first thing built.**
+4. ~~**S0 says the dry canvas is *software*.**~~ **Answered: it is hardware.** The
+   round trip costs the same at one sheet and at eight, so the stack numbers in
+   the bench are a software compositor's and belong to the export. S1b did not
+   fire. Left in the list because a stop condition that was checked and did not
+   trip is worth more than one that was quietly dropped.
 
 ## Open questions that need a human answer
 
