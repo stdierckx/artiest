@@ -53,10 +53,14 @@ object ToolIcons {
         ToolItem.ERASER -> eraser
         ToolItem.ERASER_SIZE -> eraser
         ToolItem.LAYERS -> layers
+        ToolItem.LAYERS_PANEL -> layers
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.
         ToolItem.COLOUR -> palette
+        // The same glyph as the swatch, because it is the same idea at a
+        // different size, and the chooser lists them next to each other.
+        ToolItem.COLOUR_PANEL -> palette
         ToolItem.SIZE -> size
         ToolItem.SMOOTHING -> smoothing
         ToolItem.OPACITY -> opacity
@@ -411,6 +415,47 @@ object ToolIcons {
                 moveTo(18.0f, 8.8f)
                 lineTo(21.2f, 12f)
                 lineTo(18.0f, 15.2f)
+            }
+        }
+    }
+
+    /**
+     * A corner being pulled: two strokes across the angle, and an arrow out of
+     * it. What you grab to make a floating toolbar bigger.
+     */
+    val resize: ImageVector by lazy {
+        icon("resize") {
+            stroke {
+                moveTo(21.0f, 12.0f)
+                lineTo(12.0f, 21.0f)
+                moveTo(21.0f, 17.4f)
+                lineTo(17.4f, 21.0f)
+                moveTo(21.0f, 6.6f)
+                lineTo(6.6f, 21.0f)
+                moveTo(21.0f, 6.6f)
+                lineTo(15.6f, 6.6f)
+                moveTo(21.0f, 6.6f)
+                lineTo(21.0f, 12.0f)
+            }
+        }
+    }
+
+    /** A pushpin. What keeps a popup on the screen. */
+    val pin: ImageVector by lazy {
+        icon("pin") {
+            stroke {
+                moveTo(9.0f, 3.0f)
+                lineTo(15.0f, 3.0f)
+                moveTo(10.3f, 3.0f)
+                lineTo(9.7f, 9.5f)
+                lineTo(6.2f, 12.3f)
+                lineTo(6.2f, 13.9f)
+                lineTo(17.8f, 13.9f)
+                lineTo(17.8f, 12.3f)
+                lineTo(14.3f, 9.5f)
+                lineTo(13.7f, 3.0f)
+                moveTo(12f, 13.9f)
+                lineTo(12f, 21.2f)
             }
         }
     }
