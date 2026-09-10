@@ -217,13 +217,24 @@ private fun Dock.alignment(): Alignment = when (this) {
 // ---------------------------------------------------------------------------
 
 /**
- * One bar, drawn.
+ * One surface on an edge, drawn.
  *
  * Absent entirely when it is empty and nobody is arranging: an edge with no
  * controls on it should look like an edge, not like a bar someone forgot to
  * fill. In arrange mode it appears whatever is on it, because an invisible bar
  * cannot be dropped into and *the user can decide where they attach* is the
  * whole feature.
+ *
+ * **There are two renderers here on purpose, and it is not a hedge.** A bar is
+ * a line and has things a shape does not: it scrolls when it is longer than the
+ * screen, it stops at its last item so an unfilled cell reads as a group
+ * separator, and it grows across itself to hold a panel. A shape scrolls
+ * nowhere, is exactly as big as it was drawn, and has a notch the pen goes
+ * through. Making one renderer do both would mean the strip growing a shape's
+ * special cases and the shape growing a bar's, and the first casualty would be
+ * the day-one behaviour every existing user already has. So a strip is rendered
+ * by exactly the code that rendered it before shapes existed, and anything else
+ * goes to [ChromeSurface].
  */
 @Composable
 private fun BarView(
@@ -236,6 +247,11 @@ private fun BarView(
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     if (bar.isEmpty && !arranging) return
+
+    if (!bar.region.isStrip) {
+        ChromeSurface(bar, layout, onLayout, arranging, drag, modifier, slotContent)
+        return
+    }
 
     Box(
         modifier
@@ -456,7 +472,7 @@ private fun Dock.crossAlignment(): Alignment = when (this) {
  * the slot grid.
  */
 @Composable
-private fun SlotSurface(content: @Composable () -> Unit) {
+internal fun SlotSurface(content: @Composable () -> Unit) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -469,7 +485,7 @@ private fun SlotSurface(content: @Composable () -> Unit) {
 
 /** A filled slot in arrange mode: the control stands aside so it can be moved. */
 @Composable
-private fun ArrangeChip(
+internal fun ArrangeChip(
     item: ToolItem,
     barId: String,
     cell: Cell,
@@ -543,7 +559,7 @@ private fun ArrangeChip(
 
 /** An unfilled slot in arrange mode: faint, but not invisible, because it is the way in. */
 @Composable
-private fun EmptyTarget(onClick: () -> Unit) {
+internal fun EmptyTarget(onClick: () -> Unit) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -685,11 +701,18 @@ private fun FloatingBarView(
     var overEdge by remember { mutableStateOf<String?>(null) }
     var gripCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
+    // A shape paints its own ground, so the row around it must not paint one
+    // too -- a rounded rectangle behind an L is the picture the shape exists to
+    // stop being. In arrange mode the row keeps it: the grip and the X have to
+    // be findable over a drawing, and arrange mode is where furniture belongs.
+    val shaped = !bar.region.isStrip
+    val thickness = if (shaped) Chrome.SLOT * bar.region.bounds.h else bar.thickness()
+
     Row(
         verticalAlignment = Alignment.Top,
         modifier = Modifier
             .offset { IntOffset((at.x * free.x).roundToInt(), (at.y * free.y).roundToInt()) }
-            .barSkin(drag.hover == bar.id)
+            .then(if (!shaped || arranging) Modifier.barSkin(drag.hover == bar.id) else Modifier)
             .onGloballyPositioned {
                 drag.bounds[bar.id] = it.boundsInRoot()
                 sizePx = Offset(it.size.width.toFloat(), it.size.height.toFloat())
@@ -704,7 +727,7 @@ private fun FloatingBarView(
             Grip(
                 at = at,
                 free = free,
-                height = bar.thickness(),
+                height = thickness,
                 coords = { gripCoords },
                 onPointer = { root ->
                     // Edges only, and asked for by name rather than through the
@@ -728,11 +751,20 @@ private fun FloatingBarView(
             ) { spot -> onLayout(layout.moveSurface(bar.id, spot)) }
         }
 
-        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        if (shaped) {
+            ChromeSurface(bar, layout, onLayout, arranging, drag, Modifier, slotContent)
+        } else {
+            BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        }
 
         if (arranging) {
-            ResizeHandle(bar) { along, across ->
-                onLayout(layout.resizeFloating(bar.id, along, across))
+            // A bar has a length and a depth, so it can be dragged bigger. A
+            // shape has neither -- it is reshaped rather than resized, which is
+            // its own gesture and its own menu.
+            if (!shaped) {
+                ResizeHandle(bar) { along, across ->
+                    onLayout(layout.resizeFloating(bar.id, along, across))
+                }
             }
             CloseBar { onLayout(layout.closeSurface(bar.id)) }
         }
@@ -1059,7 +1091,7 @@ private fun DragGhost(drag: DockDrag) {
  * menu says so by greying the frame.
  */
 @Composable
-private fun ToolChooser(
+internal fun ToolChooser(
     layout: DockLayout,
     bar: Surface,
     cell: Cell,
@@ -1208,7 +1240,7 @@ private fun Modifier.barSkin(hovered: Boolean): Modifier {
  * docks share. [hostOrigin] converts back to the host's own frame for the one
  * thing that is drawn rather than hit-tested: the ghost under the finger.
  */
-private class DockDrag {
+internal class DockDrag {
     var carrying by mutableStateOf<DockedItem?>(null)
     var pointer by mutableStateOf(Offset.Zero)
     var hover by mutableStateOf<String?>(null)
@@ -1267,10 +1299,7 @@ private class DockDrag {
      */
     fun cellAt(surface: Surface, point: Offset): Cell? {
         val origin = runOrigin[surface.id] ?: return null
-        if (slotPx <= 0f) return null
-        val along =
-            if (surface.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
-        return surface.cellAt((along / slotPx).toInt().coerceAtLeast(0))
+        return DropMath.cellAt(surface.region, point - origin, slotPx)
     }
 
     /**
