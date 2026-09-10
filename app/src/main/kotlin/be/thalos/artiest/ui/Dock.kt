@@ -463,6 +463,32 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     }
 
     /**
+     * Close everything on a surface up, in flow order.
+     *
+     * This is the whole of *flow when you are shaping, freeze when you are
+     * drawing*, and it is one call to [RegionLayout.pack]. It is a menu item
+     * and not an ambient behaviour: a toolbar that tidied itself every time
+     * something was added would be a toolbar where Export moves, which is the
+     * one thing a toolbar must not do.
+     *
+     * **It never loses a control.** If anything cannot be re-packed — which
+     * takes an item that will not fit the way round the new order wants it —
+     * nothing moves at all. A tidy that quietly drops the eraser is worse than
+     * an untidy bar, and "some of it moved" is the worst answer of the three.
+     */
+    fun tidy(surfaceId: String): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        if (s.isEmpty) return this
+        val order = s.region.cells(s.flow).toList().withIndex().associate { it.value to it.index }
+        val flowing = s.slots.placements
+            .sortedBy { order[it.cell] ?: Int.MAX_VALUE }
+            .map { RegionLayout.Footprint.of(it.item) }
+        val fill = RegionLayout.pack(s.region, s.flow, flowing = flowing)
+        if (fill.overflow.isNotEmpty()) return this
+        return withSurface(s.with(slots = SurfaceLayout.of(s.region, fill.placements)))
+    }
+
+    /**
      * Close a floating surface, and everything on it.
      *
      * An edge cannot be closed — there is nowhere for it to go and no way to

@@ -121,6 +121,11 @@ fun DockHost(
     val slotPx = with(density) { Chrome.SLOT.toPx() }
     SideEffect { drag.slotPx = slotPx }
 
+    // Which surface is being redrawn, if any. One at a time, because the board
+    // covers the screen and two boards would be two answers to "what is under
+    // the pen".
+    var shaping by remember { mutableStateOf<String?>(null) }
+
     Box(
         modifier
             .fillMaxSize()
@@ -135,12 +140,18 @@ fun DockHost(
             val hostHeight = with(density) { maxHeight.toPx() }
             SideEffect { drag.hostSize = Offset(hostWidth, hostHeight) }
 
+            // The chrome's own grid: how many whole cells fit on this glass.
+            // Everything a shape can be is measured against it.
+            val gridW = (hostWidth / slotPx).toInt().coerceAtLeast(1)
+            val gridH = (hostHeight / slotPx).toInt().coerceAtLeast(1)
+
             for (bar in layout.edges) {
                 BarView(
                     bar = bar,
                     layout = layout,
                     onLayout = onLayout,
                     arranging = arranging,
+                    onDraw = { shaping = bar.id },
                     drag = drag,
                     modifier = Modifier
                         .align(bar.dock.alignment())
@@ -171,6 +182,7 @@ fun DockHost(
                     layout = layout,
                     onLayout = onLayout,
                     arranging = arranging,
+                    onDraw = { shaping = bar.id },
                     drag = drag,
                     hostWidth = hostWidth,
                     hostHeight = hostHeight,
@@ -200,6 +212,26 @@ fun DockHost(
             )
 
             DragGhost(drag)
+
+            // Last, and over everything: while a shape is being drawn it is the
+            // only thing on the screen that answers a pointer.
+            shaping?.let { id ->
+                val surface = layout.surface(id)
+                if (surface == null) {
+                    shaping = null
+                } else {
+                    ShapeEditor(
+                        surface = surface,
+                        gridW = gridW,
+                        gridH = gridH,
+                        onCancel = { shaping = null },
+                        onApply = { region ->
+                            shaping = null
+                            onLayout(layout.reshape(id, region))
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -242,14 +274,29 @@ private fun BarView(
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
+    onDraw: () -> Unit,
     drag: DockDrag,
     modifier: Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     if (bar.isEmpty && !arranging) return
 
+    val shapeButton: @Composable () -> Unit = {
+        ShapeButton(bar, layout, onLayout, onDraw)
+    }
+
     if (!bar.region.isStrip) {
-        ChromeSurface(bar, layout, onLayout, arranging, drag, modifier, slotContent)
+        if (!arranging) {
+            ChromeSurface(bar, layout, onLayout, arranging, drag, modifier, slotContent)
+        } else {
+            // Beside the shape rather than on it: a button covering a cell is a
+            // cell nothing can be dropped into, and arrange mode is when
+            // dropping happens.
+            Row(verticalAlignment = Alignment.Top, modifier = modifier) {
+                shapeButton()
+                ChromeSurface(bar, layout, onLayout, arranging, drag, Modifier, slotContent)
+            }
+        }
         return
     }
 
@@ -259,7 +306,19 @@ private fun BarView(
             .onGloballyPositioned { drag.bounds[bar.id] = it.boundsInRoot() }
             .padding(Chrome.BAR_PADDING),
     ) {
-        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        if (!arranging) {
+            BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        } else if (bar.axis == Axis.VERTICAL) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                shapeButton()
+                BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                shapeButton()
+                BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+            }
+        }
     }
 }
 
@@ -684,6 +743,7 @@ private fun FloatingBarView(
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
+    onDraw: () -> Unit,
     drag: DockDrag,
     hostWidth: Float,
     hostHeight: Float,
@@ -749,6 +809,7 @@ private fun FloatingBarView(
                 },
                 modifier = Modifier.onGloballyPositioned { gripCoords = it },
             ) { spot -> onLayout(layout.moveSurface(bar.id, spot)) }
+            ShapeButton(bar, layout, onLayout, onDraw)
         }
 
         if (shaped) {

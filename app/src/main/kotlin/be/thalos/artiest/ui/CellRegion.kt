@@ -252,6 +252,20 @@ class CellRegion private constructor(
     fun atOrigin(): CellRegion =
         if (isEmpty || (bounds.x == 0 && bounds.y == 0)) this else translated(-bounds.x, -bounds.y)
 
+    /** The mirror image, left to right, in the same bounding box. */
+    fun mirroredX(): CellRegion {
+        if (isEmpty) return this
+        val b = bounds
+        return ofCells(cellSet().map { Cell(b.x + (b.right - 1 - it.x), it.y) })
+    }
+
+    /** The mirror image, top to bottom, in the same bounding box. */
+    fun mirroredY(): CellRegion {
+        if (isEmpty) return this
+        val b = bounds
+        return ofCells(cellSet().map { Cell(it.x, b.y + (b.bottom - 1 - it.y)) })
+    }
+
     /**
      * Which way a control at [x], [y] should lie.
      *
