@@ -9,10 +9,10 @@ import kotlin.test.assertTrue
  * The shape, and filling it. The nine rules U1 of `docs/ui-expansion-plan.md`
  * names, one test each, plus the arithmetic they lean on.
  *
- * Test 1 is the one that matters most: **a strip packs exactly the way
- * `ToolbarLayout` does today.** It is the evidence that the new engine is the
- * old engine plus a dimension, and it is what licenses U2 to delete a file
- * rather than keep two answers to "does this fit".
+ * Test 1 is the one that mattered most: **a strip packs exactly the way the
+ * old one-dimensional engine did.** It was the evidence that the new engine
+ * is the old engine plus a dimension, and it is what licensed U2 to delete a
+ * file rather than keep two answers to "does this fit".
  */
 class RegionLayoutTest {
 
@@ -20,44 +20,55 @@ class RegionLayoutTest {
 
     private fun flow(vararg items: ToolItem) = items.map { RegionLayout.Footprint.of(it) }
 
-    // ---- 1. the equivalence that licenses the deletion ----------------------
+    // ---- 1. the equivalence that licensed the deletion ----------------------
 
+    /**
+     * The numbers `ToolbarLayout` produced, written down.
+     *
+     * They were taken by running both engines side by side on the same six
+     * items and asserting they agreed, in both axes, on every position and both
+     * dimensions. That test could only exist while both engines did; it did its
+     * job, `ToolbarLayout.kt` was deleted in the same change, and what it
+     * proved is preserved here as the answer rather than as the comparison.
+     *
+     * Six items into a twelve-cell bar: a button, a four-cell slider, a button,
+     * a slider, a button, and one slider too many. The last one has two cells
+     * to live in and needs four, so it overflows — and it overflowing while the
+     * items before it stay exactly where they are is the whole of what a
+     * toolbar promises.
+     */
     @Test
-    fun `a strip packs exactly as ToolbarLayout does`() {
+    fun `a strip packs exactly what the old one-dimensional engine did`() {
         val items = listOf(
             ToolItem.PEN, ToolItem.SIZE, ToolItem.PENCIL,
             ToolItem.SMOOTHING, ToolItem.ERASER, ToolItem.GRAIN,
         )
+        val expected = listOf(
+            ToolItem.PEN to 0,
+            ToolItem.SIZE to 1,
+            ToolItem.PENCIL to 5,
+            ToolItem.SMOOTHING to 6,
+            ToolItem.ERASER to 10,
+        )
 
         for (axis in Axis.entries) {
-            // What the old engine does: first fit, in order, along one line.
-            var old = ToolbarLayout.empty(12)
-            val oldSlots = LinkedHashMap<ToolItem, Int>()
-            val oldOverflow = ArrayList<ToolItem>()
-            for (item in items) {
-                val span = item.slotsIn(axis)
-                val slot = old.firstFit(span)
-                if (slot == null) {
-                    oldOverflow += item
-                    continue
-                }
-                old = old.place(Placement(item, slot, span, item.depthIn(axis)))
-                oldSlots[item] = slot
-            }
-
             val fill = RegionLayout.pack(
                 region = CellRegion.strip(12, axis),
                 flow = FlowOrder.along(axis),
                 flowing = flow(*items.toTypedArray()),
             )
 
-            assertEquals(oldOverflow, fill.overflow, "$axis: the same things do not fit")
-            assertEquals(oldSlots.size, fill.placements.size, "$axis")
+            assertEquals(listOf(ToolItem.GRAIN), fill.overflow, "$axis")
+            assertEquals(
+                expected,
+                fill.placements.map { it.item to if (axis == Axis.HORIZONTAL) it.x else it.y },
+                "$axis",
+            )
             for (p in fill.placements) {
-                val slot = if (axis == Axis.HORIZONTAL) p.x else p.y
-                assertEquals(oldSlots[p.item], slot, "$axis: ${p.item.id}")
-                assertEquals(p.item.slotsIn(axis), if (axis == Axis.HORIZONTAL) p.w else p.h)
-                assertEquals(p.item.depthIn(axis), if (axis == Axis.HORIZONTAL) p.h else p.w)
+                val along = if (axis == Axis.HORIZONTAL) p.w else p.h
+                val across = if (axis == Axis.HORIZONTAL) p.h else p.w
+                assertEquals(p.item.cellsWide, along, "${p.item.id} runs along the bar")
+                assertEquals(p.item.cellsTall, across, "${p.item.id} sticks out across it")
             }
         }
     }

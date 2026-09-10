@@ -19,22 +19,23 @@ package be.thalos.artiest.ui
  * separate means the compiler can be used freely on one and the other is left
  * alone deliberately.
  *
- * **3. [slots] is a width, and widths are why the layout has real logic.** A
+ * **3. [cellsWide] is a width, and widths are why the layout has real logic.** A
  * button is one slot; a slider needs four or it is not a slider. Because items
  * differ in width, "can this go here" is a genuine question with an answer that
  * has edges — the end of the bar, the item next door — and that question is
- * what [ToolbarLayout] exists to answer.
+ * what [SurfaceLayout] exists to answer.
  *
- * Since the docks arrived, [slots] is a length along the dock's own axis rather
- * than a width: four slots is 176dp across the bottom and 176dp down the left.
- * That is the entire cost of turning a bar into five bars, and it is why the
- * buttons shed a slot each in the same change — a two-slot Undo was two slots
- * of a word, and a one-slot Undo is an icon, which is also what makes a vertical
- * dock possible. Text does not turn sideways; a glyph does not need to.
+ * The two numbers are the item's size on screen, and which of them is spent on
+ * slots is the *shape's* business rather than this enum's — see
+ * [RegionLayout.naturalSize]. Four cells is 176dp across the bottom and 176dp
+ * down the left, and in an L it is both, in different places. That is why the
+ * buttons shed a slot each when the docks arrived — a two-slot Undo was two
+ * slots of a word, and a one-slot Undo is an icon, which is what makes a
+ * vertical dock possible. Text does not turn sideways; a glyph does not need to.
  *
  * **4. [kind] is how the item behaves, not how it is drawn.** A renderer needs
  * to know whether it is placing something that swallows drags — see
- * [SlotToolbar]'s note on why filled slots are edited through Arrange — and the
+ * `DockHost`'s note on why filled cells are edited through Arrange — and the
  * dock layer needs it before it has drawn anything, to decide whether an item
  * can go on a vertical edge at all. What the glyph looks like is `ToolIcons`'
  * business and is deliberately not here, so that this enum stays free of
@@ -302,19 +303,21 @@ enum class ToolItem(
     }
 
     /**
-     * How many slots this takes on a bar running along [axis].
+     * How big this is on screen, lying flat: [cellsWide] by [cellsTall].
      *
-     * The whole of the second dimension is these two functions. A horizontal bar
-     * spends the item's width on slots and lets its height hang off the edge; a
-     * vertical bar does the opposite — unless the item [turnsWithDock], in which
-     * case it rotates and its width is still what runs along the bar.
+     * There used to be a `slotsIn(axis)` and a `depthIn(axis)` here, which
+     * answered "how much of a bar does this take" and "how far does it stick
+     * out". They are gone, and their answer moved to
+     * [RegionLayout.naturalSize] — because a *shape* knows which way it runs at
+     * every one of its cells, and a dock only ever had one answer for the whole
+     * bar. Keeping both would be two answers to one question, and one of them
+     * would go stale in an L.
+     *
+     * What is left here is the catalogue's own statement: a slider is four
+     * cells by one, a colour wheel is six by eleven, and [turnsWithDock] says
+     * whether those two numbers may be swapped to suit where it lands.
      */
-    fun slotsIn(axis: Axis): Int =
-        if (axis == Axis.HORIZONTAL || turnsWithDock) cellsWide else cellsTall
-
-    /** How far this sticks out from the bar it is on, in cells. See [slotsIn]. */
-    fun depthIn(axis: Axis): Int =
-        if (axis == Axis.HORIZONTAL || turnsWithDock) cellsTall else cellsWide
+    val cells: Pair<Int, Int> get() = cellsWide to cellsTall
 
     companion object {
         /** The catalogue keyed by [id], for the codec. Unknown ids decode to null. */

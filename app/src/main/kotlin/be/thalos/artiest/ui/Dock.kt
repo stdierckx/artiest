@@ -3,26 +3,27 @@ package be.thalos.artiest.ui
 import androidx.compose.ui.geometry.Offset
 
 /**
- * Which way a bar's slots run.
+ * Which way a run of cells goes.
  *
- * This is the one thing [ToolbarLayout] never has to know, and it is the whole
- * of what a dock adds to it: a bar is a line of slots, and a dock is a line of
- * slots with a direction. Since panels arrived it is also what decides which of
- * an item's two dimensions is spent on slots — see [ToolItem.slotsIn].
+ * Since shapes arrived this is mostly [CellRegion]'s business — a shape knows
+ * which way it runs at every cell, which a dock never could. What is left here
+ * is the anchor's own idea of itself: the left edge runs down, the top edge
+ * runs across, and that is what decides the shape a fresh one gets.
  */
 enum class Axis { HORIZONTAL, VERTICAL }
 
 /**
- * Where a bar is attached.
+ * Where a surface is attached.
  *
  * **This is an attachment, not an identity.** It used to be both: there were
  * five docks and five bars and the enum was the key. There can now be any number
- * of floating bars — the user makes them and closes them — so a bar carries an
- * id of its own and this says only where it sits.
+ * of floating surfaces — the user makes them and closes them — so a surface
+ * carries an id of its own and this says only where it sits.
  *
  * [id] is persisted for the four edges, and is deliberately not [name]: renaming
  * a Kotlin constant is a refactor, renaming a persisted key silently empties
- * somebody's toolbar.
+ * somebody's toolbar. **The ids do not move**, which is what keeps every layout
+ * string written by every previous release readable.
  */
 enum class Dock(
     val id: String,
@@ -38,14 +39,27 @@ enum class Dock(
     /**
      * Not attached to anything, and there may be several.
      *
-     * A floating bar sits over the drawing, so every slot it has is paper it is
-     * covering. They are made to size rather than to a constant — see
+     * A floating surface sits over the drawing, so every cell it has is paper
+     * it is covering. They are made to size rather than to a constant — see
      * [DockLayout.addFloating] — and [defaultSlots] is only the fallback.
      */
     FLOATING("float", "Floating", Axis.HORIZONTAL, 8),
     ;
 
     val isEdge: Boolean get() = this != FLOATING
+
+    /**
+     * The shape a fresh surface on this anchor gets: a plain bar, as before.
+     *
+     * The numbers are the ones this enum has always carried, so a first run
+     * looks exactly as it did. What changed is that they are now a *default*
+     * rather than the only shape available — the user can draw an L over the
+     * top of it and this stays the thing they started from.
+     */
+    fun defaultRegion(): CellRegion = CellRegion.strip(defaultSlots, axis)
+
+    /** How a fresh surface on this anchor fills: along the edge it is on. */
+    fun defaultFlow(): FlowOrder = FlowOrder.along(axis)
 
     companion object {
         val EDGES: List<Dock> = entries.filter { it.isEdge }
@@ -57,7 +71,7 @@ enum class Dock(
 }
 
 /**
- * Where a floating bar sits, as a fraction of the window in each axis.
+ * Where a floating surface sits, as a fraction of the window in each axis.
  *
  * Fractions and not pixels, and that is the answer to the question the UI plan
  * left for a human: *"does the floating dock need to survive rotation, or
@@ -101,150 +115,215 @@ data class BarSpot(val x: Float, val y: Float) {
 }
 
 /**
- * One toolbar: where it is, how long it is, and what is on it.
+ * One toolbar: where it is, what shape it is, and what is on it.
+ *
+ * This was `Bar`, and the rename is the whole point of the change: a bar is a
+ * line, and this is any shape at all. What it kept is everything that made a
+ * bar work — an id, an anchor, a position for the floating ones — because none
+ * of that was about being a line.
  *
  * [id] is `left`, `top`, `right` or `bottom` for the four edges, and `f1`, `f2`
- * … for floating bars. It is what everything else keys on, because a floating
- * bar has no other name and the edges may as well be named the same way.
+ * … for floating surfaces. It is what everything else keys on, because a
+ * floating surface has no other name and the edges may as well be named the
+ * same way.
  *
- * [spot] is set for floating bars and null for edges, which is the type saying
- * out loud that an edge's position is not the user's to choose.
+ * [spot] is set for floating surfaces and null for edges, which is the type
+ * saying out loud that an edge's position is not the user's to choose.
+ *
+ * The shape lives on [slots] and is reached through [region], rather than being
+ * held here as well. Two copies of a shape is one shape and a bug waiting for
+ * the day they disagree.
  */
-class Bar(
+class Surface(
     val id: String,
     val dock: Dock,
     val spot: BarSpot?,
-    val slots: ToolbarLayout,
+    /** Which way it fills. Where the next thing dropped on it lands. */
+    val flow: FlowOrder,
+    val slots: SurfaceLayout,
 ) {
-    val axis: Axis get() = dock.axis
+    val region: CellRegion get() = slots.region
+
+    /**
+     * The one direction this surface runs, for the things that still need one.
+     *
+     * A strip has an answer and a shape does not, so a shape falls back to its
+     * anchor's. Everything that can ask per-cell should ask [CellRegion.localAxis]
+     * instead; this is for the renderer's outer frame and for `slotContent`,
+     * which is handed one axis for the whole control.
+     */
+    val axis: Axis get() = region.stripAxis ?: dock.axis
+
     val isEmpty: Boolean get() = slots.isEmpty
     val isFloating: Boolean get() = dock == Dock.FLOATING
 
-    fun with(slots: ToolbarLayout = this.slots, spot: BarSpot? = this.spot): Bar =
-        Bar(id, dock, spot, slots)
+    fun with(
+        slots: SurfaceLayout = this.slots,
+        spot: BarSpot? = this.spot,
+        flow: FlowOrder = this.flow,
+    ): Surface = Surface(id, dock, spot, flow, slots)
 
-    /** The slots [item] would take on this bar. The second dimension, applied. */
-    fun spanOf(item: ToolItem): Int = item.slotsIn(axis)
+    /** The same surface reshaped, dropping whatever no longer fits. */
+    fun reshaped(region: CellRegion): Surface = with(slots = slots.reshaped(region))
 
-    /** How far [item] would stick out of this bar, in cells. */
-    fun depthOf(item: ToolItem): Int = item.depthIn(axis)
+    /**
+     * How many cells [item] would take at [at], the way round it wants to be.
+     *
+     * This is `spanOf` and `depthOf` in one, and it asks the *shape* rather
+     * than the dock — which is what makes a slider stand up in an L's arm and
+     * lie flat along its foot. See [RegionLayout.naturalSize].
+     */
+    fun footprintOf(item: ToolItem, at: Cell): Pair<Int, Int> =
+        RegionLayout.naturalSize(item, region, at)
 
-    /** How thick this bar is across its axis, in cells. One, or its deepest item. */
-    val depthCells: Int get() = slots.placements.maxOfOrNull { it.depth } ?: 1
+    /** The cell [slot] cells along a strip, from its start. */
+    fun cellAt(slot: Int): Cell {
+        val b = region.bounds
+        return if (axis == Axis.HORIZONTAL) Cell(b.x + slot, b.y) else Cell(b.x, b.y + slot)
+    }
+
+    /** How far along a strip a cell is. The inverse of [cellAt]. */
+    fun slotOf(cell: Cell): Int {
+        val b = region.bounds
+        return if (axis == Axis.HORIZONTAL) cell.x - b.x else cell.y - b.y
+    }
+
+    /** How long a strip is, in cells. */
+    val slotCount: Int get() = region.lengthAlong(axis)
+
+    /** How many cells [p] takes along this surface's axis. */
+    fun spanOf(p: CellPlacement): Int = if (axis == Axis.HORIZONTAL) p.w else p.h
+
+    /** How far [p] sticks out across it. */
+    fun depthOf(p: CellPlacement): Int = if (axis == Axis.HORIZONTAL) p.h else p.w
+
+    /** How thick this is across its axis, in cells. One, or its deepest item. */
+    val depthCells: Int get() = slots.placements.maxOfOrNull { depthOf(it) } ?: 1
 
     override fun equals(other: Any?): Boolean =
-        other is Bar && other.id == id && other.dock == dock &&
-            other.spot == spot && other.slots == slots
+        other is Surface && other.id == id && other.dock == dock &&
+            other.spot == spot && other.flow == flow && other.slots == slots
 
-    override fun hashCode(): Int = listOf(id, dock, spot, slots).hashCode()
+    override fun hashCode(): Int = listOf(id, dock, spot, flow, slots).hashCode()
 
     override fun toString(): String = "$id($dock${spot?.let { "@$it" } ?: ""}, $slots)"
 }
 
-/** A placement and the bar it is on. The answer [DockLayout.locate] gives. */
-data class DockedItem(val bar: Bar, val placement: Placement) {
+/** A placement and the surface it is on. The answer [DockLayout.locate] gives. */
+data class DockedItem(val surface: Surface, val placement: CellPlacement) {
     val item: ToolItem get() = placement.item
-    val slot: Int get() = placement.slot
+    val cell: Cell get() = placement.cell
 }
 
 /**
- * Every bar, and the rules that tie them together.
+ * Every surface, and the rules that tie them together.
  *
  * ## What this is, and what it deliberately is not
  *
- * A list of [Bar]s with a handful of operations on top. It is **not** a layout
- * engine: [fits] and [place] delegate straight to the bar in question, so every
- * edge case about spans, collisions and the end of a bar is answered by
- * [ToolbarLayout], and by the tests that already cover it. What this adds is
- * which bar, and the arithmetic that turns an item into a span.
+ * A list of [Surface]s with a handful of operations on top. It is **not** a
+ * layout engine: [fits] and [place] delegate straight to the surface in
+ * question, so every edge case about footprints, collisions and the end of a
+ * shape is answered by [SurfaceLayout], and by the tests that already cover it.
+ * What this adds is which surface, and the arithmetic that turns an item into a
+ * footprint.
+ *
+ * It also keeps its name. A `DockLayout` is an *arrangement*; a workspace is an
+ * arrangement plus a filter plus a set of defaults, and calling this one the
+ * other would leave the second thing without a word.
  *
  * ## The one rule a single bar did not need
  *
- * **An item appears in at most one place.** [ToolbarLayout] allows the same item
- * twice, and on one bar that is merely odd. Across several it is a bug with a
- * face: two Eraser buttons in different corners, one lit and one not, both real.
- * So [place] removes the item from wherever else it was, and [of] drops the
- * later of two copies.
+ * **An item appears in at most one place.** [SurfaceLayout] allows the same item
+ * twice, and on one surface that is merely odd. Across several it is a bug with
+ * a face: two Eraser buttons in different corners, one lit and one not, both
+ * real. So [place] removes the item from wherever else it was, and [of] drops
+ * the later of two copies.
  *
  * That rule is also what makes dragging work without any code for dragging.
  * Moving an item from the left edge to a floating panel is [place] on the
- * floating bar — the removal falls out of the rule, and there is no second path
- * through which a move can go wrong.
+ * floating surface — the removal falls out of the rule, and there is no second
+ * path through which a move can go wrong.
  *
- * ## Bars come and go
+ * ## Surfaces come and go
  *
  * The four edges always exist, in [Dock.EDGES] order, and can only be emptied.
- * Floating bars are made by [addFloating] and destroyed by [closeBar], which is
- * how "fixate" and "close" are ordinary operations rather than new ideas.
+ * Floating ones are made by [addFloating] and destroyed by [closeSurface],
+ * which is how "fixate" and "close" are ordinary operations rather than new
+ * ideas.
  *
  * Immutable, so it can be Compose state and so that every test is one
  * expression.
  */
-class DockLayout private constructor(val bars: List<Bar>) {
+class DockLayout private constructor(val surfaces: List<Surface>) {
 
-    val isEmpty: Boolean get() = bars.all { it.isEmpty }
+    val isEmpty: Boolean get() = surfaces.all { it.isEmpty }
 
     /** The four edges, always present, always in the same order. */
-    val edges: List<Bar> get() = bars.filter { !it.isFloating }
+    val edges: List<Surface> get() = surfaces.filter { !it.isFloating }
 
-    /** The bars the user made, oldest first. */
-    val floating: List<Bar> get() = bars.filter { it.isFloating }
+    /** The surfaces the user made, oldest first. */
+    val floating: List<Surface> get() = surfaces.filter { it.isFloating }
 
-    fun bar(id: String): Bar? = bars.firstOrNull { it.id == id }
+    fun surface(id: String): Surface? = surfaces.firstOrNull { it.id == id }
 
-    /** The bar on [dock]. Only meaningful for the four edges. */
-    fun edge(dock: Dock): Bar = bars.first { it.dock == dock && !it.isFloating }
+    /** The surface on [dock]. Only meaningful for the four edges. */
+    fun edge(dock: Dock): Surface = surfaces.first { it.dock == dock && !it.isFloating }
 
-    /** Every placed item, with the bar it is on. */
-    fun all(): List<DockedItem> = bars.flatMap { b -> b.slots.placements.map { DockedItem(b, it) } }
+    /** Every placed item, with the surface it is on. */
+    fun all(): List<DockedItem> =
+        surfaces.flatMap { s -> s.slots.placements.map { DockedItem(s, it) } }
 
-    /** Where [item] currently is, or null if it is on no bar. */
+    /** Where [item] currently is, or null if it is on no surface. */
     fun locate(item: ToolItem): DockedItem? = all().firstOrNull { it.item == item }
 
-    /** True if [item] is on some bar. What the chooser ticks. */
+    /** True if [item] is on some surface. What the chooser ticks. */
     operator fun contains(item: ToolItem): Boolean = locate(item) != null
 
     /**
-     * Would [item] go at [slot] on the bar [barId]?
+     * Would [item] go at [cell] on [surfaceId]?
      *
-     * The item is taken out of that bar first when it is already on it, because
-     * [place] moves rather than copies: by the time it lands, the slots it used
-     * to hold are free, so a `fits` that still sees it there refuses placements
-     * that would in fact succeed. Dragging a four-slot slider two slots along
-     * its own bar is exactly that case, and it is the one a hand tries first.
+     * The item is taken out of that surface first when it is already on it,
+     * because [place] moves rather than copies: by the time it lands, the cells
+     * it used to hold are free, so a `fits` that still sees it there refuses
+     * placements that would in fact succeed. Dragging a four-cell slider two
+     * cells along its own bar is exactly that case, and it is the one a hand
+     * tries first.
      */
-    fun fits(barId: String, item: ToolItem, slot: Int, ignoringSlot: Int? = null): Boolean {
-        val bar = bar(barId) ?: return false
-        return without(bar, item).fits(bar.spanOf(item), slot, ignoringSlot = ignoringSlot)
+    fun fits(surfaceId: String, item: ToolItem, cell: Cell, ignoring: Cell? = null): Boolean {
+        val s = surface(surfaceId) ?: return false
+        val (w, h) = s.footprintOf(item, cell)
+        return without(s, item).fits(w, h, cell.x, cell.y, ignoring = ignoring)
     }
 
     /**
-     * Put [item] at [slot] on [barId], taking it out of wherever it was.
+     * Put [item] at [cell] on [surfaceId], taking it out of wherever it was.
      *
-     * Throws if it does not fit, exactly as [ToolbarLayout.place] does and for
-     * the same reason: a control that silently declines to appear cannot be told
-     * apart from one that is broken.
+     * Throws if it does not fit, exactly as [SurfaceLayout.place] does and for
+     * the same reason: a control that silently declines to appear cannot be
+     * told apart from one that is broken.
      */
-    fun place(barId: String, item: ToolItem, slot: Int): DockLayout {
-        val target = bar(barId) ?: return this
+    fun place(surfaceId: String, item: ToolItem, cell: Cell): DockLayout {
+        val target = surface(surfaceId) ?: return this
         val was = locate(item)
         val cleared = was
-            ?.let { withBar(it.bar.with(slots = it.bar.slots.remove(it.slot))) }
+            ?.let { withSurface(it.surface.with(slots = it.surface.slots.remove(it.cell))) }
             ?: this
-        val fresh = cleared.bar(barId) ?: target
-        // A size the user chose follows the control, so long as the bar it is
-        // going to runs the same way. Across the turn there is nothing sensible
-        // to carry -- a panel six wide and eleven tall does not become eleven
-        // wide by being moved -- so it goes back to what the catalogue says.
-        val kept = was?.placement?.takeIf { was.bar.axis == fresh.axis }
-        return cleared.withBar(
+        val fresh = cleared.surface(surfaceId) ?: target
+        // A size the user chose follows the control, so long as it is going
+        // somewhere that runs the same way. Across the turn there is nothing
+        // sensible to carry -- a panel six wide and eleven tall does not become
+        // eleven wide by being moved -- so it goes back to what the shape says.
+        val natural = fresh.footprintOf(item, cell)
+        val kept = was?.placement?.takeIf { was.surface.axis == fresh.axis }
+        return cleared.withSurface(
             fresh.with(
                 slots = fresh.slots.place(
-                    Placement(
+                    CellPlacement(
                         item = item,
-                        slot = slot,
-                        span = kept?.span ?: fresh.spanOf(item),
-                        depth = kept?.depth ?: fresh.depthOf(item),
+                        x = cell.x,
+                        y = cell.y,
+                        w = kept?.w ?: natural.first,
+                        h = kept?.h ?: natural.second,
                     )
                 )
             )
@@ -252,59 +331,62 @@ class DockLayout private constructor(val bars: List<Bar>) {
     }
 
     /**
-     * Resize a floating bar, and the panel on it if there is exactly one.
+     * Resize a floating strip, and the panel on it if there is exactly one.
      *
      * A bar of buttons only has a length; a bar holding a panel is that panel's
      * window, so the two numbers are the panel's. Both are the user's choice and
      * both are clamped rather than refused — a drag that asks for a bar of
-     * minus three slots is a hand, not an error.
+     * minus three cells is a hand, not an error.
+     *
+     * A surface that is not a strip is left alone: the handle that drives this
+     * resizes a *bar*, and a shape is reshaped rather than resized.
      */
-    fun resizeFloating(barId: String, along: Int, across: Int): DockLayout {
-        val bar = bar(barId) ?: return this
-        if (!bar.isFloating) return this
+    fun resizeFloating(surfaceId: String, along: Int, across: Int): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        if (!s.isFloating) return this
+        val axis = s.region.stripAxis ?: return this
         val cells = along.coerceIn(MIN_CELLS, MAX_CELLS)
         val deep = across.coerceIn(MIN_CELLS, MAX_CELLS)
-        val only = bar.slots.placements.singleOrNull()?.takeIf { it.item.kind == ToolKind.PANEL }
-            ?: return withBar(bar.with(slots = bar.slots.resized(cells)))
-        return withBar(
-            bar.with(
-                slots = ToolbarLayout.of(
-                    cells,
-                    listOf(only.copy(slot = 0, span = cells, depth = deep)),
-                )
-            )
-        )
+        val region = CellRegion.strip(cells, axis)
+        val only = s.slots.placements.singleOrNull()?.takeIf { it.item.kind == ToolKind.PANEL }
+            ?: return withSurface(s.with(slots = s.slots.reshaped(region)))
+        val sized = if (axis == Axis.HORIZONTAL) {
+            CellPlacement(only.item, 0, 0, cells, deep)
+        } else {
+            CellPlacement(only.item, 0, 0, deep, cells)
+        }
+        return withSurface(s.with(slots = SurfaceLayout.of(region, listOf(sized))))
     }
 
     /**
-     * Empty a floating bar into another, and close it.
+     * Empty a floating surface into another, and close it.
      *
      * What dragging a floating bar onto an edge does. Everything on it moves in
-     * order, each to the first slot that will take it; if any of them will not
+     * order, each to the first cell that will take it; if any of them will not
      * fit, nothing moves and the answer is null — half a bar arriving is worse
      * than none, because the half left behind is on a bar that is about to be
      * closed.
      */
     fun dockInto(from: String, to: String): DockLayout? {
-        val source = bar(from) ?: return null
+        val source = surface(from) ?: return null
         if (!source.isFloating || from == to) return null
-        val target = bar(to) ?: return null
+        val target = surface(to) ?: return null
         var next = this
         for (placement in source.slots.placements) {
-            val slot = next.firstFit(target.id, placement.item) ?: return null
-            next = next.place(target.id, placement.item, slot)
+            val cell = next.firstFit(target.id, placement.item) ?: return null
+            next = next.place(target.id, placement.item, cell)
         }
-        return next.closeBar(from)
+        return next.closeSurface(from)
     }
 
-    /** Empty the slot [slot] falls in on [barId]. A no-op on an empty slot. */
-    fun remove(barId: String, slot: Int): DockLayout {
-        val bar = bar(barId) ?: return this
-        return withBar(bar.with(slots = bar.slots.remove(slot)))
+    /** Empty the cell on [surfaceId]. A no-op on an empty one. */
+    fun remove(surfaceId: String, cell: Cell): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        return withSurface(s.with(slots = s.slots.remove(cell)))
     }
 
     /**
-     * Send whatever is in [slot] of [from] to [to], at the first slot it fits.
+     * Send whatever is at [cell] of [from] to [to], at the first cell it fits.
      *
      * Returns null when the destination has no room, which is the honest answer
      * and the one the caller can act on — the drop is refused and the item stays
@@ -312,89 +394,120 @@ class DockLayout private constructor(val bars: List<Bar>) {
      * [place], this is reached by a gesture, and a gesture that lands somewhere
      * full is a normal thing for a hand to do.
      */
-    fun move(from: String, slot: Int, to: String, toSlot: Int? = null): DockLayout? {
-        val source = bar(from) ?: return null
-        val moving = source.slots.covering(slot) ?: return null
-        val target = toSlot?.takeIf { fits(to, moving.item, it) }
+    fun move(from: String, cell: Cell, to: String, toCell: Cell? = null): DockLayout? {
+        val source = surface(from) ?: return null
+        val moving = source.slots.covering(cell) ?: return null
+        val target = toCell?.takeIf { fits(to, moving.item, it) }
             ?: firstFit(to, moving.item)
             ?: return null
         return place(to, moving.item, target)
     }
 
-    /** The first slot on [barId] that [item] would fit in, or null. */
-    fun firstFit(barId: String, item: ToolItem): Int? {
-        val bar = bar(barId) ?: return null
-        return without(bar, item).firstFit(bar.spanOf(item))
-    }
-
-    /**
-     * Make a floating bar holding [item], at [spot], and say what it is called.
-     *
-     * This is the whole of "fixate". The bar is sized to the item plus a little
-     * room, rather than to a constant: a floating bar is paper the drawing
-     * cannot use, so it is as long as it has to be and no longer, and the spare
-     * slots are there so that something else can be dropped in beside it.
-     */
-    fun addFloating(item: ToolItem, spot: BarSpot): Pair<DockLayout, String> {
-        val id = nextFloatingId()
-        val span = item.slotsIn(Dock.FLOATING.axis)
-        val bar = Bar(id, Dock.FLOATING, spot, ToolbarLayout.empty(span + SPARE_SLOTS))
-        return DockLayout(bars + bar).place(id, item, 0) to id
-    }
-
-    /** Move a floating bar. A no-op on an edge, whose position is not the user's. */
-    fun moveBar(barId: String, spot: BarSpot): DockLayout {
-        val bar = bar(barId) ?: return this
-        if (!bar.isFloating) return this
-        return withBar(bar.with(spot = spot))
-    }
-
-    /**
-     * Close a floating bar, and everything on it.
-     *
-     * An edge cannot be closed — there is nowhere for it to go and no way to get
-     * it back — so this empties it instead. A floating bar is a thing the user
-     * made, so closing it is closing it.
-     */
-    fun closeBar(barId: String): DockLayout {
-        val bar = bar(barId) ?: return this
-        return if (bar.isFloating) {
-            DockLayout(bars.filter { it.id != barId })
-        } else {
-            withBar(bar.with(slots = bar.slots.cleared()))
+    /** The first cell on [surfaceId] that [item] would fit in, or null. */
+    fun firstFit(surfaceId: String, item: ToolItem): Cell? {
+        val s = surface(surfaceId) ?: return null
+        val free = without(s, item)
+        return s.region.cells(s.flow).firstOrNull { cell ->
+            val (w, h) = s.footprintOf(item, cell)
+            free.fits(w, h, cell.x, cell.y)
         }
     }
 
-    /** Every bar emptied, and every floating bar gone. */
+    /**
+     * Make a floating surface holding [item], at [spot], and say what it is
+     * called.
+     *
+     * This is the whole of "fixate". It is sized to the item plus a little
+     * room, rather than to a constant: a floating surface is paper the drawing
+     * cannot use, so it is as long as it has to be and no longer, and the spare
+     * cells are there so that something else can be dropped in beside it.
+     */
+    fun addFloating(item: ToolItem, spot: BarSpot): Pair<DockLayout, String> {
+        val id = nextFloatingId()
+        val axis = Dock.FLOATING.axis
+        val span = if (axis == Axis.HORIZONTAL) item.cellsWide else item.cellsTall
+        val surface = Surface(
+            id = id,
+            dock = Dock.FLOATING,
+            spot = spot,
+            flow = Dock.FLOATING.defaultFlow(),
+            slots = SurfaceLayout.empty(CellRegion.strip(span + SPARE_SLOTS, axis)),
+        )
+        return DockLayout(surfaces + surface).place(id, item, Cell(0, 0)) to id
+    }
+
+    /** Move a floating surface. A no-op on an edge, whose position is not the user's. */
+    fun moveSurface(surfaceId: String, spot: BarSpot): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        if (!s.isFloating) return this
+        return withSurface(s.with(spot = spot))
+    }
+
+    /**
+     * Give a surface a new shape, keeping what still fits.
+     *
+     * The single entry point for every way of changing one: a preset, a dragged
+     * end, a shape drawn with the pen, or a screen that turned out to be
+     * smaller. What no longer fits is dropped here and is the caller's to
+     * overflow — see `docs/ui-expansion-plan.md`, *clamp, overflow, say so*.
+     */
+    fun reshape(surfaceId: String, region: CellRegion): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        return withSurface(s.reshaped(region))
+    }
+
+    /** Change which way a surface fills. Nothing already placed moves. */
+    fun reflow(surfaceId: String, flow: FlowOrder): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        return withSurface(s.with(flow = flow))
+    }
+
+    /**
+     * Close a floating surface, and everything on it.
+     *
+     * An edge cannot be closed — there is nowhere for it to go and no way to
+     * get it back — so this empties it instead. A floating surface is a thing
+     * the user made, so closing it is closing it.
+     */
+    fun closeSurface(surfaceId: String): DockLayout {
+        val s = surface(surfaceId) ?: return this
+        return if (s.isFloating) {
+            DockLayout(surfaces.filter { it.id != surfaceId })
+        } else {
+            withSurface(s.with(slots = s.slots.cleared()))
+        }
+    }
+
+    /** Every surface emptied, and every floating one gone. */
     fun cleared(): DockLayout = of(edges.map { it.with(slots = it.slots.cleared()) })
 
     /**
-     * Floating bars with nothing left on them, dropped.
+     * Floating surfaces with nothing left on them, dropped.
      *
-     * Dragging the last control off a floating bar leaves a strip of empty slots
-     * over the drawing that does nothing. It is not deleted as it happens — the
-     * bar has to survive being empty for as long as the drag is being undone —
-     * so it is tidied when the layout is saved.
+     * Dragging the last control off one leaves a shape over the drawing that
+     * does nothing. It is not deleted as it happens — it has to survive being
+     * empty for as long as the drag is being undone — so it is tidied when the
+     * layout is saved.
      */
-    fun tidied(): DockLayout = of(bars.filter { !it.isFloating || !it.isEmpty })
+    fun tidied(): DockLayout = of(surfaces.filter { !it.isFloating || !it.isEmpty })
 
     /**
-     * The same items on bars of different lengths.
+     * The same items on surfaces of different shapes.
      *
      * Used by the store, which widens a saved layout to the current defaults so
      * that a release adding a control does not strand a user whose bars are
-     * full. Anything that no longer reaches is dropped, by [ToolbarLayout.of].
+     * full. Anything that no longer reaches is dropped, by [SurfaceLayout.of].
      */
-    fun resized(slotsOf: (Bar) -> Int): DockLayout =
-        of(bars.map { it.with(slots = it.slots.resized(slotsOf(it))) })
+    fun reshaped(regionOf: (Surface) -> CellRegion): DockLayout =
+        of(surfaces.map { it.reshaped(regionOf(it)) })
 
-    private fun without(bar: Bar, item: ToolItem): ToolbarLayout {
-        val here = locate(item) ?: return bar.slots
-        return if (here.bar.id == bar.id) bar.slots.remove(here.slot) else bar.slots
+    private fun without(surface: Surface, item: ToolItem): SurfaceLayout {
+        val here = locate(item) ?: return surface.slots
+        return if (here.surface.id == surface.id) surface.slots.remove(here.cell) else surface.slots
     }
 
-    private fun withBar(bar: Bar): DockLayout =
-        DockLayout(bars.map { if (it.id == bar.id) bar else it })
+    private fun withSurface(surface: Surface): DockLayout =
+        DockLayout(surfaces.map { if (it.id == surface.id) surface else it })
 
     private fun nextFloatingId(): String {
         val taken = floating.mapNotNull { it.id.removePrefix(FLOAT_PREFIX).toIntOrNull() }.toSet()
@@ -403,14 +516,14 @@ class DockLayout private constructor(val bars: List<Bar>) {
         return "$FLOAT_PREFIX$n"
     }
 
-    override fun equals(other: Any?): Boolean = other is DockLayout && other.bars == bars
+    override fun equals(other: Any?): Boolean = other is DockLayout && other.surfaces == surfaces
 
-    override fun hashCode(): Int = bars.hashCode()
+    override fun hashCode(): Int = surfaces.hashCode()
 
-    override fun toString(): String = "DockLayout(" + bars.joinToString("; ") + ")"
+    override fun toString(): String = "DockLayout(" + surfaces.joinToString("; ") + ")"
 
     companion object {
-        /** Floating bar ids are this and a number. Persisted, so it does not move. */
+        /** Floating surface ids are this and a number. Persisted, so it does not move. */
         const val FLOAT_PREFIX = "f"
 
         /** Room to drop something else in beside a freshly fixated panel. */
@@ -421,37 +534,41 @@ class DockLayout private constructor(val bars: List<Bar>) {
         private const val MAX_CELLS = 24
 
         /**
-         * Build a layout from whatever bars are supplied, filling in the rest.
+         * Build a layout from whatever surfaces are supplied, filling in the
+         * rest.
          *
          * Three normalisations, and together they are why a codec can be
          * careless with its input: a missing edge becomes an empty bar of that
-         * edge's default length, a floating bar without a position gets one, and
-         * an item that appears twice keeps only its first appearance. None of
-         * them raises.
+         * edge's default shape, a floating surface without a position gets one,
+         * and an item that appears twice keeps only its first appearance. None
+         * of them raises.
          */
-        fun of(bars: List<Bar>): DockLayout {
+        fun of(surfaces: List<Surface>): DockLayout {
             val seen = HashSet<ToolItem>()
-            val out = ArrayList<Bar>(bars.size + Dock.EDGES.size)
+            val out = ArrayList<Surface>(surfaces.size + Dock.EDGES.size)
 
-            fun keep(bar: Bar) {
-                val kept = bar.slots.placements.filter { seen.add(it.item) }
-                out += if (kept.size == bar.slots.placements.size) {
-                    bar
+            fun keep(surface: Surface) {
+                val kept = surface.slots.placements.filter { seen.add(it.item) }
+                out += if (kept.size == surface.slots.placements.size) {
+                    surface
                 } else {
-                    bar.with(slots = ToolbarLayout.of(bar.slots.slotCount, kept))
+                    surface.with(slots = SurfaceLayout.of(surface.region, kept))
                 }
             }
 
             for (dock in Dock.EDGES) {
                 keep(
-                    bars.firstOrNull { it.dock == dock && !it.isFloating }
-                        ?: Bar(dock.id, dock, null, ToolbarLayout.empty(dock.defaultSlots))
+                    surfaces.firstOrNull { it.dock == dock && !it.isFloating }
+                        ?: Surface(
+                            dock.id, dock, null, dock.defaultFlow(),
+                            SurfaceLayout.empty(dock.defaultRegion()),
+                        )
                 )
             }
             val ids = HashSet<String>(out.map { it.id })
-            for (bar in bars.filter { it.isFloating }) {
-                if (!ids.add(bar.id)) continue
-                keep(bar.with(spot = bar.spot ?: BarSpot(DEFAULT_X, DEFAULT_Y)))
+            for (surface in surfaces.filter { it.isFloating }) {
+                if (!ids.add(surface.id)) continue
+                keep(surface.with(spot = surface.spot ?: BarSpot(DEFAULT_X, DEFAULT_Y)))
             }
             return DockLayout(out)
         }
@@ -462,11 +579,10 @@ class DockLayout private constructor(val bars: List<Bar>) {
         /**
          * A fresh install, and it is **not** empty.
          *
-         * `ToolbarLayout` used to default to empty, and on one bar that was
-         * defensible: a single row of dashed slots reads as *tap me*. Four empty
-         * edges is four times that bet and it is not one worth taking — a first
-         * run that shows empty frames around a white page looks broken rather
-         * than inviting.
+         * A single row of dashed slots reads as *tap me*. Four empty edges is
+         * four times that bet and it is not one worth taking — a first run that
+         * shows empty frames around a white page looks broken rather than
+         * inviting.
          *
          * So the default is a working set, arranged by what the control is for:
          *
@@ -481,8 +597,8 @@ class DockLayout private constructor(val bars: List<Bar>) {
          *   erase.
          * - **Bottom edge — how the mark comes out.** The sliders, along the
          *   long axis, where a slider has room to be a slider.
-         * - **No floating bars**, because a floating bar is something the user
-         *   made and there is no honest guess at one.
+         * - **No floating surfaces**, because a floating surface is something
+         *   the user made and there is no honest guess at one.
          */
         val STARTER: DockLayout
             get() = of(
@@ -501,16 +617,21 @@ class DockLayout private constructor(val bars: List<Bar>) {
         /** What a fresh install gets. See [STARTER] for why it is not [EMPTY]. */
         val DEFAULT: DockLayout get() = STARTER
 
-        private fun edgeOf(dock: Dock, vararg at: Pair<ToolItem, Int>): Bar =
-            Bar(
-                dock.id, dock, null,
-                ToolbarLayout.of(
-                    dock.defaultSlots,
+        private fun edgeOf(dock: Dock, vararg at: Pair<ToolItem, Int>): Surface {
+            val region = dock.defaultRegion()
+            val horizontal = dock.axis == Axis.HORIZONTAL
+            return Surface(
+                dock.id, dock, null, dock.defaultFlow(),
+                SurfaceLayout.of(
+                    region,
                     at.map { (item, slot) ->
-                        Placement(item, slot, item.slotsIn(dock.axis), item.depthIn(dock.axis))
+                        val cell = if (horizontal) Cell(slot, 0) else Cell(0, slot)
+                        val (w, h) = RegionLayout.naturalSize(item, region, cell)
+                        CellPlacement(item, cell.x, cell.y, w, h)
                     },
                 ),
             )
+        }
 
         /** Clear of the left tools and above the bottom sliders, on a first run. */
         private const val DEFAULT_X = 0.32f

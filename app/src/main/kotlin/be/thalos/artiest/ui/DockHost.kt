@@ -227,7 +227,7 @@ private fun Dock.alignment(): Alignment = when (this) {
  */
 @Composable
 private fun BarView(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
@@ -266,7 +266,7 @@ private fun BarView(
  */
 @Composable
 private fun BarRun(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
@@ -278,7 +278,7 @@ private fun BarRun(
     // the catalogue. Asking the catalogue was a defect with a visible face:
     // shrinking a fixated colour panel made the panel smaller and left the
     // toolbar it sits on at its original size, so the wheel ended up floating
-    // in a grey rectangle twice its height. `Placement.depth` says in its own
+    // in a grey rectangle twice its height. `CellPlacement` says in its own
     // KDoc why it is carried rather than derived — a resized panel's size is a
     // property of the placement — and this was the one reader that did not
     // believe it. Sharing `thickness()` with the grip beside it is also what
@@ -288,19 +288,19 @@ private fun BarRun(
 
     // Only as far as the last item, unless arranging. See the file KDoc.
     val extent = if (arranging) {
-        bar.slots.slotCount
+        bar.slotCount
     } else {
-        bar.slots.placements.maxOfOrNull { it.endSlot } ?: 0
+        bar.slots.placements.maxOfOrNull { bar.slotOf(it.cell) + bar.spanOf(it) } ?: 0
     }
 
     val cells: @Composable () -> Unit = {
         var slot = 0
         while (slot < extent) {
-            val here = slot
+            val here = bar.cellAt(slot)
             val placed = bar.slots.covering(here)
             SlotCell(
                 bar = bar,
-                slot = here,
+                cell = here,
                 placed = placed,
                 thickness = thickness,
                 layout = layout,
@@ -309,7 +309,7 @@ private fun BarRun(
                 drag = drag,
                 slotContent = slotContent,
             )
-            slot += placed?.span ?: 1
+            slot += placed?.let { bar.spanOf(it) } ?: 1
         }
     }
 
@@ -345,15 +345,15 @@ private fun BarRun(
  * One cell: a control, a chip standing in for it, or an empty target.
  *
  * The size is decided here and in one place, because it is the number the drop
- * arithmetic in [DockDrag.slotAt] inverts. If a cell were ever a different width
- * from `slots × SLOT`, a drop would land in the wrong slot and nothing would say
- * why.
+ * arithmetic in [DockDrag.cellAt] inverts. If a cell were ever a different width
+ * from `cells × SLOT`, a drop would land in the wrong place and nothing would
+ * say why.
  */
 @Composable
 private fun SlotCell(
-    bar: Bar,
-    slot: Int,
-    placed: Placement?,
+    bar: Surface,
+    cell: Cell,
+    placed: CellPlacement?,
     thickness: Dp,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
@@ -364,7 +364,7 @@ private fun SlotCell(
     val vertical = bar.axis == Axis.VERTICAL
     var chooser by remember { mutableStateOf(false) }
 
-    val span = placed?.span ?: 1
+    val span = placed?.let { bar.spanOf(it) } ?: 1
     // An unfilled slot out of arrange mode is a group separator, not a hole.
     val cells = if (placed == null && !arranging) 0.28f else span.toFloat()
     val length = Chrome.SLOT * cells
@@ -375,7 +375,7 @@ private fun SlotCell(
     // the bar's depth turns the two spare slots beside a fixated panel into two
     // 440dp columns of dashed outline, which reads as three panels rather than
     // one panel and some room.
-    val across = minOf(Chrome.SLOT * (placed?.depth ?: 1), thickness)
+    val across = minOf(Chrome.SLOT * (placed?.let { bar.depthOf(it) } ?: 1), thickness)
 
     Box(
         modifier = if (vertical) {
@@ -404,7 +404,7 @@ private fun SlotCell(
                     ArrangeChip(
                         item = placed.item,
                         barId = bar.id,
-                        slot = slot,
+                        cell = cell,
                         drag = drag,
                         layout = layout,
                         onLayout = onLayout,
@@ -421,7 +421,7 @@ private fun SlotCell(
             ToolChooser(
                 layout = layout,
                 bar = bar,
-                slot = slot,
+                cell = cell,
                 onDismiss = { chooser = false },
                 onLayout = { chooser = false; onLayout(it) },
             )
@@ -472,7 +472,7 @@ private fun SlotSurface(content: @Composable () -> Unit) {
 private fun ArrangeChip(
     item: ToolItem,
     barId: String,
-    slot: Int,
+    cell: Cell,
     drag: DockDrag,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
@@ -482,7 +482,7 @@ private fun ArrangeChip(
     // Stands in for the ripple that went with Modifier.clickable. See
     // carryGesture for why the clickable had to go.
     var pressed by remember { mutableStateOf(false) }
-    val lifted = drag.carrying?.bar?.id == barId && drag.carrying?.slot == slot
+    val lifted = drag.carrying?.surface?.id == barId && drag.carrying?.cell == cell
 
     Box(
         contentAlignment = Alignment.Center,
@@ -504,13 +504,13 @@ private fun ArrangeChip(
             )
             .alpha(if (lifted) 0.25f else 1f)
             .onGloballyPositioned { coords = it }
-            .pointerInput(item, barId, slot) {
+            .pointerInput(item, barId, cell) {
                 carryGesture(
                     coords = { coords },
                     onPressed = { pressed = it },
                     onPick = {
-                        val bar = layout.bar(barId)
-                        val here = bar?.slots?.covering(slot)
+                        val bar = layout.surface(barId)
+                        val here = bar?.slots?.covering(cell)
                         drag.carrying = if (bar != null && here != null) {
                             DockedItem(bar, here)
                         } else {
@@ -519,7 +519,7 @@ private fun ArrangeChip(
                     },
                     onMove = { root ->
                         drag.pointer = root
-                        drag.hover = drag.barAt(root)
+                        drag.hover = drag.surfaceAt(root)
                     },
                     onDrop = { onLayout(drag.drop(layout) ?: layout) },
                     onCancel = { drag.clear() },
@@ -664,7 +664,7 @@ private suspend fun PointerInputScope.carryGesture(
  */
 @Composable
 private fun FloatingBarView(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
@@ -725,7 +725,7 @@ private fun FloatingBarView(
                     if (edge != null) layout.dockInto(bar.id, edge)?.let(onLayout)
                 },
                 modifier = Modifier.onGloballyPositioned { gripCoords = it },
-            ) { spot -> onLayout(layout.moveBar(bar.id, spot)) }
+            ) { spot -> onLayout(layout.moveSurface(bar.id, spot)) }
         }
 
         BarRun(bar, layout, onLayout, arranging, drag, slotContent)
@@ -734,7 +734,7 @@ private fun FloatingBarView(
             ResizeHandle(bar) { along, across ->
                 onLayout(layout.resizeFloating(bar.id, along, across))
             }
-            CloseBar { onLayout(layout.closeBar(bar.id)) }
+            CloseBar { onLayout(layout.closeSurface(bar.id)) }
         }
     }
 }
@@ -749,11 +749,11 @@ private fun FloatingBarView(
  * reads as deliberate rather than as lag once you know the grid is there.
  */
 @Composable
-private fun ResizeHandle(bar: Bar, onResize: (Int, Int) -> Unit) {
+private fun ResizeHandle(bar: Surface, onResize: (Int, Int) -> Unit) {
     val density = LocalDensity.current
     val slotPx = with(density) { Chrome.SLOT.toPx() }
     val resize by rememberUpdatedState(onResize)
-    val along by rememberUpdatedState(bar.slots.slotCount)
+    val along by rememberUpdatedState(bar.slotCount)
     val across by rememberUpdatedState(bar.depthCells)
 
     Box(
@@ -828,7 +828,7 @@ private fun CloseBar(onClose: () -> Unit) {
  * on a bar eleven cells tall is a grip nobody can find — and getting it from one
  * place is what stops the two disagreeing by a padding.
  */
-private fun Bar.thickness(): Dp =
+private fun Surface.thickness(): Dp =
     maxOf(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2, Chrome.SLOT * depthCells)
 
 /**
@@ -1061,12 +1061,12 @@ private fun DragGhost(drag: DockDrag) {
 @Composable
 private fun ToolChooser(
     layout: DockLayout,
-    bar: Bar,
-    slot: Int,
+    bar: Surface,
+    cell: Cell,
     onDismiss: () -> Unit,
     onLayout: (DockLayout) -> Unit,
 ) {
-    val occupant = bar.slots.covering(slot)
+    val occupant = bar.slots.covering(cell)
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         if (occupant != null) {
@@ -1078,7 +1078,7 @@ private fun ToolChooser(
             )
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                 for (target in Dock.EDGES) {
-                    val moved = layout.move(bar.id, slot, target.id)
+                    val moved = layout.move(bar.id, cell, target.id)
                     DockTarget(
                         dock = target,
                         enabled = target.id != bar.id && moved != null,
@@ -1099,7 +1099,7 @@ private fun ToolChooser(
             DropdownMenuItem(
                 text = { Text("Remove ${occupant.item.label}", fontSize = 13.sp) },
                 leadingIcon = { Icon(ToolIcons.close, null, Modifier.size(17.dp)) },
-                onClick = { onLayout(layout.remove(bar.id, slot)) },
+                onClick = { onLayout(layout.remove(bar.id, cell)) },
             )
             HorizontalDivider()
         }
@@ -1114,7 +1114,7 @@ private fun ToolChooser(
                 modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
             )
             for (item in items) {
-                val fits = layout.fits(bar.id, item, slot, ignoringSlot = slot)
+                val fits = layout.fits(bar.id, item, cell, ignoring = cell)
                 val already = item == occupant?.item
                 val elsewhere = !already && item in layout
                 DropdownMenuItem(
@@ -1125,7 +1125,7 @@ private fun ToolChooser(
                             // and saying which edge it is leaving is the
                             // difference between a menu and a guess.
                             if (elsewhere) {
-                                "${item.label}  ·  ${layout.locate(item)?.bar?.dock?.label}"
+                                "${item.label}  ·  ${layout.locate(item)?.surface?.dock?.label}"
                             } else {
                                 item.label
                             },
@@ -1136,7 +1136,7 @@ private fun ToolChooser(
                         ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) }
                     },
                     enabled = fits && !already,
-                    onClick = { onLayout(layout.place(bar.id, item, slot)) },
+                    onClick = { onLayout(layout.place(bar.id, item, cell)) },
                 )
             }
         }
@@ -1246,25 +1246,31 @@ private class DockDrag {
     fun edgeAt(point: Offset): String? =
         Dock.EDGES.firstOrNull { bounds[it.id]?.contains(point) == true }?.id
 
-    fun barAt(point: Offset): String? =
+    fun surfaceAt(point: Offset): String? =
         bounds.entries
             .filter { it.value.contains(point) }
             .map { it.key }
             .maxByOrNull { if (it.startsWith(DockLayout.FLOAT_PREFIX)) 1 else 0 }
 
     /**
-     * Which slot of [dock] the point is over.
+     * Which cell of [surface] the point is over.
      *
      * The inverse of [SlotCell]'s sizing, and it is only correct because that
-     * sizing is `slots × SLOT` with no exceptions. Measured from [runOrigin],
+     * sizing is `cells × SLOT` with no exceptions. Measured from [runOrigin],
      * which is the run's own position and therefore already scrolled — there is
      * nothing here to add back and nothing to get wrong.
+     *
+     * Still one-dimensional, because the renderer still draws a line of cells.
+     * When it draws a shape this becomes two of the same division — see
+     * `docs/ui-expansion-plan.md`, U3 — and the identity it inverts does not
+     * change, which is the reason that step is cheap.
      */
-    fun slotAt(bar: Bar, point: Offset): Int? {
-        val origin = runOrigin[bar.id] ?: return null
+    fun cellAt(surface: Surface, point: Offset): Cell? {
+        val origin = runOrigin[surface.id] ?: return null
         if (slotPx <= 0f) return null
-        val along = if (bar.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
-        return (along / slotPx).toInt().coerceAtLeast(0)
+        val along =
+            if (surface.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
+        return surface.cellAt((along / slotPx).toInt().coerceAtLeast(0))
     }
 
     /**
@@ -1281,9 +1287,9 @@ private class DockDrag {
         val held = carrying ?: return null
         val where = pointer
         clear()
-        val target = barAt(where)?.let { layout.bar(it) }
+        val target = surfaceAt(where)?.let { layout.surface(it) }
             ?: return layout.addFloating(held.item, spotAt(where)).first
-        return layout.move(held.bar.id, held.slot, target.id, slotAt(target, where))
+        return layout.move(held.surface.id, held.cell, target.id, cellAt(target, where))
     }
 
     /** A root point as a fraction of the chrome, for a bar that is about to exist. */

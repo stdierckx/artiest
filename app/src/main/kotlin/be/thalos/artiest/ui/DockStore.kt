@@ -37,19 +37,29 @@ class DockStore(context: Context) {
     fun load(): DockLayout {
         val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null))
             ?: return introduce(DockLayout.DEFAULT)
-        // Edges are widened to the current defaults; a floating bar keeps the
-        // length it was made, because it was made to fit what is on it and
-        // stretching it would put empty slots over the drawing.
-        val widened = stored.resized { bar ->
-            if (bar.isFloating) bar.slots.slotCount
-            else maxOf(bar.slots.slotCount, bar.dock.defaultSlots)
+        // Edges are widened to the current defaults; a floating surface keeps
+        // the length it was made, because it was made to fit what is on it and
+        // stretching it would put empty cells over the drawing.
+        //
+        // **A shape is never widened.** Widening a bar adds room at the end,
+        // which is what this rule is for; widening a shape somebody drew would
+        // change the drawing, and there is no end of an L to add room to.
+        val widened = stored.reshaped { surface ->
+            if (surface.isFloating || !surface.region.isStrip) surface.region
+            else CellRegion.strip(
+                maxOf(surface.slotCount, surface.dock.defaultSlots),
+                surface.axis,
+            )
         }
         // A v2 string carried the one floating dock's position in its own two
         // keys. Seeding it here is the last thing those keys are for.
         val seeded = widened.floating.firstOrNull()?.takeIf { it.spot == null }
         val placed = if (seeded == null) widened else {
             val (x, y) = loadFloatingAt()
-            widened.moveBar(seeded.id, BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y))
+            widened.moveSurface(
+                seeded.id,
+                BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y),
+            )
         }
         return introduce(placed)
     }
@@ -84,8 +94,8 @@ class DockStore(context: Context) {
             changed = true
             if (item in out) continue
             for (dock in listOf(preferred) + Dock.EDGES.filter { it != preferred }) {
-                val slot = out.firstFit(dock.id, item) ?: continue
-                out = out.place(dock.id, item, slot)
+                val cell = out.firstFit(dock.id, item) ?: continue
+                out = out.place(dock.id, item, cell)
                 break
             }
         }

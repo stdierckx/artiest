@@ -114,6 +114,18 @@ object RegionLayout {
     }
 
     /**
+     * How big [item] is at [at] in [region], the way round it wants to be.
+     *
+     * The one place that answers it, so that the packer, the chooser and the
+     * drop path cannot disagree about how much room a slider needs. It is what
+     * `ToolItem.slotsIn`/`depthIn` were, asked of the shape rather than of a
+     * dock: a shape knows which way it runs at any cell, and a dock only ever
+     * knew one answer for the whole bar.
+     */
+    fun naturalSize(item: ToolItem, region: CellRegion, at: Cell): Pair<Int, Int> =
+        orientations(Footprint.of(item), region, at).first()
+
+    /**
      * The sizes to try at [cell], best first.
      *
      * A turning item lies along the shape: upright in an L's arm, flat along
