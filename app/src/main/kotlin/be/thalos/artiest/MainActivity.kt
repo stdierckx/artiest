@@ -75,12 +75,15 @@ import be.thalos.artiest.canvas.MarqueeShape
 import be.thalos.artiest.canvas.setDocToView
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
+import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.SelectionButton
 import be.thalos.artiest.ui.SelectionOverlay
 import be.thalos.artiest.ui.LayersButton
+import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
+import be.thalos.artiest.ui.ColourPanelCard
 import be.thalos.artiest.ui.DockHost
 import be.thalos.artiest.ui.DockLayout
 import be.thalos.artiest.ui.DockStore
@@ -428,10 +431,6 @@ private fun CanvasScreen(
     val store = remember { DockStore(context) }
     var docks by remember { mutableStateOf(store.load()) }
     var arranging by remember { mutableStateOf(false) }
-    var floatingAt by remember {
-        val (x, y) = store.loadFloatingAt()
-        mutableStateOf(Offset(x, y))
-    }
 
     // The colours mixed on the wheel. Pushed when the panel closes rather than
     // on every sample of a drag -- see ColourButton for why.
@@ -845,8 +844,6 @@ private fun CanvasScreen(
             onLayout = { docks = it; store.save(it) },
             arranging = arranging,
             onArranging = { arranging = it },
-            floatingAt = floatingAt,
-            onFloatingAt = { floatingAt = it; store.saveFloatingAt(it.x, it.y) },
         ) { item, axis ->
                 ToolSlot(
                     item = item,
@@ -854,6 +851,18 @@ private fun CanvasScreen(
                     ink = ink,
                     recentInks = recentInks,
                     onInkCommitted = { recentInks = store.pushRecentColour(it) },
+                    onFixate = { panel, spot ->
+                        // Three ordinary operations and no new idea: make a
+                        // floating bar, put the panel on it, and turn on
+                        // arrange mode so the next thing the hand does is move
+                        // it somewhere better. Every panel is fixated through
+                        // this one path, which is what makes adding the next
+                        // one a catalogue entry rather than a feature.
+                        val (next, _) = docks.addFloating(panel, spot)
+                        docks = next
+                        store.save(next)
+                        arranging = true
+                    },
                     onInk = { ink = it },
                     sizeMax = sizeMax,
                     onSizeMax = { sizeMax = it },
@@ -1006,6 +1015,7 @@ private fun ToolSlot(
     onInk: (Int) -> Unit,
     recentInks: List<Int>,
     onInkCommitted: (Int) -> Unit,
+    onFixate: (ToolItem, BarSpot) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
     eraserSize: Float,
@@ -1058,6 +1068,20 @@ private fun ToolSlot(
             palette = PALETTE,
             recent = recentInks,
             onCommit = onInkCommitted,
+            onFixate = { onFixate(ToolItem.COLOUR_PANEL, it) },
+        )
+
+        /**
+         * The same picker, kept. It is a separate catalogue entry rather than a
+         * bigger [ToolItem.COLOUR] because fixate leaves the swatch where it
+         * was — two things on screen at once cannot be one item under the rule
+         * that an item lives in exactly one place.
+         */
+        ToolItem.COLOUR_PANEL -> ColourPanelCard(
+            ink = ink,
+            onInk = onInk,
+            palette = PALETTE,
+            recent = recentInks,
         )
 
         ToolItem.SIZE -> ToolSlider(
@@ -1138,6 +1162,18 @@ private fun ToolSlot(
             onSelecting = onSelecting,
         )
         ToolItem.LAYERS -> LayersButton(
+            layers = layerRows,
+            activeId = activeLayer,
+            maxLayers = LayerStack.MAX_LAYERS,
+            onOp = onLayerOp,
+            onAdd = onLayerAdd,
+            onDuplicate = onLayerDuplicate,
+            onOpenChange = onLayersOpen,
+            onFixate = { onFixate(ToolItem.LAYERS_PANEL, it) },
+        )
+
+        /** The same list, kept. See [ToolItem.LAYERS_PANEL]. */
+        ToolItem.LAYERS_PANEL -> LayersPanelCard(
             layers = layerRows,
             activeId = activeLayer,
             maxLayers = LayerStack.MAX_LAYERS,

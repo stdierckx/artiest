@@ -37,8 +37,21 @@ class DockStore(context: Context) {
     fun load(): DockLayout {
         val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null))
             ?: return introduce(DockLayout.DEFAULT)
-        val widened = stored.resized { dock -> maxOf(stored.bar(dock).slotCount, dock.defaultSlots) }
-        return introduce(widened)
+        // Edges are widened to the current defaults; a floating bar keeps the
+        // length it was made, because it was made to fit what is on it and
+        // stretching it would put empty slots over the drawing.
+        val widened = stored.resized { bar ->
+            if (bar.isFloating) bar.slots.slotCount
+            else maxOf(bar.slots.slotCount, bar.dock.defaultSlots)
+        }
+        // A v2 string carried the one floating dock's position in its own two
+        // keys. Seeding it here is the last thing those keys are for.
+        val seeded = widened.floating.firstOrNull()?.takeIf { it.spot == null }
+        val placed = if (seeded == null) widened else {
+            val (x, y) = loadFloatingAt()
+            widened.moveBar(seeded.id, BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y))
+        }
+        return introduce(placed)
     }
 
     /**
@@ -70,9 +83,9 @@ class DockStore(context: Context) {
             if (!offered.add(item.id)) continue
             changed = true
             if (item in out) continue
-            for (dock in listOf(preferred) + Dock.entries.filter { it != preferred }) {
-                val slot = out.firstFit(dock, item) ?: continue
-                out = out.place(dock, item, slot)
+            for (dock in listOf(preferred) + Dock.EDGES.filter { it != preferred }) {
+                val slot = out.firstFit(dock.id, item) ?: continue
+                out = out.place(dock.id, item, slot)
                 break
             }
         }
@@ -84,32 +97,23 @@ class DockStore(context: Context) {
     }
 
     fun save(layout: DockLayout) {
-        prefs.edit().putString(KEY_LAYOUT, DockCodec.encode(layout)).apply()
+        // Tidied on the way out, not on the way in: a floating bar has to
+        // survive being empty for as long as the drag emptying it might still
+        // be undone, but an empty one has no business outliving the session.
+        prefs.edit().putString(KEY_LAYOUT, DockCodec.encode(layout.tidied())).apply()
     }
 
     /**
-     * Where the floating panel sits, as a fraction of the window in each axis.
+     * Where the one floating dock used to sit, from before there could be more
+     * than one of them.
      *
-     * Fractions and not pixels, and that is the answer to the open question the
-     * UI plan left for a human: *"does the floating dock need to survive
-     * rotation, or reset?"* A fraction survives it — the panel keeps its
-     * relative place on the screen instead of landing off the edge or snapping
-     * to a dock it was moved away from — and it costs one line rather than a
-     * second saved position per orientation. It is not perfect: a panel three
-     * quarters of the way down a landscape window lands three quarters of the
-     * way down a portrait one, which is further in absolute terms than the user
-     * put it. It is honest, cheap, and never off-screen, and the drag to fix it
-     * is one gesture.
+     * Kept only so that [load] can seed a migrated `v2` layout with the position
+     * that dock had. Positions live in the layout string now, one per bar,
+     * because there is no longer a single floating bar to have a single
+     * position — see [BarSpot] for why they are fractions.
      */
-    fun loadFloatingAt(): Pair<Float, Float> =
+    private fun loadFloatingAt(): Pair<Float, Float> =
         prefs.getFloat(KEY_FLOAT_X, DEFAULT_FLOAT_X) to prefs.getFloat(KEY_FLOAT_Y, DEFAULT_FLOAT_Y)
-
-    fun saveFloatingAt(x: Float, y: Float) {
-        prefs.edit()
-            .putFloat(KEY_FLOAT_X, x.coerceIn(0f, 1f))
-            .putFloat(KEY_FLOAT_Y, y.coerceIn(0f, 1f))
-            .apply()
-    }
 
     /**
      * The colours mixed on the wheel, most recent first.
