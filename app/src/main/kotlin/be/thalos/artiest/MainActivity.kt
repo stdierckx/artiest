@@ -71,8 +71,16 @@ import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
+import be.thalos.artiest.canvas.MarqueeShape
+import be.thalos.artiest.canvas.setDocToView
+import be.thalos.artiest.doc.FloatOp
+import be.thalos.artiest.doc.SelectMode
+import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
+import be.thalos.artiest.ui.SelectionButton
+import be.thalos.artiest.ui.SelectionOverlay
+import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushStore
@@ -395,6 +403,34 @@ private fun CanvasScreen(
     var activeLayer by remember { mutableIntStateOf(document.layers.activeId) }
     var layersOpen by remember { mutableStateOf(false) }
 
+    // The stencil, and the marquee being dragged over it.
+    //
+    // Three pieces of state and not one, because they change at three
+    // different rates and only one of them recomposes anything. `selecting`
+    // and `marqueeShape` are pressed by hand; `selectionShape` changes when the
+    // render thread republishes; `outlineTick` moves at the rate of a pan or a
+    // pen sample and is read *inside a draw lambda*, so it invalidates the
+    // draw phase and nothing else. That is the same arrangement `cursorAt`
+    // uses, and it is what makes an animated outline affordable.
+    var selecting by remember { mutableStateOf(false) }
+    var marqueeShape by remember { mutableStateOf(MarqueeShape.RECTANGLE) }
+    var marqueeMode by remember { mutableStateOf(SelectMode.NEW) }
+    var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
+    val outlineTick = remember { mutableIntStateOf(0) }
+
+    // The floating pixels, as the chrome sees them: the rectangle they were
+    // lifted from, and a token that changes when a different float is lifted so
+    // the transform box starts over rather than inheriting the last one's
+    // matrix.
+    var floatingBox by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    var floatToken by remember { mutableIntStateOf(0) }
+
+    // Document-to-view, rebuilt only when the canvas actually moves. A `Matrix`
+    // is mutable native state and this one is written on the UI thread and read
+    // on the UI thread, in a draw lambda, so one instance is enough -- but it
+    // must not be the renderer's, which the render thread concatenates.
+    val outlineMatrix = remember { android.graphics.Matrix() }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -523,6 +559,35 @@ private fun CanvasScreen(
         }
     }
 
+    // The stencil, polled for the same reason `canUndo` is: the render thread
+    // is what applies a selection -- it arrives through the commit queue,
+    // behind whatever was drawn before it -- and it has no way to reach into a
+    // composition. Four times a second is fast enough for an outline that
+    // appears after a gesture the user has already finished.
+    //
+    // The tick is bumped as well as the snapshot swapped, because the outline
+    // is drawn from a lambda that reads the tick; swapping the snapshot alone
+    // would recompose and leave the draw phase believing nothing had moved.
+    LaunchedEffect(document) {
+        while (true) {
+            kotlinx.coroutines.delay(250)
+            val snap = document.selection.snapshot
+            if (snap !== selectionShape) {
+                selectionShape = snap
+                outlineTick.intValue++
+            }
+            // The float is picked up on the same poll. Its bounds never change
+            // once lifted -- the matrix moves, not the source -- so a reference
+            // comparison is enough and a new box means a new gesture.
+            val box = document.floating?.sourceBounds
+            if (box !== floatingBox) {
+                floatingBox = box
+                floatToken++
+                outlineTick.intValue++
+            }
+        }
+    }
+
     // Only while the panel is open, and faster than the undo poll, because
     // this one is watching the result of a press the user just made: a row that
     // takes half a second to light up reads as a button that did not work.
@@ -600,6 +665,13 @@ private fun CanvasScreen(
         // scheduled and then deferred, and it is a no-op when there is no
         // surface - which is the only state in which the queue is reliably
         // non-empty, and also the one in which this button cannot be pressed.
+        // Pixels still in the air are put down first. The export composites
+        // sheets and knows nothing about a float, and the alternatives are
+        // both worse: exporting without it saves a drawing with a hole in it,
+        // and teaching the exporter to read a bitmap the render thread may
+        // recycle at any moment is a race for a case that has an obvious
+        // answer. Pressing Save while transforming commits the transform.
+        if (document.floating != null) surface?.float(FloatOp.Drop)
         surface?.redrawDry()
         exporting = true
         export = null
@@ -607,6 +679,22 @@ private fun CanvasScreen(
             export = PngExporter.export(context, document)
             exporting = false
             generation++
+        }
+    }
+
+    // Turning the marquee on or off, in one place because three controls do it:
+    // the Select toggle, picking a shape in the panel, and picking a brush.
+    //
+    // Through the view rather than straight onto the field, because an open
+    // stroke has to be abandoned -- a mode switch with the pen already down
+    // would turn half a lasso into half a pencil line.
+    val setSelecting: (Boolean) -> Unit = { on ->
+        if (selecting != on) {
+            selecting = on
+            surface?.let {
+                it.selecting = on
+                it.abandonStroke()
+            }
         }
     }
 
@@ -622,9 +710,54 @@ private fun CanvasScreen(
                     it.onHover = { inRange, x, y ->
                         cursorAt.value = if (inRange) Offset(x, y) else Offset.Unspecified
                     }
+                    // Both bump a counter read inside a draw lambda rather than
+                    // setting a value: a marquee at 200 Hz and a pan at 90 Hz
+                    // must not recompose the chrome.
+                    it.onMarqueeChanged = { outlineTick.intValue++ }
+                    it.onTransformChanged = { outlineTick.intValue++ }
                     onView(it)
                 }
             },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Above the canvas and below the chrome, for the reason the ring is
+        // there: the outline belongs over the paper.
+        SelectionOverlay(
+            selection = {
+                outlineTick.intValue
+                // Hidden while pixels are in the air: the transform box is the
+                // outline then, and two rectangles -- one around the hole, one
+                // around what came out of it -- is a picture nobody can read.
+                if (floatingBox != null) null else selectionShape.path
+            },
+            marquee = {
+                outlineTick.intValue
+                surface?.liveMarquee?.takeIf { it.isOpen }?.path
+            },
+            docToView = {
+                outlineTick.intValue
+                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                outlineMatrix
+            },
+            // Recomposes when the answer moves, which is once per selection
+            // rather than once per frame -- and it is what stops the ants
+            // ticking over a page with nothing on it.
+            showing = selectionShape.active || selecting,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Over the outline, because it is the thing being dragged, and it
+        // takes the pen while it is there. Absent -- and consuming nothing --
+        // whenever there is no float.
+        TransformBox(
+            sourceBounds = floatingBox,
+            token = floatToken,
+            docToView = {
+                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                outlineMatrix
+            },
+            onMatrix = { m -> surface?.float(FloatOp.Move(m)) },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -828,6 +961,36 @@ private fun CanvasScreen(
                             surface?.redrawDry()
                         }
                     },
+                    selecting = selecting,
+                    onSelecting = { on ->
+                        setSelecting(on)
+                        generation++
+                    },
+                    marqueeShape = marqueeShape,
+                    onMarqueeShape = {
+                        marqueeShape = it
+                        surface?.marqueeShape = it
+                        generation++
+                    },
+                    marqueeMode = marqueeMode,
+                    onMarqueeMode = {
+                        marqueeMode = it
+                        surface?.marqueeMode = it
+                        generation++
+                    },
+                    hasSelection = selectionShape.active,
+                    floating = floatingBox != null,
+                    onFloatOp = { op ->
+                        surface?.float(op)
+                        generation++
+                    },
+                    onSelectOp = { op ->
+                        surface?.select(op)
+                        // Not waited for: the op is queued and the render
+                        // thread applies it behind whatever was drawn first.
+                        // The poll above is what notices.
+                        generation++
+                    },
                     smoothing = smoothing,
                     onSmoothing = { smoothing = it },
                     opacity = opacity,
@@ -840,6 +1003,9 @@ private fun CanvasScreen(
                     onEraser = {
                         eraser = !eraser
                         surface?.eraserTool = eraser
+                        // Reaching for the eraser is a statement that the pen
+                        // is drawing. See `onPreset`.
+                        setSelecting(false)
                         generation++
                     },
                     preset = preset,
@@ -852,6 +1018,14 @@ private fun CanvasScreen(
                         surface?.let { v ->
                             p.applyTo(v.pen)
                             preset = p
+                            // Picking a brush turns the marquee off, the mirror
+                            // of picking a shape turning it on. Without it the
+                            // pen button and the Select button are lit at the
+                            // same time and the pen still selects -- two
+                            // mutually exclusive states both showing as
+                            // current, which is worse than either being wrong.
+                            // Found on the tablet, not in a test.
+                            setSelecting(false)
                             sizeMax = v.pen.sizeMax
                             eraserSize = v.pen.eraseSizeMax
                             smoothing = v.pen.stabilization
@@ -922,6 +1096,16 @@ private fun ToolSlot(
     onLayerAdd: () -> Unit,
     onLayerDuplicate: () -> Unit,
     onLayersOpen: (Boolean) -> Unit,
+    selecting: Boolean,
+    onSelecting: (Boolean) -> Unit,
+    marqueeShape: MarqueeShape,
+    onMarqueeShape: (MarqueeShape) -> Unit,
+    marqueeMode: SelectMode,
+    onMarqueeMode: (SelectMode) -> Unit,
+    hasSelection: Boolean,
+    floating: Boolean,
+    onFloatOp: (FloatOp) -> Unit,
+    onSelectOp: (SelectOp) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
     opacity: Float,
@@ -995,32 +1179,36 @@ private fun ToolSlot(
         // Lit rather than disabled. The tool in the hand is a state worth
         // seeing from across the room, and a greyed-out Pen says "broken" at a
         // glance where a lit Pencil says "this one".
+        // `&& !selecting` on all three: while the marquee is in hand the pen
+        // does not draw, and a bar that lights the pencil *and* the Select
+        // button says two things are current when only one is. Found on the
+        // tablet, where the screenshot showed both lit at once.
         ToolItem.PEN -> IconToolButton(
             icon = ToolIcons.pen,
             label = item.label,
             onClick = { onPreset(BrushPreset.PEN) },
-            selected = preset == BrushPreset.PEN,
+            selected = preset == BrushPreset.PEN && !selecting,
         )
 
         ToolItem.PENCIL -> IconToolButton(
             icon = ToolIcons.pencil,
             label = item.label,
             onClick = { onPreset(BrushPreset.PENCIL) },
-            selected = preset == BrushPreset.PENCIL,
+            selected = preset == BrushPreset.PENCIL && !selecting,
         )
 
         ToolItem.MARKER -> IconToolButton(
             icon = ToolIcons.marker,
             label = item.label,
             onClick = { onPreset(BrushPreset.MARKER) },
-            selected = preset == BrushPreset.MARKER,
+            selected = preset == BrushPreset.MARKER && !selecting,
         )
 
         ToolItem.ERASER -> IconToolButton(
             icon = ToolIcons.eraser,
             label = item.label,
             onClick = onEraser,
-            selected = eraser,
+            selected = eraser && !selecting,
         )
 
         ToolItem.ERASER_SIZE -> ToolSlider(
@@ -1033,6 +1221,24 @@ private fun ToolSlot(
         ToolItem.REDO ->
             IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
 
+        ToolItem.MARQUEE -> IconToolButton(
+            ToolIcons.marquee,
+            item.label,
+            { onSelecting(!selecting) },
+            selected = selecting,
+        )
+        ToolItem.SELECTION -> SelectionButton(
+            shape = marqueeShape,
+            mode = marqueeMode,
+            selecting = selecting,
+            hasSelection = hasSelection,
+            floating = floating,
+            onShape = onMarqueeShape,
+            onMode = onMarqueeMode,
+            onOp = onSelectOp,
+            onFloatOp = onFloatOp,
+            onSelecting = onSelecting,
+        )
         ToolItem.LAYERS -> LayersButton(
             layers = layerRows,
             activeId = activeLayer,
@@ -1297,6 +1503,13 @@ private fun readout(
         "${r(surface.pen.grain.scaleDocPx, 0)} doc px a tile   " +
         "${surface.grainBuilds} built\n" +
         "wetpass  ${r(surface.wetMeanMs, 3)} ms mean over ${surface.wetCalls} batches\n" +
+        "dryframe ${r(surface.dryLastMs, 2)} last   ${r(surface.dryMeanMs, 2)} mean   " +
+        "${r(surface.dryMaxMs, 2)} max ms   ${if (surface.dryHardware) "GPU" else "CPU"}   " +
+        "over ${surface.dryCalls} frames\n" +
+        "record   ${r(surface.compositeLastMs, 2)} last   ${r(surface.compositeMeanMs, 2)} mean   " +
+        "${r(surface.compositeMaxMs, 2)} max ms   ${surface.drySheets} sheets recorded\n" +
+        "gpuround ${r(surface.roundTripLastMs, 2)} last   ${r(surface.roundTripMeanMs, 2)} mean   " +
+        "${r(surface.roundTripMaxMs, 2)} max ms   over ${surface.roundTripCalls} round trips\n" +
         "figure   ${strokeTimes.ifEmpty { "not run" }}\n" +
         "scratch  ${if (surface.scratchF16) "RGBA_F16" else "ARGB_8888"}   " +
         "${surface.scratchExtent}   ${surface.scratchAllocations} alloc   " +

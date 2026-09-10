@@ -72,6 +72,14 @@ class LayerUndoTest {
             override fun onLayers(op: LayerOp) {
                 doc.layers.apply(op)
             }
+
+            override fun onSelect(op: SelectOp) {
+                doc.selection.apply(op)
+            }
+
+            override fun onFloat(op: FloatOp) {
+                doc.applyFloat(op)
+            }
         })
     }
 

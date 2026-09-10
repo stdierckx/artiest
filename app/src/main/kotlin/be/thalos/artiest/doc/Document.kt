@@ -1,6 +1,7 @@
 package be.thalos.artiest.doc
 
 import android.graphics.Color
+import android.graphics.Rect
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
 
@@ -83,6 +84,27 @@ class Document(
      * lifecycle.
      */
     val layers: LayerStack = LayerStack(widthPx, heightPx, enforceOffMainThread)
+
+    /**
+     * The stencil: where the pen is allowed to put ink.
+     *
+     * On the document and not on a sheet, and the reason is in [Selection]'s
+     * header: a selection is something you hold over the drawing while you work
+     * through several layers.
+     */
+    val selection: Selection = Selection(widthPx, heightPx)
+
+    /**
+     * Pixels lifted off a sheet and not yet put back, or null.
+     *
+     * **Render thread**, like everything else that touches pixels — but read by
+     * the UI thread as well, which is what the volatile is for: the transform
+     * box has to know whether there is anything to transform, and the export
+     * has to know whether to drop one first.
+     */
+    @Volatile
+    var floating: FloatingPixels? = null
+        private set
 
     /**
      * The sheet the pen is on.
@@ -274,18 +296,61 @@ class Document(
      */
     fun snapshotBeforeStroke(bounds: Bounds) {
         val active = layers.active
-        val patch = PixelPatch.capture(active.id, active.layer, bounds, widthPx, heightPx) ?: return
+        val patch = PixelPatch.capture(
+            active.id, active.layer, confined(bounds), widthPx, heightPx,
+        ) ?: return
         history.record(patch)
         publishHistory()
     }
 
-    /** Snapshot the whole page, before a Clear. **Render thread.** */
+    /**
+     * Snapshot what a Clear is about to remove. **Render thread.**
+     *
+     * The whole page, or the stencil's extent when there is one — because with
+     * a selection on the page a Clear removes only what is inside it.
+     */
     fun snapshotBeforeClear() {
         val active = layers.active
-        val patch = PixelPatch.captureAll(active.id, active.layer, widthPx, heightPx) ?: return
+        val patch = if (selection.active) {
+            PixelPatch.capture(
+                active.id, active.layer, boundsOf(selection.bounds), widthPx, heightPx,
+            )
+        } else {
+            PixelPatch.captureAll(active.id, active.layer, widthPx, heightPx)
+        } ?: return
         history.record(patch)
         publishHistory()
     }
+
+    /**
+     * [bounds], cut down to what the stencil could possibly have let through.
+     *
+     * A stroke that runs across the page with a small selection on it can only
+     * have changed pixels inside that selection, so the rectangle worth
+     * snapshotting is the overlap. Free, and it keeps the 48 MB history budget
+     * from being spent on rows that could not have moved.
+     *
+     * Returns [bounds] unchanged when nothing is selected, and when the two do
+     * not overlap returns something empty — which `PixelPatch.capture` turns
+     * into null, so the stroke records no undo step at all. That is right: a
+     * stroke entirely outside the stencil changed nothing.
+     */
+    private fun confined(bounds: Bounds): Bounds {
+        if (!selection.active || bounds.isEmpty) return bounds
+        val r = selection.bounds
+        val left = maxOf(bounds.left, r.left.toFloat())
+        val top = maxOf(bounds.top, r.top.toFloat())
+        val right = minOf(bounds.right, r.right.toFloat())
+        val bottom = minOf(bounds.bottom, r.bottom.toFloat())
+        // `Bounds.of` refuses an inverted rectangle rather than normalising it,
+        // and no overlap is exactly that. EMPTY is the answer the caller can
+        // use: it captures nothing and records nothing.
+        if (left > right || top > bottom) return Bounds.EMPTY
+        return Bounds.of(left, top, right, bottom)
+    }
+
+    private fun boundsOf(r: android.graphics.Rect): Bounds =
+        Bounds.of(r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat())
 
     /** **Render thread.** Returns false if there was nothing to undo. */
     fun applyUndo(): Boolean {
@@ -355,6 +420,115 @@ class Document(
         commits.layers(op)
     }
 
+    /**
+     * Queue a change to what is selected. UI thread, from a marquee gesture or
+     * the selection panel.
+     *
+     * Queued, and for the third time in this class for the same reason: order
+     * against the strokes is the thing that has to survive. See
+     * [CommitQueue.Commit.Select].
+     */
+    fun requestSelect(op: SelectOp) {
+        commits.select(op)
+    }
+
+    /** Queue a change to the floating pixels. UI thread. See [CommitQueue.Commit.Float]. */
+    fun requestFloat(op: FloatOp) {
+        commits.float(op)
+    }
+
+    /**
+     * Apply one float operation. **Render thread**, from the commit sink.
+     *
+     * Returns true if anything changed, which is what the caller uses to decide
+     * whether a redraw is worth asking for.
+     */
+    fun applyFloat(op: FloatOp): Boolean {
+        val current = floating
+        return when (op) {
+            FloatOp.LiftSelection -> {
+                if (current != null) return false
+                val lifted = FloatingPixels.lift(layers.active, selection) ?: return false
+                floating = lifted
+                true
+            }
+
+            FloatOp.LiftLayer -> {
+                if (current != null) return false
+                val lifted = FloatingPixels.liftWhole(layers.active, widthPx, heightPx)
+                    ?: return false
+                floating = lifted
+                true
+            }
+
+            is FloatOp.Move -> {
+                if (current == null) return false
+                current.matrix = op.matrix
+                true
+            }
+
+            FloatOp.Drop -> {
+                if (current == null) return false
+                // The stencil follows the pixels. Read before the drop closes
+                // the float, because `release` is the last thing `dropFloat`
+                // does and a matrix read after it would be reading a corpse.
+                val moved = current.matrix
+                dropFloat(current)
+                selection.transformBy(moved)
+                floating = null
+                true
+            }
+
+            FloatOp.Cancel -> {
+                // Nothing to undo: the sheet was never written. That is the
+                // whole point of leaving the source in place -- see
+                // [FloatingPixels].
+                if (current == null) return false
+                current.release()
+                floating = null
+                true
+            }
+        }
+    }
+
+    /**
+     * The one write a transform makes, and the one undo step it records.
+     *
+     * The patch covers the union of where the pixels were and where they went,
+     * taken **before** either half of the write. Two patches would be two
+     * presses of undo for one move, which is not what the hand did.
+     */
+    private fun dropFloat(float: FloatingPixels) {
+        val entry = layers.byId(float.sourceLayerId)
+        if (entry == null) {
+            // The sheet was deleted while the pixels were in the air. There is
+            // nowhere to put them and nothing to undo.
+            float.release()
+            return
+        }
+        val union = Rect(float.sourceBounds)
+        val moved = Rect()
+        float.transformedBounds(moved)
+        union.union(moved)
+        val patch = PixelPatch.capture(
+            float.sourceLayerId,
+            entry.layer,
+            Bounds.of(
+                union.left.toFloat(), union.top.toFloat(),
+                union.right.toFloat(), union.bottom.toFloat(),
+            ),
+            widthPx,
+            heightPx,
+        )
+        float.dropInto(entry.layer)
+        float.release()
+        if (patch != null) {
+            history.record(patch)
+            publishHistory()
+        }
+        layers.touchActive()
+    }
+
     /** A fresh empty sheet, allocated by the UI thread. See [LayerStack]. */
     fun newLayer(): Layer = layers.newLayer()
 
@@ -396,6 +570,9 @@ class Document(
         history.clear()
         publishHistory()
         layers.close()
+        selection.close()
+        floating?.release()
+        floating = null
     }
 
     companion object {

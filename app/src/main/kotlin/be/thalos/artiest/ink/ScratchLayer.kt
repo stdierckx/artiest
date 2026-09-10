@@ -296,6 +296,103 @@ class ScratchLayer(
     }
 
     /**
+     * Rub away everything [mask] does not cover, in place.
+     *
+     * **This is how "only draw inside the selection" is implemented, and it is
+     * a mask on the pixels rather than a clip on a canvas for a measured
+     * reason.** The two canvases this buffer reaches disagree about clipping:
+     * `Layer`'s is a software canvas over a `Bitmap`, where Skia antialiases a
+     * path clip — `CompositeBench` pins that as an assertion — and the frame's
+     * comes from `CanvasFrontBufferedRenderer`, which holds a `RenderNode`, so
+     * clip edges there are hard. Clipping both would give a wet stroke with a
+     * stair-stepped selection edge that snapped smooth at pen-up: the ink would
+     * visibly change shape as the pen lifted.
+     *
+     * Masking the buffer instead means the wet pass and the committed stroke
+     * read the *same pixels*, so they cannot disagree by construction. Erasing
+     * inherits it for free — a masked buffer subtracted with `DST_OUT` can only
+     * subtract where the mask let it through — and so do grain and burnish,
+     * which are shaders over this same bitmap.
+     *
+     * **Through a shader, and not as `drawBitmap(mask, …)` with `DST_IN`.** The
+     * obvious version does not work and fails in the direction that looks like
+     * success: Skia draws an `ALPHA_8` bitmap as a *mask*, colouring the paint
+     * through it, and a mask blit only visits pixels the mask actually covers.
+     * So `DST_IN` clears nothing outside the selection — the ink stays exactly
+     * where it should not be — while every pixel inside is correct, which reads
+     * as "the selection is not doing anything" rather than as a blend bug.
+     * `SelectionInkTest` carries that version longhand and watches it fail.
+     *
+     * A `BitmapShader` makes it an ordinary blit of a real source. `DECAL`
+     * would have been the tidy tile mode — sampling beyond the mask returns
+     * nothing, so a stroke running off the page would clear itself with no
+     * arithmetic at all — but it is API 31 and this app's floor is 29, so the
+     * shader is `CLAMP` and the masked draw is confined to the part of the
+     * buffer that is on the page. What hangs off it is cleared outright,
+     * because the page is the largest thing a selection can be and off the page
+     * is therefore outside it. Under `CLAMP` no sample ever reaches the edge to
+     * be clamped, which is the point of doing the arithmetic rather than
+     * trusting the tile mode.
+     *
+     * Idempotent, because `DST_IN` against a fixed mask is: applying it after
+     * every batch during the wet pass is correct as well as simple, and nothing
+     * has to track which dabs are new.
+     *
+     * [mask] is in **document** coordinates. The buffer moves and grows as a
+     * stroke wanders, so the local matrix is set from the live origin every
+     * call rather than cached; the shader itself is kept, like [selfShader],
+     * because this runs once a batch on the render thread.
+     */
+    fun maskBy(mask: Bitmap) {
+        val c = canvas ?: return
+        if (!isOpen || bitmap == null) return
+        if (usedWidth <= 0 || usedHeight <= 0) return
+        // Buffer coordinates: this is a blit, not a draw in document space.
+        c.setMatrix(null)
+        val left = (-originX).coerceIn(0, usedWidth)
+        val top = (-originY).coerceIn(0, usedHeight)
+        val right = (mask.width - originX).coerceIn(0, usedWidth)
+        val bottom = (mask.height - originY).coerceIn(0, usedHeight)
+        if (right <= left || bottom <= top) {
+            // The whole buffer is off the page, so none of it is selected.
+            c.drawRect(0f, 0f, usedWidth.toFloat(), usedHeight.toFloat(), clearPaint)
+            return
+        }
+        if (maskShader == null || maskShaderFor !== mask) {
+            maskShader = BitmapShader(mask, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            maskShaderFor = mask
+        }
+        // The shader maps bitmap space to buffer space, so a buffer pixel at
+        // (x, y) samples the mask at (x + originX, y + originY).
+        maskMatrix.setTranslate(-originX.toFloat(), -originY.toFloat())
+        maskShader!!.setLocalMatrix(maskMatrix)
+        maskPaint.shader = maskShader
+        c.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), maskPaint)
+        maskPaint.shader = null
+        if (left > 0 || top > 0 || right < usedWidth || bottom < usedHeight) {
+            val save = c.save()
+            c.clipOutRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+            c.drawRect(0f, 0f, usedWidth.toFloat(), usedHeight.toFloat(), clearPaint)
+            c.restoreToCount(save)
+        }
+    }
+
+    /**
+     * `DST_IN`: keep the destination where the source is opaque, scaled by its
+     * coverage. An `ALPHA_8` mask carries nothing but coverage, so this is
+     * exactly "keep the ink the stencil lets through", soft edge included.
+     */
+    private val maskPaint = Paint().apply {
+        xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+        isFilterBitmap = false
+        isAntiAlias = false
+    }
+
+    private var maskShader: BitmapShader? = null
+    private var maskShaderFor: Bitmap? = null
+    private val maskMatrix = Matrix()
+
+    /**
      * Composite the accumulated stroke onto [dst] at [alpha], and close it.
      *
      * [dst] must be in document space — the layer's own canvas is, because one

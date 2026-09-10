@@ -14,6 +14,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.LayerOp
+import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.engine.ink.Bounds
@@ -187,19 +188,92 @@ class PngExporterTest {
         assertIs<ExportResult.Written>(exportOf(document))
         val exported = decode(bytes)
 
-        // The plan's recipe, longhand: paper down first, ink over it. The
-        // exporter cannot do this — the paper would have to go into the
-        // transient bitmap before the layer is copied, which means holding the
-        // lock across a full-canvas drawColor — so it composites the paper
-        // *under* the ink after releasing the lock instead. The claim that the
-        // two are the same image is the whole justification for that, and it is
-        // exactly the kind of claim that is easier to assert than to trust.
+        // Paper down first, ink over it, written out by hand. Until Phase 3
+        // the exporter did the opposite — it slid the paper underneath at the
+        // end with `DST_OVER`, to keep a full-canvas `drawColor` out of the
+        // critical section — and this test existed to pin the claim that the
+        // two are the same image. That trick is gone, because it stops being
+        // true the moment a sheet blends, so what this now checks is that the
+        // straightforward reading of the file is the right one. It is cheap
+        // and it is the assertion that fails first if the order ever moves
+        // again.
         val longhand = Bitmap.createBitmap(document.widthPx, document.heightPx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(longhand)
         canvas.drawColor(document.paperColor)
         document.layer.read { canvas.drawBitmap(it, 0f, 0f, null) }
 
         assertContentEquals(pixels(longhand), pixels(exported))
+    }
+
+    /**
+     * The file is the screen, pixel for pixel.
+     *
+     * The reason [StackCompositor] exists, stated as the test that would have
+     * caught the defect it was extracted to prevent. The screen and the export
+     * had a sheet loop each, and the two already differed about where the paper
+     * goes — invisibly, because for source-over sheets the difference computes
+     * to the same image. This composes the same document through the object the
+     * renderer uses and asserts the exported bytes agree.
+     *
+     * Deliberately not a test of *how* either one is written: it would pass
+     * against two copies of the loop that happened to agree, and fail the day
+     * they stopped. That is exactly the guarantee wanted, and it is why this is
+     * a pixel comparison rather than a check that both call the same method.
+     *
+     * Three sheets, two of them translucent, one hidden, so that an opacity or
+     * a visibility handled differently on the two paths shows up here rather
+     * than in somebody's file.
+     */
+    @Test
+    fun `the export is the same image the compositor draws`() {
+        val document = document()
+        val paint = Paint().apply { isAntiAlias = true }
+        paint.color = Color.RED
+        document.layer.write { it.drawCircle(12f, 12f, 8f, paint) }
+
+        val second = document.newLayer()
+        paint.color = Color.BLUE
+        second.write { it.drawCircle(20f, 12f, 8f, paint) }
+        document.layers.apply(LayerOp.Add(second, "blue"))
+        document.layers.apply(LayerOp.SetOpacity(document.layers.active.id, 0.4f))
+
+        val third = document.newLayer()
+        paint.color = Color.GREEN
+        third.write { it.drawCircle(28f, 12f, 8f, paint) }
+        document.layers.apply(LayerOp.Add(third, "green"))
+        document.layers.apply(LayerOp.SetVisible(document.layers.active.id, false))
+
+        // A fourth, blended, because a blend mode is exactly what the two loops
+        // used to disagree about: the screen painted paper first and the export
+        // slid it underneath at the end, and multiplying against transparency
+        // is not multiplying against paper.
+        val fourth = document.newLayer()
+        paint.color = Color.rgb(120, 120, 120)
+        fourth.write { it.drawRect(4f, 4f, 36f, 20f, paint) }
+        document.layers.apply(LayerOp.Add(fourth, "shade"))
+        document.layers.apply(
+            LayerOp.SetBlend(document.layers.active.id, be.thalos.artiest.doc.LayerBlend.MULTIPLY),
+        )
+
+        val onScreen = Bitmap.createBitmap(
+            document.widthPx, document.heightPx, Bitmap.Config.ARGB_8888,
+        )
+        StackCompositor().compose(
+            Canvas(onScreen),
+            document.layers,
+            document.paperColor,
+            document.widthPx,
+            document.heightPx,
+            wet = null,
+            left = 0f,
+            top = 0f,
+            right = document.widthPx.toFloat(),
+            bottom = document.heightPx.toFloat(),
+        )
+
+        val bytes = captureNextInsert()
+        assertIs<ExportResult.Written>(exportOf(document))
+        assertContentEquals(pixels(onScreen), pixels(decode(bytes)))
     }
 
     // --- the stack ----------------------------------------------------------
@@ -491,6 +565,14 @@ class PngExporterTest {
 
             override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
                 document.layers.apply(op)
+            }
+
+            override fun onSelect(op: be.thalos.artiest.doc.SelectOp) {
+                document.selection.apply(op)
+            }
+
+            override fun onFloat(op: be.thalos.artiest.doc.FloatOp) {
+                document.applyFloat(op)
             }
 
             override fun onUndo() {

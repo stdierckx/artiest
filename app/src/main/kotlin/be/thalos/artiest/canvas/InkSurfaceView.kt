@@ -15,6 +15,10 @@ import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.FloatOp
+import be.thalos.artiest.doc.SelectMode
+import be.thalos.artiest.doc.SelectOp
+import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
@@ -360,6 +364,7 @@ class InkSurfaceView(
                 document.layers.touchActive()
                 return
             }
+            val stencil = document.selection.maskBitmap()
             // W6's indirect path. The dabs land on the scratch, which starts
             // empty, so the stroke's own overlaps composite against nothing;
             // the single composite at the end is what carries the opacity.
@@ -370,6 +375,11 @@ class InkSurfaceView(
             if (scratch.isOpen && scratchEpoch == strokeEpoch &&
                 scratch.ensureCovers(stroke.bounds)
             ) {
+                // Already masked by the wet pass, and `DST_IN` is idempotent,
+                // so this is belt to that braces -- and it is what covers the
+                // case where `ensureCovers` has just grown the buffer into
+                // ground the wet pass never masked.
+                if (stencil != null) scratch.maskBy(stencil)
                 document.layer.write {
                     scratch.compositeInto(
                         it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
@@ -384,8 +394,19 @@ class InkSurfaceView(
                 // The buffer could not be opened. Falling back to the direct
                 // path draws a beaded stroke, which is wrong but visible;
                 // dropping the stroke silently is wrong and invisible.
+                //
+                // The stencil still has to hold, and here a clip is the only
+                // tool left. `Layer`'s canvas is a software one, where Skia
+                // antialiases a path clip, so this costs nothing visible
+                // against the masked path -- which is exactly why it is safe
+                // here and wrong on the frame's `RenderNode` canvas.
                 armRasterizer()
-                document.layer.write { rasterizer.drawDry(it, stroke) }
+                document.layer.write {
+                    val save = it.save()
+                    document.selection.clipInto(it)
+                    rasterizer.drawDry(it, stroke)
+                    it.restoreToCount(save)
+                }
                 document.layers.touchActive()
                 return
             }
@@ -398,6 +419,7 @@ class InkSurfaceView(
             // squared and the darkest press it could reach was 0.72 of what
             // the preset asked for.
             rasterizer.drawDry(sc, stroke)
+            if (stencil != null) scratch.maskBy(stencil)
             document.layer.write {
                 scratch.compositeInto(
                     it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
@@ -406,9 +428,17 @@ class InkSurfaceView(
             document.layers.touchActive()
         }
 
+        /**
+         * Clear, which means *clear the stencil* when there is one.
+         *
+         * What every editor does, and what the request implies: a selection is
+         * for confining what you do to the page, and the most destructive thing
+         * on the bar is the last one that should ignore it.
+         */
         override fun onClear() {
             document.snapshotBeforeClear()
-            document.layer.blank()
+            val stencil = document.selection.maskBitmap()
+            if (stencil != null) document.layer.blank(stencil) else document.layer.blank()
             document.layers.touchActive()
         }
 
@@ -435,6 +465,30 @@ class InkSurfaceView(
          */
         override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
             if (document.layers.apply(op)) document.layers.touchAll()
+        }
+
+        /**
+         * A change to the stencil, in its place in the queue. See
+         * `CommitQueue.Commit.Select`.
+         *
+         * Nothing is marked stale: a selection does not change a pixel of any
+         * sheet, so the thumbnails are still pictures of the drawing. What it
+         * changes is where the *next* stroke may land, and the marching ants,
+         * which are the chrome's and read the published snapshot.
+         */
+        override fun onSelect(op: SelectOp) {
+            document.selection.apply(op)
+        }
+
+        /**
+         * A lift, a move, a drop or a cancel, in its place in the queue. See
+         * `CommitQueue.Commit.Float`.
+         *
+         * The thumbnail is marked stale by `Document.applyFloat` itself, at the
+         * one place a float actually writes pixels.
+         */
+        override fun onFloat(op: FloatOp) {
+            document.applyFloat(op)
         }
     }
 
@@ -540,10 +594,18 @@ class InkSurfaceView(
      *
      * Hardness counts because a soft edge *is* a translucent rim, which is the
      * beading case wearing a different hat.
+     *
+     * **A live selection forces it, whatever the nib is.** The stencil is
+     * applied by masking the scratch buffer — see `ScratchLayer.maskBy` for why
+     * it is a mask on the pixels and not a clip on a canvas — so an opaque nib
+     * taking the direct path would be the one stroke in the app that could
+     * paint outside the selection. The cost is the scratch path, which is
+     * already shipped and already measured; the alternative is a second way of
+     * confining ink, which is a second way of getting it wrong.
      */
     private fun indirectNeeded(): Boolean =
         pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f ||
-            pen.grain.isActive || pen.erase
+            pen.grain.isActive || pen.erase || document.selection.active
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -617,6 +679,153 @@ class InkSurfaceView(
     val wetMeanMs: Float
         get() = if (wetCalls == 0L) 0f else wetNanos / 1e6f / wetCalls
 
+    /**
+     * How long a dry frame is taking, and on what kind of canvas.
+     *
+     * Phase 3's S0. The phase's plan rests on a bench that ran on this
+     * machine's CPU, and half of what it measured — the sheet-by-sheet
+     * composite — does not happen there in the app: the renderer holds an
+     * `android.graphics.RenderNode` (read out of the 1.0.4 aar with `javap`),
+     * so [dryHardware] should read true and those blits should be the GPU's.
+     * *Should*. Nothing in the repo has ever checked it, the plan says so
+     * plainly, and the whole question of whether the layer stack needs a cached
+     * compositor turns on the answer.
+     *
+     * Everything inside `onDrawMultiBufferedLayer` is counted: the desk, the
+     * paper, the commit drain and every visible sheet. That is the frame, which
+     * is the thing with a budget — 11.1 ms at 90 Hz — rather than any one part
+     * of it.
+     *
+     * **The statistics reset when the sheet count changes**, which is what makes
+     * them usable by hand. The question S0 asks is "what does a dry frame cost
+     * at one sheet, and at eight", and a mean pooled across a session that
+     * added seven sheets answers neither. Adding a sheet starts the count again.
+     */
+    var dryNanos: Long = 0L
+        private set
+    var dryCalls: Long = 0L
+        private set
+    var dryLastNanos: Long = 0L
+        private set
+    var dryMaxNanos: Long = 0L
+        private set
+
+    /** Sheets composited in the last dry frame — visible ones, not the stack's size. */
+    var drySheets: Int = 0
+        private set
+
+    /** What the statistics above are counting. See [dryNanos]. */
+    private var dryStatsFor: Int = -1
+
+    /**
+     * Whether the multi-buffered canvas is hardware accelerated.
+     *
+     * Read from the canvas itself on the first dry frame rather than assumed
+     * from the library's field names. `@Volatile` because the render thread
+     * writes it and the readout reads it.
+     */
+    @Volatile
+    var dryHardware: Boolean = false
+        private set
+
+    /**
+     * The sheet-by-sheet composite alone, out of the dry frame.
+     *
+     * Two clocks and not one, because the frame contains two very different
+     * things and S0 only asks about one of them. A frame that also drained a
+     * commit has stamped a stroke into a `Layer` — CPU work, under the layer
+     * lock, proportional to the stroke — and a frame that also built a
+     * thumbnail has rescaled a 7.1 Mpx page five times. Both are real costs and
+     * both belong in [dryNanos]; neither says anything about what a stack of
+     * eight sheets costs to blit, which is the question the cached compositor
+     * is gated on.
+     */
+    var compositeNanos: Long = 0L
+        private set
+    var compositeCalls: Long = 0L
+        private set
+    var compositeLastNanos: Long = 0L
+        private set
+    var compositeMaxNanos: Long = 0L
+        private set
+
+    /** Mean milliseconds in the dry composite, or 0 before one has run. */
+    val compositeMeanMs: Float
+        get() = if (compositeCalls == 0L) 0f else compositeNanos / 1e6f / compositeCalls
+
+    /** The last dry composite, in milliseconds. */
+    val compositeLastMs: Float get() = compositeLastNanos / 1e6f
+
+    /** The worst dry composite since the sheet count last changed. */
+    val compositeMaxMs: Float get() = compositeMaxNanos / 1e6f
+
+    /**
+     * [redrawDry] to `onMultiBufferedLayerRenderComplete`: the whole round
+     * trip, and the only clock here that can see the GPU.
+     *
+     * **The other two clocks do not measure drawing, and finding that out is
+     * half of what S0 was for.** The `Canvas` handed to
+     * `onDrawMultiBufferedLayer` belongs to an `android.graphics.RenderNode`,
+     * so `drawBitmap` on it *records a draw op* and returns; the rasterizing
+     * happens afterwards, on the GPU, inside the library's own render pass.
+     * [compositeNanos] therefore measures how long it takes to write down
+     * "blit these eight bitmaps", which is close to free however many there
+     * are, and quoting it as the cost of a stack would be a confident wrong
+     * answer of exactly the kind Phase 1's W2 produced.
+     *
+     * This one spans the request, the recording, the GPU pass and the buffer
+     * handoff. It is coarser than a GPU trace and it is the honest instrument
+     * available from inside the app.
+     *
+     * Not reset with the sheet count, because a round trip can span a change:
+     * the request goes out, a layer op lands in the drain, and the completion
+     * arrives against a different stack. [roundTripCalls] counts them all and
+     * the reader is expected to let it settle.
+     */
+    var roundTripNanos: Long = 0L
+        private set
+    var roundTripCalls: Long = 0L
+        private set
+    var roundTripLastNanos: Long = 0L
+        private set
+    var roundTripMaxNanos: Long = 0L
+        private set
+
+    @Volatile
+    private var roundTripStartNanos: Long = 0L
+
+    /** Mean milliseconds from asking for a dry frame to being told it landed. */
+    val roundTripMeanMs: Float
+        get() = if (roundTripCalls == 0L) 0f else roundTripNanos / 1e6f / roundTripCalls
+
+    /** The last dry round trip, in milliseconds. */
+    val roundTripLastMs: Float get() = roundTripLastNanos / 1e6f
+
+    /** The worst dry round trip since the view was created. */
+    val roundTripMaxMs: Float get() = roundTripMaxNanos / 1e6f
+
+    /** See [roundTripNanos]. Render thread, from the completion callback. */
+    private fun recordRoundTrip() {
+        val start = roundTripStartNanos
+        if (start == 0L) return
+        roundTripStartNanos = 0L
+        val elapsed = System.nanoTime() - start
+        roundTripNanos += elapsed
+        roundTripCalls++
+        roundTripLastNanos = elapsed
+        if (elapsed > roundTripMaxNanos) roundTripMaxNanos = elapsed
+    }
+
+    /** Mean milliseconds in a dry frame, or 0 before one has run. */
+    val dryMeanMs: Float
+        get() = if (dryCalls == 0L) 0f else dryNanos / 1e6f / dryCalls
+
+    /** The last dry frame, in milliseconds. */
+    val dryLastMs: Float get() = dryLastNanos / 1e6f
+
+    /** The worst dry frame since the sheet count last changed. */
+    val dryMaxMs: Float get() = dryMaxNanos / 1e6f
+
     private fun drawWetIndirectTimed(canvas: Canvas, docToView: Matrix, batch: DabBatch) {
         rasterizer.boundsOf(batch, wetRect)
         val bounds = Bounds.of(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
@@ -632,13 +841,16 @@ class InkSurfaceView(
         // their own flow. Anything else here and the wet stroke would not
         // match the committed one, which is the one thing this path may not do.
         rasterizer.drawInto(sc, batch, 1f)
+        // Every batch, because `ensureCovers` may have grown the buffer into
+        // ground that has never been masked, and because `DST_IN` against a
+        // fixed mask is idempotent so re-masking what was already masked costs
+        // a blit and changes nothing.
+        document.selection.maskBitmap()?.let { scratch.maskBy(it) }
 
         val save = canvas.save()
         canvas.concat(docToView)
         canvas.clipRect(wetRect[0], wetRect[1], wetRect[2], wetRect[3])
         canvas.clipRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
-        paperPaint.color = document.paperColor
-        canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
         // The whole stack and not just the active sheet, clipped to the dirty
         // rectangle two lines above. Painting only the active layer here would
         // make every sheet above the pen disappear inside the wet stroke's
@@ -649,66 +861,121 @@ class InkSurfaceView(
     }
 
     /**
-     * Every sheet, bottom to top, with the wet stroke in its place on the
-     * active one. Document space; the caller has already concatenated the
+     * Paper and every sheet, bottom to top, with the wet stroke in its place on
+     * the active one. Document space; the caller has already concatenated the
      * matrix and clipped.
      *
-     * [l], [t], [r] and [b] bound the offscreen layer this needs when the
-     * active sheet is translucent or is being erased. They are the dirty
-     * rectangle on the front-buffered path and the whole page on the dry one:
-     * a `saveLayer` costs its own area, so handing it the page when a dab is
-     * being erased would allocate 7.1 Mpx per batch.
+     * The loop itself is [StackCompositor]'s, and it is there rather than here
+     * because `PngExporter` had a second copy of it that already disagreed
+     * about where the paper goes. What is left in this file is the part that is
+     * genuinely the renderer's: what the wet stroke *is*.
      *
      * **The wet stroke belongs *inside* the stack, not on top of it.** Ink
      * going onto the third of five sheets must be hidden by the two above it
-     * while it is still wet, or the stroke jumps behind them at pen-up. That is
-     * also why erasing takes an offscreen layer: `DST_OUT` applied straight to
-     * the canvas would cut through the paper and every sheet already painted,
-     * and the stroke would read as a window onto the desk.
+     * while it is still wet, or the stroke jumps behind them at pen-up.
      */
     private fun compositeStack(canvas: Canvas, l: Float, t: Float, r: Float, b: Float) {
-        val stack = document.layers
-        val activeAt = stack.activePosition
-        val wet = scratch.isOpen
-        for (i in 0 until stack.size) {
-            val entry = stack.entryAt(i)
-            if (!entry.visible) continue
-            val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
-            // A sheet at zero opacity is not merely invisible, it is a full-page
-            // blit that cannot change a pixel.
-            if (alpha <= 0) continue
-            if (i != activeAt || !wet) {
-                layerPaint.alpha = alpha
-                entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
-                continue
-            }
-            // An offscreen layer only when it buys something: it is what scopes
-            // the erase, and it is what makes a translucent sheet fade the
-            // stroke *with* the ink under it rather than over it. An opaque
-            // sheet taking ink stays on the cheap path it was on before there
-            // was a stack at all.
-            val grouped = pen.erase || alpha < 255
-            val save = if (grouped) canvas.saveLayerAlpha(l, t, r, b, alpha) else -1
-            layerPaint.alpha = if (grouped) 255 else alpha
-            entry.layer.read { canvas.drawBitmap(it, 0f, 0f, layerPaint) }
+        compositor.compose(
+            canvas,
+            document.layers,
+            document.paperColor,
+            document.widthPx,
+            document.heightPx,
+            wetInk,
+            l, t, r, b,
+            document.floating,
+        )
+        drySheets = compositor.sheetsPainted
+    }
+
+    /**
+     * One per view. See [StackCompositor]'s threading note: its `Paint` is not
+     * shareable, and the export builds its own.
+     */
+    private val compositor = StackCompositor()
+
+    /**
+     * The open stroke, as the compositor sees it.
+     *
+     * An object rather than a lambda because it is read on the render thread
+     * every frame and a capturing lambda per frame is an allocation on the one
+     * path with a measured budget — the same reason `CommitQueue.Sink` is an
+     * interface.
+     */
+    private val wetInk = object : StackCompositor.Wet {
+        override val position: Int get() = document.layers.activePosition
+        override val isOpen: Boolean get() = scratch.isOpen
+        override val erases: Boolean get() = pen.erase
+        override fun draw(canvas: Canvas) {
             if (pen.erase) {
                 scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), erase = true)
             } else {
                 scratch.drawOnto(canvas, compositeAlpha(), compositeGrain(), burnish = pen.burnish)
             }
-            if (grouped) canvas.restoreToCount(save)
         }
     }
 
     /**
-     * The stack's blit paint. Separate from [blitPaint] because its alpha is
-     * rewritten per sheet, and a shared `Paint` whose alpha is left at whatever
-     * the last layer wanted is the classic way to make one drawing fade another.
+     * Whether the pen draws or selects.
+     *
+     * A mode on the view rather than a second `InkInputSink`, and that is a
+     * deliberately small change. Every rule about *who* may draw —
+     * `StrokeExclusivity`'s palm rejection, its two-finger gesture, the
+     * cancel-on-focus-loss — is about pointers and applies to a marquee word
+     * for word. A second sink would have had to inherit all of it or lose it,
+     * and the tap recogniser and the gesture controller both keep state that
+     * would then need a home. So the stroke callbacks fork inside
+     * [StrokeDriver] and everything else is untouched.
+     *
+     * The fork is decided at pen-down and held for the gesture's life, the same
+     * shape [eraseDecided] has: a mode switch with the pen already on the glass
+     * must not turn half a lasso into half a pencil line.
      */
-    private val layerPaint = Paint().apply {
-        isFilterBitmap = true
-        isAntiAlias = false
-    }
+    @Volatile
+    var selecting: Boolean = false
+
+    /** What a marquee gesture draws. UI thread. */
+    var marqueeShape: MarqueeShape = MarqueeShape.RECTANGLE
+
+    /**
+     * What a finished marquee does to what is already selected. UI thread.
+     *
+     * The barrel button overrides it to [SelectMode.SUBTRACT] for one gesture,
+     * which is the same momentary shape the eraser already has on the brush:
+     * hold the button, take some away, let go, and the panel still says what it
+     * said. Chosen because there is no keyboard on this tablet and the hand is
+     * already on the barrel.
+     */
+    var marqueeMode: be.thalos.artiest.doc.SelectMode = be.thalos.artiest.doc.SelectMode.NEW
+
+    /**
+     * The marquee under the pen, or null when there is none.
+     *
+     * Read by the chrome inside a draw lambda. Both live on the UI thread, so
+     * there is no publication here and no copy: see [Marquee].
+     */
+    var liveMarquee: Marquee? = null
+        private set
+
+    /**
+     * Bumped whenever [liveMarquee] changes shape, so the overlay can redraw.
+     *
+     * A callback rather than Compose state on this class, for the reason
+     * [onHover] gives: the view is the render path and knows nothing about
+     * Compose, and a `MutableState` field here would put a recomposition scope
+     * on a class whose whole design is that the UI thread does not touch it
+     * while a stroke is live.
+     */
+    var onMarqueeChanged: (() -> Unit)? = null
+
+    /**
+     * Called after the canvas transform moves, so chrome drawn in document
+     * coordinates can follow it.
+     *
+     * The marching ants are stroked in view space from a document-space path,
+     * so a pan or a zoom moves them and nothing else tells Compose that.
+     */
+    var onTransformChanged: (() -> Unit)? = null
 
     /**
      * Whether the toolbar's eraser is selected. Written from the UI thread.
@@ -814,9 +1081,6 @@ class InkSurfaceView(
      */
     var deskColorArgb: Int = DEFAULT_DESK_COLOR
 
-    /** The page rectangle's fill. One `Paint` for the view's life; see [blitPaint]. */
-    private val paperPaint = Paint()
-
     private val blitPaint = Paint().apply {
         isFilterBitmap = true
         isAntiAlias = false
@@ -883,6 +1147,7 @@ class InkSurfaceView(
             transaction: SurfaceControlCompat.Transaction,
         ) {
             dryRenderInFlight = false
+            recordRoundTrip()
         }
 
         override fun onDrawMultiBufferedLayer(
@@ -891,55 +1156,108 @@ class InkSurfaceView(
             bufferHeight: Int,
             params: Collection<DabBatch>,
         ) {
-            document.drainCommits(commitSink)
-            batches.markDrawn(commitWatermark)
-
-            // The desk, then the paper on it. Through W14 this line was
-            // `drawColor(document.paperColor)` over the whole surface, which
-            // draws a white page on a white background: the paper is exactly
-            // where it always was and there is no way to see where it ends,
-            // so a stroke that runs off the sheet simply stops for no visible
-            // reason and pan, zoom and fit all move something invisible. The
-            // paper is still not painted *into* the layer — that invariant is
-            // untouched — it is painted into the frame, in the document's own
-            // coordinates, which is where the plan always said it belonged.
-            canvas.drawColor(deskColorArgb)
-
-            val t = transform
-            if (t !== dryMatrixSource) {
-                dryMatrix.setDocToView(t)
-                dryMatrixSource = t
+            val dryStart = System.nanoTime()
+            try {
+                drawDryFrame(canvas)
+            } finally {
+                recordDryFrame(System.nanoTime() - dryStart)
             }
-            val save = canvas.save()
-            canvas.concat(dryMatrix)
-            paperPaint.color = document.paperColor
-            canvas.drawRect(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(), paperPaint)
-            // A stroke still in flight lives on the scratch, not in the layer,
-            // so a redraw that ignored it would blank the wet ink for a frame
-            // every time the transform changed. Pinching mid-stroke is not a
-            // gesture anyone makes on purpose, but the same redraw is what
-            // `redrawDry` schedules after a zoom button.
-            //
-            // Erasing has to happen inside an offscreen layer, or DST_OUT cuts
-            // through the paper as well and the wet stroke reads as a window
-            // onto the desk. That is also why the layer blit is inside the
-            // branch: it has to be the thing being subtracted from.
-            compositeStack(
-                canvas, 0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(),
-            )
-            canvas.restoreToCount(save)
-            // One stale thumbnail per frame, and only while the panel is open.
-            // Here rather than in the sink because it has to happen after the
-            // commits have landed -- a thumbnail built before the stroke was
-            // stamped is a picture of the drawing as it was a moment ago, which
-            // is exactly the complaint a thumbnail is supposed to answer.
-            // One more frame if there is another stale thumbnail behind it.
-            // `post` and not a direct call: `redrawDry` asks the library for a
-            // render, and asking for one from inside the render callback is a
-            // re-entrant call into the renderer. This is a UI-thread hop that
-            // happens at most eight times, only while the panel is open.
-            if (document.layers.refreshThumbnails()) post { redrawDry() }
         }
+    }
+
+    /**
+     * One dry frame: the desk, the paper, every visible sheet, and whatever the
+     * commit queue had waiting.
+     *
+     * Split out of the callback so [recordDryFrame] can time all of it without
+     * a `return` inside the body escaping the clock. See [dryNanos].
+     */
+    private fun drawDryFrame(canvas: Canvas) {
+        // Asked of the canvas rather than inferred from the library's field
+        // names. See [dryHardware].
+        dryHardware = canvas.isHardwareAccelerated
+        document.drainCommits(commitSink)
+        batches.markDrawn(commitWatermark)
+
+        // The desk, then the paper on it. Through W14 this line was
+        // `drawColor(document.paperColor)` over the whole surface, which
+        // draws a white page on a white background: the paper is exactly
+        // where it always was and there is no way to see where it ends,
+        // so a stroke that runs off the sheet simply stops for no visible
+        // reason and pan, zoom and fit all move something invisible. The
+        // paper is still not painted *into* the layer — that invariant is
+        // untouched — it is painted into the frame, in the document's own
+        // coordinates, which is where the plan always said it belonged.
+        canvas.drawColor(deskColorArgb)
+
+        val t = transform
+        if (t !== dryMatrixSource) {
+            dryMatrix.setDocToView(t)
+            dryMatrixSource = t
+        }
+        val save = canvas.save()
+        canvas.concat(dryMatrix)
+        // The paper is the compositor's now: it is the bottom of the stack, not
+        // a backdrop, and the export has to agree with this frame about that.
+        //
+        // A stroke still in flight lives on the scratch, not in the layer,
+        // so a redraw that ignored it would blank the wet ink for a frame
+        // every time the transform changed. Pinching mid-stroke is not a
+        // gesture anyone makes on purpose, but the same redraw is what
+        // `redrawDry` schedules after a zoom button.
+        //
+        // Erasing has to happen inside an offscreen layer, or DST_OUT cuts
+        // through the paper as well and the wet stroke reads as a window
+        // onto the desk. That is also why the layer blit is inside the
+        // branch: it has to be the thing being subtracted from.
+        val compositeStart = System.nanoTime()
+        compositeStack(
+            canvas, 0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(),
+        )
+        recordComposite(System.nanoTime() - compositeStart)
+        canvas.restoreToCount(save)
+        // One stale thumbnail per frame, and only while the panel is open.
+        // Here rather than in the sink because it has to happen after the
+        // commits have landed -- a thumbnail built before the stroke was
+        // stamped is a picture of the drawing as it was a moment ago, which
+        // is exactly the complaint a thumbnail is supposed to answer.
+        // One more frame if there is another stale thumbnail behind it.
+        // `post` and not a direct call: `redrawDry` asks the library for a
+        // render, and asking for one from inside the render callback is a
+        // re-entrant call into the renderer. This is a UI-thread hop that
+        // happens at most eight times, only while the panel is open.
+        if (document.layers.refreshThumbnails()) post { redrawDry() }
+    }
+
+    /**
+     * Fold one frame into the statistics, resetting them if the stack changed
+     * shape underneath. **Render thread.** See [dryNanos].
+     */
+    private fun recordDryFrame(elapsedNanos: Long) {
+        val sheets = document.layers.size
+        if (sheets != dryStatsFor) {
+            dryStatsFor = sheets
+            dryNanos = 0L
+            dryCalls = 0L
+            dryMaxNanos = 0L
+        }
+        dryNanos += elapsedNanos
+        dryCalls++
+        dryLastNanos = elapsedNanos
+        if (elapsedNanos > dryMaxNanos) dryMaxNanos = elapsedNanos
+    }
+
+    /** See [compositeNanos]. Reset alongside [recordDryFrame]'s statistics. */
+    private fun recordComposite(elapsedNanos: Long) {
+        if (document.layers.size != dryStatsFor) {
+            compositeNanos = 0L
+            compositeCalls = 0L
+            compositeMaxNanos = 0L
+        }
+        compositeNanos += elapsedNanos
+        compositeCalls++
+        compositeLastNanos = elapsedNanos
+        if (elapsedNanos > compositeMaxNanos) compositeMaxNanos = elapsedNanos
     }
 
     /**
@@ -1170,6 +1488,9 @@ class InkSurfaceView(
         val r = renderer ?: return
         if (!surfaceAlive) return
         dryRenderInFlight = true
+        // Before the call and not inside it: what this clock measures is the
+        // wait the *caller* sees. See [roundTripNanos].
+        roundTripStartNanos = System.nanoTime()
         r.renderMultiBufferedLayer(emptyList())
     }
 
@@ -1236,6 +1557,39 @@ class InkSurfaceView(
     fun redo() {
         router.abandon()
         document.requestRedo()
+        redrawDry()
+    }
+
+    /**
+     * Change what is selected, and redraw.
+     *
+     * The same three lines as [clear] and [undo], and the open stroke is
+     * abandoned for a reason of this feature's own. The wet pass masks the
+     * scratch buffer with the stencil as it stands, and the commit masks it
+     * again at pen-up; a selection that landed between those two would make the
+     * ink visibly change shape as the pen lifted, which is precisely the defect
+     * the masked-buffer design exists to prevent. It is not a gesture anybody
+     * makes on purpose — the marquee is not the brush — but a Select All
+     * pressed with the other hand mid-stroke is reachable, and abandoning is
+     * cheaper than explaining.
+     */
+    fun select(op: be.thalos.artiest.doc.SelectOp) {
+        router.abandon()
+        document.requestSelect(op)
+        redrawDry()
+    }
+
+    /**
+     * Lift, move, drop or cancel the floating pixels, and redraw.
+     *
+     * The open stroke is abandoned for lifts and drops, which write pixels, and
+     * for the same reason [undo] abandons one. A [FloatOp.Move] does not: it
+     * arrives eight times a second while the transform box is being dragged,
+     * and there is no stroke open then anyway — the box owns the pen.
+     */
+    fun float(op: FloatOp) {
+        if (op !is FloatOp.Move) router.abandon()
+        document.requestFloat(op)
         redrawDry()
     }
 
@@ -1437,7 +1791,26 @@ class InkSurfaceView(
         private val tailEmitter = TailEmitter()
         private val tail = PredictedTail(tailEmitter)
 
+        /**
+         * The marquee this gesture is building, or null when it is drawing.
+         *
+         * Fixed at pen-down and never revisited, the same rule [eraseDecided]
+         * follows: switching tools with the pen already on the glass must not
+         * turn half a lasso into half a pencil line.
+         */
+        private var marquee: Marquee? = null
+
+        private val marqueeBuilder = Marquee()
+
+        private var marqueeMode = SelectMode.NEW
+        private var marqueeModeDecided = false
+
         override fun onStrokeBegin(pointerId: Int) {
+            if (selecting) {
+                beginMarquee(pointerId)
+                return
+            }
+            marquee = null
             emitted = 0
             seen = 0
             strokeTiltMaxRad = 0f
@@ -1482,6 +1855,11 @@ class InkSurfaceView(
          * it was found on the tablet rather than in a test.
          */
         override fun onStrokeSamples(samples: ArrayList<PenSample>) {
+            val marquee = this.marquee
+            if (marquee != null) {
+                extendMarquee(marquee, samples)
+                return
+            }
             // Indexed, not `for (s in samples)`: an ArrayList iterator is an
             // allocation per event on the path with a per-sample budget.
             val n = samples.size
@@ -1639,6 +2017,11 @@ class InkSurfaceView(
          * reads as the stroke snapping forward at pen-up.
          */
         override fun onStrokeEnd() {
+            val marquee = this.marquee
+            if (marquee != null) {
+                endMarquee(marquee)
+                return
+            }
             // The drag watermark is taken before end() runs, because end()
             // flushes the held-back segment and then allocates the Stroke, its
             // dab copy and its Bounds. Those are the commit's, on purpose, and
@@ -1677,12 +2060,108 @@ class InkSurfaceView(
         }
 
         override fun onStrokeCancel() {
+            val marquee = this.marquee
+            if (marquee != null) {
+                // A palm arriving, a second finger taking the gesture away, the
+                // window losing focus. Nothing is selected and nothing was:
+                // the shape never reached the queue.
+                marquee.cancel()
+                this.marquee = null
+                liveMarquee = null
+                strokeOpen = false
+                this@InkSurfaceView.strokeOpen = false
+                releaseTransform()
+                onMarqueeChanged?.invoke()
+                return
+            }
             gate.reset()
             builder.cancel()
             emitted = 0
             strokeOpen = false
             cancelStroke()
             releaseTransform()
+        }
+
+        // --- the marquee ----------------------------------------------------
+
+        /**
+         * A selection gesture, rather than a stroke.
+         *
+         * The transform is frozen here for the same reason a stroke freezes it:
+         * every sample is turned into document coordinates through it, and a
+         * pinch landing mid-gesture would put the second half of a lasso
+         * somewhere the first half is not. Unlike a stroke there is no wet ink
+         * to go wrong — the shape is rebuilt from its points at any zoom — but
+         * one mapping for one gesture is the rule the whole input path is built
+         * on and there is no reason to have a second answer here.
+         */
+        private fun beginMarquee(pointerId: Int) {
+            strokePointerId = pointerId
+            frozen = transform
+            marqueeModeDecided = false
+            marqueeMode = this@InkSurfaceView.marqueeMode
+            frozen.viewToDoc(0f, 0f, docPoint)
+            marquee = marqueeBuilder
+            liveMarquee = marqueeBuilder
+            marqueeBuilder.cancel()
+            strokeOpen = true
+            this@InkSurfaceView.strokeOpen = true
+            beganAtDown = false
+            onMarqueeChanged?.invoke()
+        }
+
+        /**
+         * Whether the marquee has had its first point yet.
+         *
+         * `onStrokeBegin` carries a pointer id and no coordinates — the
+         * decision that opens a stroke and the event that carries its position
+         * are separate bits in the same mask — so the shape cannot start until
+         * the first sample arrives. Without this the rectangle would be dragged
+         * from wherever the previous one ended.
+         */
+        private var beganAtDown = false
+
+        private fun extendMarquee(marquee: Marquee, samples: ArrayList<PenSample>) {
+            val n = samples.size
+            if (n == 0) return
+            if (!marqueeModeDecided) {
+                marqueeModeDecided = true
+                // The barrel button, as a momentary subtract. Same shape as the
+                // eraser's override on the brush: hold it, take some away, let
+                // go, and the panel still says what it said. There is no
+                // keyboard on this tablet and the hand is already on the barrel.
+                if ((samples[0].buttonState and BARREL_BUTTONS) != 0) {
+                    marqueeMode = SelectMode.SUBTRACT
+                }
+            }
+            var changed = false
+            var i = 0
+            while (i < n) {
+                val sample = samples[i]
+                frozen.viewToDoc(sample.x, sample.y, docPoint)
+                if (!beganAtDown) {
+                    beganAtDown = true
+                    marquee.begin(marqueeShape, docPoint[0], docPoint[1])
+                    changed = true
+                } else if (marquee.extend(docPoint[0], docPoint[1])) {
+                    changed = true
+                }
+                i++
+            }
+            if (changed) onMarqueeChanged?.invoke()
+        }
+
+        private fun endMarquee(marquee: Marquee) {
+            val shape = marquee.end()
+            this.marquee = null
+            liveMarquee = null
+            strokeOpen = false
+            this@InkSurfaceView.strokeOpen = false
+            releaseTransform()
+            onMarqueeChanged?.invoke()
+            // Copied into the op, which is what makes it safe to go on using
+            // this builder for the next gesture. See `SelectOp.Shape`.
+            select(SelectOp.Shape(shape, marqueeMode))
         }
 
         override fun onGestureBegin() {

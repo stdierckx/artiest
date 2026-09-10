@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import be.thalos.artiest.doc.LayerBlend
 import be.thalos.artiest.doc.LayerInfo
 import be.thalos.artiest.doc.LayerOp
 import androidx.compose.foundation.Image
@@ -314,6 +315,35 @@ private fun LayersBody(
                         modifier = Modifier.width(34.dp),
                     )
                 }
+
+                Spacer(Modifier.height(8.dp))
+
+                // Beside the opacity slider and not on the row, for the reason
+                // the slider is here: a row already carries a picture, a name
+                // and three targets across 272dp, and an eighth control on it
+                // would be a control nobody can hit. Both of these are
+                // properties of the *active* sheet, which is what the
+                // highlighted row means.
+                Text(
+                    "Blend",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+                // Two rows of words rather than a dropdown. A dropdown is one
+                // more thing to open before you can see what you have, and the
+                // seven fit -- see `LayerBlend` for why there are seven.
+                for (line in BLEND_ROWS) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (blend in line) {
+                            BlendChip(blend, blend == active.blend) {
+                                onOp(LayerOp.SetBlend(active.id, blend))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -518,6 +548,44 @@ private fun LayerRow(
         }
     }
 }
+
+/**
+ * One blend mode, as a word you can press.
+ *
+ * A word and not a glyph: there is no picture of "multiply" that anybody reads
+ * faster than the word, and the same argument the selection panel makes about
+ * its four combine modes applies here with three more of them.
+ */
+@Composable
+private fun BlendChip(blend: LayerBlend, selected: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(width = 62.dp, height = 28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) scheme.primaryContainer else scheme.surfaceContainerHighest)
+            .clickable(onClick = onClick),
+    ) {
+        Text(
+            blend.label,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Four and three. Seven chips at 62dp plus their gaps is 446dp against a 272dp
+ * panel, so they wrap; written out rather than reached for with a `FlowRow`,
+ * which is still experimental and would decide the break for us.
+ */
+private val BLEND_ROWS: List<List<LayerBlend>> = listOf(
+    listOf(LayerBlend.NORMAL, LayerBlend.MULTIPLY, LayerBlend.SCREEN, LayerBlend.OVERLAY),
+    listOf(LayerBlend.DARKEN, LayerBlend.LIGHTEN, LayerBlend.DIFFERENCE),
+)
 
 /**
  * A small square target inside a row.

@@ -85,6 +85,8 @@ class LayerStack(
         var name: String,
         var opacity: Float,
         var visible: Boolean,
+        /** How this sheet mixes with what is under it. See [LayerBlend]. */
+        var blend: LayerBlend = LayerBlend.NORMAL,
     ) {
         /**
          * The last thumbnail built for this entry, or null if none has been.
@@ -237,7 +239,9 @@ class LayerStack(
                     // out under one lock and back under the other, which is the
                     // same work with no nesting.
                     val at = entries.indexOfFirst { it.id == op.id } + 1
-                    val entry = Entry(nextId++, op.layer, op.name, from.opacity, from.visible)
+                    val entry = Entry(
+                        nextId++, op.layer, op.name, from.opacity, from.visible, from.blend,
+                    )
                     val patch = PixelPatch.captureAll(from.layer, widthPx, heightPx)
                     patch?.restoreInto(entry.layer)
                     patch?.recycle()
@@ -300,6 +304,11 @@ class LayerStack(
 
         is LayerOp.SetVisible -> byId(op.id)?.let {
             it.visible = op.visible
+            true
+        } ?: false
+
+        is LayerOp.SetBlend -> byId(op.id)?.let {
+            it.blend = op.blend
             true
         } ?: false
 
@@ -395,7 +404,7 @@ class LayerStack(
         val list = ArrayList<LayerInfo>(entries.size)
         for (i in entries.indices) {
             val e = entries[i]
-            list.add(LayerInfo(e.id, e.name, e.opacity, e.visible, e.thumbnail))
+            list.add(LayerInfo(e.id, e.name, e.opacity, e.visible, e.blend, e.thumbnail))
         }
         snapshot = list
         activeId = active.id
@@ -495,6 +504,7 @@ data class LayerInfo(
     val name: String,
     val opacity: Float,
     val visible: Boolean,
+    val blend: LayerBlend,
     val thumbnail: Bitmap?,
 )
 
@@ -537,6 +547,8 @@ sealed interface LayerOp {
     class SetName(val id: Int, val name: String) : LayerOp
 
     class SetVisible(val id: Int, val visible: Boolean) : LayerOp
+
+    class SetBlend(val id: Int, val blend: LayerBlend) : LayerOp
 
     /** Put the pen on [id]. */
     class SetActive(val id: Int) : LayerOp

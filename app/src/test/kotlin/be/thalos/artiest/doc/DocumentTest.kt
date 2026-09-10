@@ -166,6 +166,17 @@ class DocumentTest {
         override fun onLayers(op: LayerOp) {
             log.append('L')
         }
+
+        override fun onSelect(op: SelectOp) {
+            // 'M' for marquee: 'S' is already the stroke, and a log that
+            // spelled both the same would make an ordering assertion pass
+            // against the wrong order.
+            log.append('M')
+        }
+
+        override fun onFloat(op: FloatOp) {
+            log.append('F')
+        }
     }
 
     @Test
