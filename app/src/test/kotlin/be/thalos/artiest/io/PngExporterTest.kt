@@ -243,6 +243,18 @@ class PngExporterTest {
         document.layers.apply(LayerOp.Add(third, "green"))
         document.layers.apply(LayerOp.SetVisible(document.layers.active.id, false))
 
+        // A fourth, blended, because a blend mode is exactly what the two loops
+        // used to disagree about: the screen painted paper first and the export
+        // slid it underneath at the end, and multiplying against transparency
+        // is not multiplying against paper.
+        val fourth = document.newLayer()
+        paint.color = Color.rgb(120, 120, 120)
+        fourth.write { it.drawRect(4f, 4f, 36f, 20f, paint) }
+        document.layers.apply(LayerOp.Add(fourth, "shade"))
+        document.layers.apply(
+            LayerOp.SetBlend(document.layers.active.id, be.thalos.artiest.doc.LayerBlend.MULTIPLY),
+        )
+
         val onScreen = Bitmap.createBitmap(
             document.widthPx, document.heightPx, Bitmap.Config.ARGB_8888,
         )

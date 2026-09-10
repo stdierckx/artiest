@@ -1,5 +1,6 @@
 package be.thalos.artiest.doc
 
+import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Paint
 
@@ -136,35 +137,44 @@ class StackCompositor {
             } else {
                 null
             }
+            val blend = entry.blend
             if (i != wetAt && float == null) {
                 sheetPaint.alpha = alpha
+                sheetPaint.blendMode = blend.mode ?: BlendMode.SRC_OVER
                 if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
                 continue
             }
+            // Anything with something *on* it -- wet ink, floating pixels -- is
+            // composed in an offscreen layer first and blended as a whole.
+            // Blending the sheet and then drawing the stroke over the result
+            // would paint the stroke straight onto the frame at normal, which
+            // is not what "drawing on a multiply layer" means: the ink has to
+            // join the sheet before the pair of them meet what is underneath.
+            //
+            // `saveLayer` with a paint rather than `saveLayerAlpha`, because the
+            // group's blend mode is the whole point and `saveLayerAlpha` cannot
+            // carry one.
+            val grouped = float != null || wet!!.erases || alpha < 255 || blend.mode != null
+            val save = if (grouped) {
+                groupPaint.alpha = alpha
+                groupPaint.blendMode = blend.mode ?: BlendMode.SRC_OVER
+                canvas.saveLayer(left, top, right, bottom, groupPaint)
+            } else {
+                -1
+            }
+            sheetPaint.alpha = if (grouped) 255 else alpha
+            sheetPaint.blendMode = BlendMode.SRC_OVER
+            if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
             if (float != null) {
-                // The hole and the float, inside one offscreen layer. `DST_OUT`
-                // straight onto the frame would cut through the paper and every
-                // sheet already painted, which is the same trap the eraser's wet
-                // pass documents -- and the float has to go *inside* the group
-                // so a sheet above it still covers it.
-                val save = canvas.saveLayerAlpha(left, top, right, bottom, alpha)
-                sheetPaint.alpha = 255
-                if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
+                // The hole and the pixels over it, both inside the group: the
+                // float has to go *inside* so a sheet above it still covers it,
+                // and `DST_OUT` straight onto the frame would cut through the
+                // paper and every sheet already painted -- the same trap the
+                // eraser's wet pass documents.
                 float.punchInto(canvas)
                 float.drawInto(canvas)
-                if (i == wetAt) wet!!.draw(canvas)
-                canvas.restoreToCount(save)
-                continue
             }
-            // An offscreen layer only when it buys something: it is what scopes
-            // the erase, and it is what makes a translucent sheet fade the
-            // stroke *with* the ink under it rather than over it. An opaque
-            // sheet taking ink stays on the cheap path.
-            val grouped = wet!!.erases || alpha < 255
-            val save = if (grouped) canvas.saveLayerAlpha(left, top, right, bottom, alpha) else -1
-            sheetPaint.alpha = if (grouped) 255 else alpha
-            if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
-            wet.draw(canvas)
+            if (i == wetAt) wet!!.draw(canvas)
             if (grouped) canvas.restoreToCount(save)
         }
         sheetsPainted = painted
@@ -188,6 +198,16 @@ class StackCompositor {
         isFilterBitmap = true
         isAntiAlias = false
     }
+
+    /**
+     * The paint a grouped sheet is composited *out* of its offscreen layer
+     * with: its alpha and its blend mode together.
+     *
+     * Separate from [sheetPaint] because the two are used at the same time and
+     * mean opposite things — this one carries the blend and that one must not,
+     * or a blended sheet would blend twice.
+     */
+    private val groupPaint = Paint()
 
     private val paperPaint = Paint()
 

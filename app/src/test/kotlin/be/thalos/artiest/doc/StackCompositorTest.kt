@@ -147,6 +147,81 @@ class StackCompositorTest {
         assertEquals(2, compositor.sheetsPainted)
     }
 
+    // --- blending -----------------------------------------------------------
+
+    @Test
+    fun `a multiply sheet darkens what is under it`() {
+        val stack = stackOf()
+        stack.active.layer.write { it.drawColor(Color.rgb(200, 200, 200)) }
+        val top = stack.addSheet(Color.rgb(128, 128, 128))
+        stack.apply(LayerOp.SetBlend(top, LayerBlend.MULTIPLY))
+        val mid = compose(stack).first.getPixel(4, 2)
+        // 200 * 128 / 255 is about 100. A wide band, because what is asserted
+        // is "darker than either, and not one of them".
+        assertTrue(Color.red(mid) in 90..110, "expected about 100, got ${Color.red(mid)}")
+    }
+
+    @Test
+    fun `a multiply sheet blends with the paper, not with transparency`() {
+        // The defect `StackCompositor` was extracted to prevent, stated
+        // directly. Until Phase 3 the export slid the paper underneath at the
+        // end, which for a multiply sheet means multiplying against nothing --
+        // and multiplying against nothing is nothing.
+        val stack = stackOf()
+        stack.apply(LayerOp.SetBlend(stack.active.id, LayerBlend.MULTIPLY))
+        stack.active.layer.write { it.drawColor(Color.rgb(128, 128, 128)) }
+        val mid = compose(stack, paper = Color.WHITE).first.getPixel(4, 2)
+        assertTrue(Color.red(mid) in 118..138, "grey over white paper, got ${Color.red(mid)}")
+        assertEquals(255, Color.alpha(mid), "and still opaque")
+    }
+
+    @Test
+    fun `a screen sheet lightens what is under it`() {
+        val stack = stackOf()
+        stack.active.layer.write { it.drawColor(Color.rgb(60, 60, 60)) }
+        val top = stack.addSheet(Color.rgb(60, 60, 60))
+        stack.apply(LayerOp.SetBlend(top, LayerBlend.SCREEN))
+        val mid = compose(stack).first.getPixel(4, 2)
+        assertTrue(Color.red(mid) > 100, "screen should lighten, got ${Color.red(mid)}")
+    }
+
+    @Test
+    fun `a blended sheet still honours its opacity`() {
+        // Two things on one paint, and the order matters: the alpha scales the
+        // sheet and the blend mode joins it to what is below. Reversed, a
+        // half-strength multiply would be a full-strength one at half alpha.
+        val stack = stackOf()
+        stack.active.layer.write { it.drawColor(Color.WHITE) }
+        val top = stack.addSheet(Color.BLACK)
+        stack.apply(LayerOp.SetBlend(top, LayerBlend.MULTIPLY))
+        stack.apply(LayerOp.SetOpacity(top, 0.5f))
+        val mid = compose(stack).first.getPixel(4, 2)
+        assertTrue(
+            Color.red(mid) in 100..155,
+            "half a multiply of black onto white is mid grey, got ${Color.red(mid)}",
+        )
+    }
+
+    @Test
+    fun `wet ink joins its sheet before the sheet blends`() {
+        // What "drawing on a multiply layer" means. Blending the sheet first
+        // and then painting the stroke over the result would put the ink on the
+        // frame at normal -- visibly wrong, and only while the pen is down, so
+        // the stroke would change as it lifted.
+        val stack = stackOf()
+        stack.active.layer.write { it.drawColor(Color.WHITE) }
+        val top = stack.addSheet(Color.TRANSPARENT)
+        stack.apply(LayerOp.SetBlend(top, LayerBlend.MULTIPLY))
+        val withWet = compose(stack, Ink(position = 1, erases = false, color = Color.rgb(128, 128, 128)))
+            .first.getPixel(1, 2)
+        // Grey ink on an empty multiply sheet, over white: multiply of grey
+        // and white is grey. Painted on the frame at normal it would also be
+        // grey -- so the case that separates them is the *sheet* underneath,
+        // which is why the bottom is white and not paper.
+        assertTrue(Color.red(withWet) in 118..138, "got ${Color.red(withWet)}")
+        assertEquals(255, Color.alpha(withWet))
+    }
+
     // --- the wet stroke -----------------------------------------------------
 
     /** Wet ink on sheet [position], as a rectangle across the left half. */
