@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -112,8 +113,6 @@ fun DockHost(
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     onArranging: (Boolean) -> Unit,
-    floatingAt: Offset,
-    onFloatingAt: (Offset) -> Unit,
     modifier: Modifier = Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
@@ -134,17 +133,17 @@ fun DockHost(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val hostWidth = with(density) { maxWidth.toPx() }
             val hostHeight = with(density) { maxHeight.toPx() }
+            SideEffect { drag.hostSize = Offset(hostWidth, hostHeight) }
 
-            for (dock in Dock.entries) {
-                if (dock == Dock.FLOATING) continue
-                DockBar(
-                    dock = dock,
+            for (bar in layout.edges) {
+                BarView(
+                    bar = bar,
                     layout = layout,
                     onLayout = onLayout,
                     arranging = arranging,
                     drag = drag,
                     modifier = Modifier
-                        .align(dock.alignment())
+                        .align(bar.dock.alignment())
                         .padding(Chrome.EDGE_INSET)
                         // A horizontal bar in arrange mode is every slot wide,
                         // which on a tablet is very nearly the whole screen —
@@ -154,7 +153,7 @@ fun DockHost(
                         // control that gets you out of the mode from being
                         // underneath the bar you are editing.
                         .then(
-                            if (dock.axis == Axis.HORIZONTAL) {
+                            if (bar.axis == Axis.HORIZONTAL) {
                                 Modifier.padding(horizontal = CORNER_CLEARANCE)
                             } else {
                                 Modifier
@@ -164,17 +163,20 @@ fun DockHost(
                 )
             }
 
-            FloatingPanel(
-                layout = layout,
-                onLayout = onLayout,
-                arranging = arranging,
-                drag = drag,
-                at = floatingAt,
-                onAt = onFloatingAt,
-                hostWidth = hostWidth,
-                hostHeight = hostHeight,
-                slotContent = slotContent,
-            )
+            // After the edges, so a bar the user placed himself wins the
+            // overlap. He put it there; the edge was always going to be there.
+            for (bar in layout.floating) {
+                FloatingBarView(
+                    bar = bar,
+                    layout = layout,
+                    onLayout = onLayout,
+                    arranging = arranging,
+                    drag = drag,
+                    hostWidth = hostWidth,
+                    hostHeight = hostHeight,
+                    slotContent = slotContent,
+                )
+            }
 
             // Above the bottom dock and centred, which is the one strip of
             // canvas that is guaranteed clear in arrange mode: the side docks
@@ -215,17 +217,17 @@ private fun Dock.alignment(): Alignment = when (this) {
 // ---------------------------------------------------------------------------
 
 /**
- * A single dock, drawn.
+ * One bar, drawn.
  *
  * Absent entirely when it is empty and nobody is arranging: an edge with no
  * controls on it should look like an edge, not like a bar someone forgot to
- * fill. In arrange mode it appears whatever is in it, because an invisible dock
+ * fill. In arrange mode it appears whatever is on it, because an invisible bar
  * cannot be dropped into and *the user can decide where they attach* is the
  * whole feature.
  */
 @Composable
-private fun DockBar(
-    dock: Dock,
+private fun BarView(
+    bar: Bar,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
@@ -233,53 +235,76 @@ private fun DockBar(
     modifier: Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    val bar = layout.bar(dock)
     if (bar.isEmpty && !arranging) return
 
-    val hovered = drag.hover == dock
     Box(
         modifier
-            .barSkin(hovered)
-            .onGloballyPositioned { drag.bounds[dock] = it.boundsInRoot() }
+            .barSkin(drag.hover == bar.id)
+            .onGloballyPositioned { drag.bounds[bar.id] = it.boundsInRoot() }
             .padding(Chrome.BAR_PADDING),
     ) {
-        DockRun(dock, layout, onLayout, arranging, drag, slotContent)
+        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
     }
 }
 
-/** The run of slots inside a bar, along the dock's axis. */
+/**
+ * The run of slots inside a bar, along its axis.
+ *
+ * **A bar is as thick as its thickest item.** Everything that lives inside a
+ * bar is one cell deep and this is `BAR_THICKNESS`, exactly as before; a panel
+ * is ten cells deep and the bar grows to hold it. That is the whole of the
+ * second dimension at render time, and it is the reading of *"just another Ui
+ * element in another toolbar, just a little bigger"* that needed no new layer:
+ * a bar holding a big thing is a big bar. It is also what a docked palette does
+ * in every program that has one.
+ *
+ * The consequence, stated rather than discovered: putting a panel on an edge
+ * makes that whole edge deep, and the buttons beside it sit against the screen
+ * edge rather than floating in the middle of it. That is the user's choice to
+ * make — *"if it is not a good place, his choice"* — and the way out is one
+ * drag.
+ */
 @Composable
-private fun DockRun(
-    dock: Dock,
+private fun BarRun(
+    bar: Bar,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    val bar = layout.bar(dock)
-    val vertical = dock.axis == Axis.VERTICAL
+    val vertical = bar.axis == Axis.VERTICAL
+    val deepest = bar.slots.placements.maxOfOrNull { it.item.depthIn(bar.axis) } ?: 1
+    val thickness = maxOf(
+        Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2,
+        Chrome.SLOT * deepest,
+    )
     val scroll = rememberScrollState()
 
     // Only as far as the last item, unless arranging. See the file KDoc.
-    val extent = if (arranging) bar.slotCount else bar.placements.maxOfOrNull { it.endSlot } ?: 0
+    val extent = if (arranging) {
+        bar.slots.slotCount
+    } else {
+        bar.slots.placements.maxOfOrNull { it.endSlot } ?: 0
+    }
 
     val cells: @Composable () -> Unit = {
         var slot = 0
         while (slot < extent) {
             val here = slot
-            val placed = bar.covering(here)
+            val placed = bar.slots.covering(here)
             SlotCell(
-                dock = dock,
+                bar = bar,
                 slot = here,
                 placed = placed,
+                thickness = thickness,
                 layout = layout,
                 onLayout = onLayout,
                 arranging = arranging,
                 drag = drag,
                 slotContent = slotContent,
             )
-            slot += placed?.item?.slots ?: 1
+            slot += placed?.span ?: 1
         }
     }
 
@@ -288,17 +313,17 @@ private fun DockRun(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
             modifier = Modifier
-                .width(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2)
+                .width(thickness)
                 .heightIn(max = 640.dp)
                 .verticalScroll(scroll)
-                .onGloballyPositioned { drag.runOrigin[dock] = it.positionInRoot() },
+                .onGloballyPositioned { drag.runOrigin[bar.id] = it.positionInRoot() },
         ) { cells() }
     } else {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             modifier = Modifier
-                .height(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2)
+                .height(thickness)
                 .widthIn(max = 1000.dp)
                 .horizontalScroll(scroll)
                 // Inside the scroll, so this moves as the bar is scrolled and
@@ -306,7 +331,7 @@ private fun DockRun(
                 // positionInRoot and not boundsInRoot: the second is clipped to
                 // the viewport, so a bar scrolled off its start would report the
                 // visible edge and every drop would land short.
-                .onGloballyPositioned { drag.runOrigin[dock] = it.positionInRoot() },
+                .onGloballyPositioned { drag.runOrigin[bar.id] = it.positionInRoot() },
         ) { cells() }
     }
 }
@@ -321,62 +346,96 @@ private fun DockRun(
  */
 @Composable
 private fun SlotCell(
-    dock: Dock,
+    bar: Bar,
     slot: Int,
     placed: Placement?,
+    thickness: Dp,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    val vertical = dock.axis == Axis.VERTICAL
+    val vertical = bar.axis == Axis.VERTICAL
     var chooser by remember { mutableStateOf(false) }
 
-    val span = (placed?.item?.slots ?: 1)
+    val span = placed?.span ?: 1
     // An unfilled slot out of arrange mode is a group separator, not a hole.
     val cells = if (placed == null && !arranging) 0.28f else span.toFloat()
     val length = Chrome.SLOT * cells
-    val thickness = Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2
+    // How deep this item is, which may be less than the bar. A button on a bar
+    // that also holds a panel keeps its own size and sits against the screen
+    // edge rather than floating in the middle of a deep bar.
+    // An empty slot is one cell deep whatever the bar is. Letting it inherit
+    // the bar's depth turns the two spare slots beside a fixated panel into two
+    // 440dp columns of dashed outline, which reads as three panels rather than
+    // one panel and some room.
+    val across = minOf(Chrome.SLOT * (placed?.item?.depthIn(bar.axis) ?: 1), thickness)
 
     Box(
-        contentAlignment = Alignment.Center,
         modifier = if (vertical) {
             Modifier.width(thickness).height(length)
         } else {
             Modifier.height(thickness).width(length)
         },
     ) {
-        when {
-            placed != null && !arranging ->
-                SlotSurface { slotContent(placed.item, dock.axis) }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .align(bar.dock.crossAlignment())
+                .then(
+                    if (vertical) {
+                        Modifier.width(across).height(length)
+                    } else {
+                        Modifier.height(across).width(length)
+                    }
+                ),
+        ) {
+            when {
+                placed != null && !arranging ->
+                    SlotSurface { slotContent(placed.item, bar.axis) }
 
-            placed != null ->
-                ArrangeChip(
-                    item = placed.item,
-                    dock = dock,
-                    slot = slot,
-                    drag = drag,
-                    layout = layout,
-                    onLayout = onLayout,
-                    onClick = { chooser = true },
-                )
+                placed != null ->
+                    ArrangeChip(
+                        item = placed.item,
+                        barId = bar.id,
+                        slot = slot,
+                        drag = drag,
+                        layout = layout,
+                        onLayout = onLayout,
+                        onClick = { chooser = true },
+                    )
 
-            arranging -> EmptyTarget { chooser = true }
+                arranging -> EmptyTarget { chooser = true }
 
-            else -> Unit
+                else -> Unit
+            }
         }
 
         if (chooser) {
             ToolChooser(
                 layout = layout,
-                dock = dock,
+                bar = bar,
                 slot = slot,
                 onDismiss = { chooser = false },
                 onLayout = { chooser = false; onLayout(it) },
             )
         }
     }
+}
+
+/**
+ * Which side of a deep bar its shallow items sit against.
+ *
+ * The screen edge, so that a button on a bar made deep by a panel stays where
+ * the hand expects it rather than drifting into the middle. A floating bar has
+ * no edge to sit against, so it uses its leading side.
+ */
+private fun Dock.crossAlignment(): Alignment = when (this) {
+    Dock.LEFT, Dock.FLOATING -> Alignment.CenterStart
+    Dock.RIGHT -> Alignment.CenterEnd
+    Dock.TOP -> Alignment.TopCenter
+    Dock.BOTTOM -> Alignment.BottomCenter
 }
 
 /**
@@ -407,7 +466,7 @@ private fun SlotSurface(content: @Composable () -> Unit) {
 @Composable
 private fun ArrangeChip(
     item: ToolItem,
-    dock: Dock,
+    barId: String,
     slot: Int,
     drag: DockDrag,
     layout: DockLayout,
@@ -418,7 +477,7 @@ private fun ArrangeChip(
     // Stands in for the ripple that went with Modifier.clickable. See
     // carryGesture for why the clickable had to go.
     var pressed by remember { mutableStateOf(false) }
-    val lifted = drag.carrying?.dock == dock && drag.carrying?.slot == slot
+    val lifted = drag.carrying?.bar?.id == barId && drag.carrying?.slot == slot
 
     Box(
         contentAlignment = Alignment.Center,
@@ -440,14 +499,22 @@ private fun ArrangeChip(
             )
             .alpha(if (lifted) 0.25f else 1f)
             .onGloballyPositioned { coords = it }
-            .pointerInput(item, dock, slot) {
+            .pointerInput(item, barId, slot) {
                 carryGesture(
                     coords = { coords },
                     onPressed = { pressed = it },
-                    onPick = { drag.carrying = DockedItem(dock, Placement(item, slot)) },
+                    onPick = {
+                        val bar = layout.bar(barId)
+                        val here = bar?.slots?.covering(slot)
+                        drag.carrying = if (bar != null && here != null) {
+                            DockedItem(bar, here)
+                        } else {
+                            null
+                        }
+                    },
                     onMove = { root ->
                         drag.pointer = root
-                        drag.hover = drag.dockAt(root)
+                        drag.hover = drag.barAt(root)
                     },
                     onDrop = { onLayout(drag.drop(layout) ?: layout) },
                     onCancel = { drag.clear() },
@@ -456,7 +523,7 @@ private fun ArrangeChip(
             },
     ) {
         val glyph = ToolIcons.of(item)
-        if (glyph != null && item.slots <= 1) {
+        if (glyph != null && item.cellsWide <= 1 && item.cellsTall <= 1) {
             Icon(glyph, item.label, Modifier.size(Chrome.GLYPH), MaterialTheme.colorScheme.onSurface)
         } else {
             Text(
@@ -591,69 +658,137 @@ private suspend fun PointerInputScope.carryGesture(
  * why that trade was taken.
  */
 @Composable
-private fun FloatingPanel(
+private fun FloatingBarView(
+    bar: Bar,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
-    at: Offset,
-    onAt: (Offset) -> Unit,
     hostWidth: Float,
     hostHeight: Float,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    val dock = Dock.FLOATING
-    if (layout.bar(dock).isEmpty && !arranging) return
-
+    val at = bar.spot ?: BarSpot(0.3f, 0.4f)
     var sizePx by remember { mutableStateOf(Offset.Zero) }
     val free = Offset(
         (hostWidth - sizePx.x).coerceAtLeast(0f),
         (hostHeight - sizePx.y).coerceAtLeast(0f),
     )
-    val hovered = drag.hover == dock
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         modifier = Modifier
             .offset { IntOffset((at.x * free.x).roundToInt(), (at.y * free.y).roundToInt()) }
-            .barSkin(hovered)
+            .barSkin(drag.hover == bar.id)
             .onGloballyPositioned {
-                drag.bounds[dock] = it.boundsInRoot()
+                drag.bounds[bar.id] = it.boundsInRoot()
                 sizePx = Offset(it.size.width.toFloat(), it.size.height.toFloat())
             }
             .padding(Chrome.BAR_PADDING),
     ) {
-        Grip { delta ->
-            if (free.x > 0f && free.y > 0f) {
-                onAt(
-                    Offset(
-                        (at.x + delta.x / free.x).coerceIn(0f, 1f),
-                        (at.y + delta.y / free.y).coerceIn(0f, 1f),
-                    )
-                )
-            }
+        Grip(at = at, free = free, height = bar.thickness()) { spot ->
+            onLayout(layout.moveBar(bar.id, spot))
         }
-        DockRun(dock, layout, onLayout, arranging, drag, slotContent)
+        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        CloseBar { onLayout(layout.closeBar(bar.id)) }
     }
 }
 
-/** Two columns of dots. The only part of the floating panel that is a handle. */
+/**
+ * The X on a floating bar.
+ *
+ * Only floating bars have one, and that asymmetry is the type's: an edge has
+ * nowhere to go and no way to be brought back, so it can only be emptied. A
+ * floating bar is a thing the user made, so closing it closes it — with
+ * everything on it, which is what makes closing a fixated panel one tap rather
+ * than a hunt through a menu for the control that put it there.
+ */
 @Composable
-private fun Grip(onDrag: (Offset) -> Unit) {
+private fun CloseBar(onClose: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .padding(start = 2.dp)
+            .size(22.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClose),
+    ) {
+        Icon(
+            ToolIcons.close,
+            "Close this toolbar",
+            Modifier.size(13.dp),
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+    }
+}
+
+/**
+ * How thick a bar is across its axis: one cell, or as deep as its deepest item.
+ *
+ * Shared by the run and by the handle beside it, because a grip one button tall
+ * on a bar eleven cells tall is a grip nobody can find — and getting it from one
+ * place is what stops the two disagreeing by a padding.
+ */
+private fun Bar.thickness(): Dp {
+    val deepest = slots.placements.maxOfOrNull { it.item.depthIn(axis) } ?: 1
+    return maxOf(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2, Chrome.SLOT * deepest)
+}
+
+/**
+ * Two columns of dots, and the only part of a floating bar that is a handle.
+ *
+ * It is dragged by this rather than by its body, and that is not decoration:
+ * the body is full of live controls, and a bar you move by grabbing its middle
+ * is a bar that moves when you meant to change the brush size.
+ */
+@Composable
+private fun Grip(at: BarSpot, free: Offset, height: Dp, onMove: (BarSpot) -> Unit) {
+    // Held through rememberUpdatedState because the pointerInput below is keyed
+    // on Unit -- it has to be, or every recomposition during a drag would cancel
+    // the gesture producing the recompositions -- and a value captured once
+    // would be the bar's position when the finger went down, forever.
+    val current by rememberUpdatedState(at)
+    val room by rememberUpdatedState(free)
+    val move by rememberUpdatedState(onMove)
+
     Column(
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = Modifier
             .width(18.dp)
-            .height(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2)
+            .height(height)
             .pointerInput(Unit) {
-                detectDragGestures { change, delta ->
-                    change.consume()
-                    onDrag(delta)
-                }
+                // Both of these live in the gesture's own coroutine, so they
+                // survive the whole drag and are not affected by when
+                // recomposition happens. Adding each delta to the *composed*
+                // position instead loses every event that arrives before the
+                // next frame: a fast drag then moves the bar a fraction of the
+                // distance the finger went, which is exactly what it did.
+                var base = Offset.Zero
+                var travelled = Offset.Zero
+                detectDragGestures(
+                    onDragStart = {
+                        base = Offset(current.x, current.y)
+                        travelled = Offset.Zero
+                    },
+                    onDrag = { change, delta ->
+                        change.consume()
+                        travelled += delta
+                        val f = room
+                        if (f.x > 0f && f.y > 0f) {
+                            BarSpot.of(
+                                base.x + travelled.x / f.x,
+                                base.y + travelled.y / f.y,
+                            )?.let(move)
+                        }
+                    },
+                )
             }
             .padding(horizontal = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // The dots mark the top of the handle rather than running its length: a
+        // column of forty dots down the side of a panel is a texture, not a
+        // control. The whole strip is draggable either way.
         Spacer(Modifier.height(6.dp))
         repeat(4) {
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -811,12 +946,12 @@ private fun DragGhost(drag: DockDrag) {
 @Composable
 private fun ToolChooser(
     layout: DockLayout,
-    dock: Dock,
+    bar: Bar,
     slot: Int,
     onDismiss: () -> Unit,
     onLayout: (DockLayout) -> Unit,
 ) {
-    val occupant = layout.bar(dock).covering(slot)
+    val occupant = bar.slots.covering(slot)
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         if (occupant != null) {
@@ -827,19 +962,29 @@ private fun ToolChooser(
                 modifier = Modifier.padding(start = 12.dp, top = 6.dp),
             )
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                for (target in Dock.entries) {
-                    val moved = layout.move(dock, slot, target)
+                for (target in Dock.EDGES) {
+                    val moved = layout.move(bar.id, slot, target.id)
                     DockTarget(
                         dock = target,
-                        enabled = target != dock && moved != null,
+                        enabled = target.id != bar.id && moved != null,
                         onClick = { moved?.let(onLayout) },
                     )
                 }
+                // The fifth target makes a bar rather than filling one, which
+                // is the only way to reach a floating bar from a menu: there
+                // may be none yet, and there may be six.
+                DockTarget(
+                    dock = Dock.FLOATING,
+                    enabled = true,
+                    onClick = {
+                        onLayout(layout.addFloating(occupant.item, NEW_BAR_SPOT).first)
+                    },
+                )
             }
             DropdownMenuItem(
                 text = { Text("Remove ${occupant.item.label}", fontSize = 13.sp) },
                 leadingIcon = { Icon(ToolIcons.close, null, Modifier.size(17.dp)) },
-                onClick = { onLayout(layout.remove(dock, slot)) },
+                onClick = { onLayout(layout.remove(bar.id, slot)) },
             )
             HorizontalDivider()
         }
@@ -854,7 +999,7 @@ private fun ToolChooser(
                 modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
             )
             for (item in items) {
-                val fits = layout.fits(dock, item, slot, ignoringSlot = slot)
+                val fits = layout.fits(bar.id, item, slot, ignoringSlot = slot)
                 val already = item == occupant?.item
                 val elsewhere = !already && item in layout
                 DropdownMenuItem(
@@ -865,7 +1010,7 @@ private fun ToolChooser(
                             // and saying which edge it is leaving is the
                             // difference between a menu and a guess.
                             if (elsewhere) {
-                                "${item.label}  ·  ${layout.locate(item)?.dock?.label}"
+                                "${item.label}  ·  ${layout.locate(item)?.bar?.dock?.label}"
                             } else {
                                 item.label
                             },
@@ -876,7 +1021,7 @@ private fun ToolChooser(
                         ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) }
                     },
                     enabled = fits && !already,
-                    onClick = { onLayout(layout.place(dock, item, slot)) },
+                    onClick = { onLayout(layout.place(bar.id, item, slot)) },
                 )
             }
         }
@@ -951,11 +1096,14 @@ private fun Modifier.barSkin(hovered: Boolean): Modifier {
 private class DockDrag {
     var carrying by mutableStateOf<DockedItem?>(null)
     var pointer by mutableStateOf(Offset.Zero)
-    var hover by mutableStateOf<Dock?>(null)
+    var hover by mutableStateOf<String?>(null)
     var hostOrigin by mutableStateOf(Offset.Zero)
 
+    /** The chrome's usable size, for turning a drop point into a bar position. */
+    var hostSize by mutableStateOf(Offset.Zero)
+
     /** Each bar's visible rectangle, for deciding which dock a point is over. */
-    val bounds = mutableStateMapOf<Dock, Rect>()
+    val bounds = mutableStateMapOf<String, Rect>()
 
     /**
      * Where each dock's run of slots begins, in root coordinates.
@@ -966,12 +1114,21 @@ private class DockDrag {
      * arithmetic used to add a padding constant and a scroll value back by
      * hand, and every one of those terms was a chance to be a few slots out.
      */
-    val runOrigin = mutableStateMapOf<Dock, Offset>()
+    val runOrigin = mutableStateMapOf<String, Offset>()
 
     var slotPx: Float = 0f
 
-    fun dockAt(point: Offset): Dock? =
-        Dock.entries.firstOrNull { bounds[it]?.contains(point) == true }
+    /**
+     * Which bar the point is over, or null for bare canvas.
+     *
+     * Floating bars are asked first, and in reverse order, so that the topmost
+     * of two overlapping bars is the one you hit — which is the one you can see.
+     */
+    fun barAt(point: Offset): String? =
+        bounds.entries
+            .filter { it.value.contains(point) }
+            .map { it.key }
+            .maxByOrNull { if (it.startsWith(DockLayout.FLOAT_PREFIX)) 1 else 0 }
 
     /**
      * Which slot of [dock] the point is over.
@@ -981,10 +1138,10 @@ private class DockDrag {
      * which is the run's own position and therefore already scrolled — there is
      * nothing here to add back and nothing to get wrong.
      */
-    fun slotAt(dock: Dock, point: Offset): Int? {
-        val origin = runOrigin[dock] ?: return null
+    fun slotAt(bar: Bar, point: Offset): Int? {
+        val origin = runOrigin[bar.id] ?: return null
         if (slotPx <= 0f) return null
-        val along = if (dock.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
+        val along = if (bar.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
         return (along / slotPx).toInt().coerceAtLeast(0)
     }
 
@@ -992,17 +1149,26 @@ private class DockDrag {
      * Finish a drag. Null when the drop changes nothing, which the caller reads
      * as *keep what you had*.
      *
-     * A drop that lands on no dock at all is not a mistake to be undone — it is
-     * how an item is sent to the floating panel, which is the only dock with no
-     * edge to aim at. That makes "drag it out onto the paper" the gesture for
-     * *detach*, which is the gesture everyone already tries.
+     * **A drop on bare canvas makes a new floating bar where it landed.** That
+     * is not a fallback, it is the gesture: dragging a control off the chrome
+     * and onto the paper is how everyone tries to detach one, and now it does
+     * exactly that. The bar is placed under the finger rather than at a default,
+     * so what you get is where you let go.
      */
     fun drop(layout: DockLayout): DockLayout? {
         val held = carrying ?: return null
-        val target = dockAt(pointer) ?: Dock.FLOATING
-        val slot = slotAt(target, pointer)
+        val where = pointer
         clear()
-        return layout.move(held.dock, held.slot, target, slot)
+        val target = barAt(where)?.let { layout.bar(it) }
+            ?: return layout.addFloating(held.item, spotAt(where)).first
+        return layout.move(held.bar.id, held.slot, target.id, slotAt(target, where))
+    }
+
+    /** A root point as a fraction of the chrome, for a bar that is about to exist. */
+    private fun spotAt(point: Offset): BarSpot {
+        if (hostSize.x <= 0f || hostSize.y <= 0f) return BarSpot(0.3f, 0.4f)
+        val local = point - hostOrigin
+        return BarSpot.of(local.x / hostSize.x, local.y / hostSize.y) ?: BarSpot(0.3f, 0.4f)
     }
 
     fun clear() {
@@ -1020,3 +1186,12 @@ private class DockDrag {
  * how a control ends up half under a button on one screen and not on another.
  */
 private val CORNER_CLEARANCE = 58.dp
+
+/**
+ * Where a floating bar made from the menu appears.
+ *
+ * A drag knows where the finger let go; a menu does not, so this is a guess —
+ * clear of the left tools and above the bottom sliders — and the drag that
+ * fixes it is the same one that made the bar reachable in the first place.
+ */
+private val NEW_BAR_SPOT = BarSpot(0.34f, 0.38f)

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,8 +28,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -61,10 +67,18 @@ fun ColourButton(
     palette: List<Int>,
     recent: List<Int>,
     onCommit: (Int) -> Unit,
+    onFixate: (BarSpot) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    var here by remember { mutableStateOf(Offset.Zero) }
+    val view = LocalView.current
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(38.dp)) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(38.dp)
+            .onGloballyPositioned { here = it.positionInRoot() },
+    ) {
         Box(
             Modifier
                 .size(24.dp)
@@ -88,6 +102,15 @@ fun ColourButton(
                 palette = palette,
                 recent = recent,
                 onDismiss = { open = false; onCommit(ink) },
+                onFixate = {
+                    open = false
+                    onCommit(ink)
+                    // "In the neighbourhood of the place it was opened", which
+                    // is this button: the new bar appears beside it and the
+                    // drag that moves it somewhere better is the one arrange
+                    // mode has just been turned on for.
+                    onFixate(spotBeside(here, view.width, view.height))
+                },
             )
         }
     }
@@ -128,6 +151,7 @@ private fun ColourPanel(
     palette: List<Int>,
     recent: List<Int>,
     onDismiss: () -> Unit,
+    onFixate: () -> Unit,
 ) {
     val gap = with(LocalDensity.current) { 10.dp.roundToPx() }
     Popup(
@@ -154,24 +178,38 @@ private fun ColourPanel(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        hexOf(ink),
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            hexOf(ink),
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        // The whole of "fixate", and it is one tap: the panel
+                        // becomes a control on a toolbar of its own. See
+                        // docs/panels-plan.md for why that is placing something
+                        // rather than a new kind of thing.
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .clickable(onClick = onFixate),
+                        ) {
+                            Icon(
+                                ToolIcons.pin,
+                                "Keep this panel on screen",
+                                Modifier.size(15.dp),
+                                MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(10.dp))
-                ColorWheel(argb = ink, onColorChange = onInk, modifier = Modifier.fillMaxWidth())
-
-                Spacer(Modifier.height(14.dp))
-                SwatchRow("Palette", palette, ink, onInk)
-
-                if (recent.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    SwatchRow("Recent", recent, ink, onInk)
-                }
+                ColourBody(ink, onInk, palette, recent, Modifier.fillMaxWidth())
             }
         }
     }
@@ -205,6 +243,86 @@ internal class PanelPosition(private val gap: Int) : PopupPositionProvider {
         )
     }
 }
+
+/**
+ * The wheel and the swatch rows, with nothing around them.
+ *
+ * Shared by the popup and by [ColourPanelCard], which is the point: fixating
+ * changes where the panel is drawn and nothing about what it is. A second copy
+ * would be two colour pickers that drift apart, and the one you were not
+ * looking at would be the one that was wrong.
+ */
+@Composable
+private fun ColourBody(
+    ink: Int,
+    onInk: (Int) -> Unit,
+    palette: List<Int>,
+    recent: List<Int>,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        ColorWheel(argb = ink, onColorChange = onInk, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(14.dp))
+        SwatchRow("Palette", palette, ink, onInk)
+        if (recent.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            SwatchRow("Recent", recent, ink, onInk)
+        }
+    }
+}
+
+/**
+ * The same panel, as a control on a bar.
+ *
+ * It fills the cell the layout gave it — six cells by ten — rather than sizing
+ * itself, because a control that disagrees with its slot is a control that
+ * overlaps its neighbour. There is no close button on it: the bar it is on has
+ * one, and a panel that could be closed two ways would leave an empty bar
+ * behind one of them.
+ */
+@Composable
+fun ColourPanelCard(
+    ink: Int,
+    onInk: (Int) -> Unit,
+    palette: List<Int>,
+    recent: List<Int>,
+) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Colour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                hexOf(ink),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        ColourBody(ink, onInk, palette, recent, Modifier.fillMaxWidth())
+    }
+}
+
+/**
+ * A spot beside [anchor], as a fraction of a window [w] by [h].
+ *
+ * Beside and slightly below, so the new bar does not land exactly under the
+ * finger that asked for it and cover the button it came from.
+ */
+private fun spotBeside(anchor: Offset, w: Int, h: Int): BarSpot {
+    if (w <= 0 || h <= 0) return BarSpot(0.34f, 0.38f)
+    // Far enough to clear the bar the button is on. The button that opened the
+    // popup is usually on an edge, and a new bar landing on top of that edge is
+    // in the neighbourhood in the least useful sense.
+    return BarSpot.of((anchor.x + CLEAR_OF_THE_BAR) / w, (anchor.y + 40f) / h)
+        ?: BarSpot(0.34f, 0.38f)
+}
+
+/** One bar's thickness and then some, in pixels at a typical tablet density. */
+private const val CLEAR_OF_THE_BAR = 190f
 
 @Composable
 private fun SwatchRow(label: String, colours: List<Int>, ink: Int, onInk: (Int) -> Unit) {

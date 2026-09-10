@@ -15,177 +15,260 @@ import kotlin.test.assertTrue
  * tested on the JVM. Then the generalisation has picked up a rendering
  * dependency and the design is wrong."* Nothing here imports anything from
  * Compose or from `android.*`, which is the condition being met rather than
- * merely claimed.
+ * merely claimed — and it still holds now that bars are made and destroyed at
+ * run time and items have two dimensions.
  */
 class DockLayoutTest {
 
     private val empty get() = DockLayout.EMPTY
+    private val here = BarSpot(0.4f, 0.5f)
+
+    // ---- footprints ------------------------------------------------------
 
     @Test
-    fun `every dock exists, empty, at its own length`() {
-        for (dock in Dock.entries) {
-            assertTrue(empty.bar(dock).isEmpty, dock.id)
-            assertEquals(dock.defaultSlots, empty.bar(dock).slotCount, dock.id)
+    fun `a button is one slot whichever way the bar runs`() {
+        assertEquals(1, ToolItem.PEN.slotsIn(Axis.HORIZONTAL))
+        assertEquals(1, ToolItem.PEN.slotsIn(Axis.VERTICAL))
+        assertEquals(1, ToolItem.PEN.depthIn(Axis.VERTICAL))
+    }
+
+    @Test
+    fun `a slider turns with the bar, so it is always long along it`() {
+        assertEquals(4, ToolItem.SIZE.slotsIn(Axis.HORIZONTAL))
+        assertEquals(4, ToolItem.SIZE.slotsIn(Axis.VERTICAL))
+        assertEquals(1, ToolItem.SIZE.depthIn(Axis.HORIZONTAL))
+        assertEquals(1, ToolItem.SIZE.depthIn(Axis.VERTICAL))
+    }
+
+    @Test
+    fun `a panel keeps its shape, so only which side eats slots changes`() {
+        // Six by ten on screen in both cases. This is the whole reason the
+        // footprint is in screen terms and not in the dock's frame: a colour
+        // wheel that were 396 by 264 on the top edge would owe every panel a
+        // responsive layout forever.
+        val p = ToolItem.COLOUR_PANEL
+        assertEquals(6, p.slotsIn(Axis.HORIZONTAL))
+        assertEquals(11, p.depthIn(Axis.HORIZONTAL))
+        assertEquals(11, p.slotsIn(Axis.VERTICAL))
+        assertEquals(6, p.depthIn(Axis.VERTICAL))
+    }
+
+    @Test
+    fun `the span a bar gives an item follows its own axis`() {
+        assertEquals(6, empty.edge(Dock.TOP).spanOf(ToolItem.COLOUR_PANEL))
+        assertEquals(11, empty.edge(Dock.LEFT).spanOf(ToolItem.COLOUR_PANEL))
+    }
+
+    // ---- the four edges --------------------------------------------------
+
+    @Test
+    fun `every edge exists, empty, at its own length`() {
+        for (dock in Dock.EDGES) {
+            val bar = empty.edge(dock)
+            assertTrue(bar.isEmpty, dock.id)
+            assertEquals(dock.id, bar.id)
+            assertEquals(dock.defaultSlots, bar.slots.slotCount, dock.id)
         }
         assertTrue(empty.isEmpty)
+        assertTrue(empty.floating.isEmpty())
     }
 
     @Test
     fun `an item lives in one place, so placing it elsewhere moves it`() {
-        val one = empty.place(Dock.LEFT, ToolItem.PEN, 0)
-        val two = one.place(Dock.BOTTOM, ToolItem.PEN, 3)
+        val one = empty.place("left", ToolItem.PEN, 0)
+        val two = one.place("bottom", ToolItem.PEN, 3)
 
-        assertTrue(two.bar(Dock.LEFT).isEmpty, "the left edge let go of it")
-        assertEquals(ToolItem.PEN, two.bar(Dock.BOTTOM).covering(3)?.item)
-        assertEquals(DockedItem(Dock.BOTTOM, Placement(ToolItem.PEN, 3)), two.locate(ToolItem.PEN))
+        assertTrue(two.edge(Dock.LEFT).isEmpty, "the left edge let go of it")
+        assertEquals(ToolItem.PEN, two.edge(Dock.BOTTOM).slots.covering(3)?.item)
+        assertEquals("bottom", two.locate(ToolItem.PEN)?.bar?.id)
         assertEquals(1, two.all().size)
     }
 
     @Test
-    fun `of keeps the first copy of a duplicated item and drops the rest`() {
-        val layout = DockLayout.of(
-            mapOf(
-                Dock.LEFT to ToolbarLayout.of(12, listOf(Placement(ToolItem.ERASER, 0))),
-                Dock.TOP to ToolbarLayout.of(24, listOf(Placement(ToolItem.ERASER, 5))),
-            ),
-        )
-        // Dock declaration order decides, and LEFT is declared first.
-        assertEquals(Dock.LEFT, layout.locate(ToolItem.ERASER)?.dock)
-        assertEquals(1, layout.all().size)
-    }
-
-    @Test
-    fun `an item does not collide with itself when it moves within its own dock`() {
-        // A four-slot slider at 0, dragged two slots along. Its new span 2..5
-        // overlaps its old span 0..3, and it is the same item, so the overlap is
-        // with a placement that is about to stop existing.
-        val layout = empty.place(Dock.BOTTOM, ToolItem.SIZE, 0)
-        assertTrue(layout.fits(Dock.BOTTOM, ToolItem.SIZE, 2))
-        val moved = layout.place(Dock.BOTTOM, ToolItem.SIZE, 2)
-        assertEquals(1, moved.bar(Dock.BOTTOM).placements.size)
+    fun `an item does not collide with itself when it moves within its own bar`() {
+        val layout = empty.place("bottom", ToolItem.SIZE, 0)
+        assertTrue(layout.fits("bottom", ToolItem.SIZE, 2))
+        val moved = layout.place("bottom", ToolItem.SIZE, 2)
+        assertEquals(1, moved.edge(Dock.BOTTOM).slots.placements.size)
         assertEquals(2, moved.locate(ToolItem.SIZE)?.slot)
     }
 
     @Test
     fun `a different item in the way still blocks`() {
         val layout = empty
-            .place(Dock.BOTTOM, ToolItem.SIZE, 0)
-            .place(Dock.BOTTOM, ToolItem.SMOOTHING, 4)
-        assertFalse(layout.fits(Dock.BOTTOM, ToolItem.GRAIN, 2), "2..5 runs into smoothing")
-        assertTrue(layout.fits(Dock.BOTTOM, ToolItem.GRAIN, 8))
-        assertFailsWith<IllegalArgumentException> {
-            layout.place(Dock.BOTTOM, ToolItem.GRAIN, 2)
-        }
+            .place("bottom", ToolItem.SIZE, 0)
+            .place("bottom", ToolItem.SMOOTHING, 4)
+        assertFalse(layout.fits("bottom", ToolItem.GRAIN, 2), "2..5 runs into smoothing")
+        assertTrue(layout.fits("bottom", ToolItem.GRAIN, 8))
+        assertFailsWith<IllegalArgumentException> { layout.place("bottom", ToolItem.GRAIN, 2) }
+    }
+
+    @Test
+    fun `a panel needs its whole footprint, on whichever edge`() {
+        // Eleven slots of a twelve-slot side edge. It fits, and it leaves that edge
+        // good for very little else — which is the user's choice to make.
+        assertTrue(empty.fits("left", ToolItem.COLOUR_PANEL, 0))
+        assertFalse(empty.fits("left", ToolItem.COLOUR_PANEL, 2))
+        assertTrue(empty.fits("top", ToolItem.COLOUR_PANEL, 3))
     }
 
     @Test
     fun `move lands where it is asked to when there is room`() {
-        val layout = empty.place(Dock.TOP, ToolItem.UNDO, 3)
-        val moved = assertNotNull(layout.move(Dock.TOP, 3, Dock.RIGHT, 2))
-        assertEquals(DockedItem(Dock.RIGHT, Placement(ToolItem.UNDO, 2)), moved.locate(ToolItem.UNDO))
-    }
-
-    @Test
-    fun `move without a slot takes the first one that fits`() {
-        val layout = empty
-            .place(Dock.RIGHT, ToolItem.ZOOM_IN, 0)
-            .place(Dock.TOP, ToolItem.UNDO, 3)
-        val moved = assertNotNull(layout.move(Dock.TOP, 3, Dock.RIGHT))
-        assertEquals(1, moved.locate(ToolItem.UNDO)?.slot)
+        val layout = empty.place("top", ToolItem.UNDO, 3)
+        val moved = assertNotNull(layout.move("top", 3, "right", 2))
+        assertEquals("right", moved.locate(ToolItem.UNDO)?.bar?.id)
+        assertEquals(2, moved.locate(ToolItem.UNDO)?.slot)
     }
 
     @Test
     fun `a drop onto an occupied slot slides to the nearest room rather than evicting`() {
-        // The gesture version of "does not fit". Replacing here would throw away
-        // a control the user never touched, which is the rule the single bar
-        // already had: nothing moves that was not dragged.
         val layout = empty
-            .place(Dock.RIGHT, ToolItem.ZOOM_IN, 2)
-            .place(Dock.TOP, ToolItem.FIT, 0)
-        val moved = assertNotNull(layout.move(Dock.TOP, 0, Dock.RIGHT, 2))
+            .place("right", ToolItem.ZOOM_IN, 2)
+            .place("top", ToolItem.FIT, 0)
+        val moved = assertNotNull(layout.move("top", 0, "right", 2))
         assertEquals(0, moved.locate(ToolItem.FIT)?.slot)
         assertEquals(2, moved.locate(ToolItem.ZOOM_IN)?.slot, "the one already there did not move")
     }
 
     @Test
-    fun `a drop onto a dock with no room is refused rather than thrown`() {
-        // A one-slot dock with something in it. A gesture that lands somewhere
-        // full is a normal thing for a hand to do, so the answer is null and the
-        // caller keeps what it had.
-        val tight = DockLayout.of(
-            mapOf(
-                Dock.FLOATING to ToolbarLayout.of(1, listOf(Placement(ToolItem.STATS, 0))),
-                Dock.TOP to ToolbarLayout.of(24, listOf(Placement(ToolItem.UNDO, 0))),
-            ),
-        )
-        assertNull(tight.move(Dock.TOP, 0, Dock.FLOATING))
-        assertNull(tight.move(Dock.LEFT, 0, Dock.TOP), "nothing in the source slot")
+    fun `a drop onto a bar with no room is refused rather than thrown`() {
+        // A gesture that lands somewhere full is a normal thing for a hand to
+        // do, so the answer is null and the caller keeps what it had.
+        val tight = empty.place("top", ToolItem.COLOUR_PANEL, 0)
+        val (withBar, id) = tight.addFloating(ToolItem.STATS, here)
+        // That bar was made to hold one button plus two spare slots, so a
+        // six-slot panel has nowhere to go on it.
+        assertNull(withBar.move("top", 0, id))
+        assertNull(withBar.move("left", 0, "top"), "nothing in the source slot")
+        assertNull(withBar.move("nonesuch", 0, "top"), "no such bar")
+    }
+
+    // ---- bars that come and go -------------------------------------------
+
+    @Test
+    fun `fixate is three ordinary operations, and the first makes a bar`() {
+        val (next, id) = empty.addFloating(ToolItem.COLOUR_PANEL, here)
+        val bar = assertNotNull(next.bar(id))
+        assertEquals(Dock.FLOATING, bar.dock)
+        assertEquals(here, bar.spot)
+        assertEquals(0, next.locate(ToolItem.COLOUR_PANEL)?.slot)
+        // Sized to the panel plus room to drop something else in beside it.
+        assertEquals(ToolItem.COLOUR_PANEL.slotsIn(Axis.HORIZONTAL) + 2, bar.slots.slotCount)
+        assertEquals(1, next.floating.size)
     }
 
     @Test
-    fun `remove empties the slot the item covers, from anywhere in its span`() {
-        val layout = empty.place(Dock.BOTTOM, ToolItem.SIZE, 4)
-        assertTrue(layout.remove(Dock.BOTTOM, 6).bar(Dock.BOTTOM).isEmpty)
-        assertEquals(layout, layout.remove(Dock.BOTTOM, 0), "an empty slot changes nothing")
+    fun `floating bars get their own names, and a closed one frees its name`() {
+        val (a, first) = empty.addFloating(ToolItem.STATS, here)
+        val (b, second) = a.addFloating(ToolItem.CLEAR, here)
+        assertEquals("f1", first)
+        assertEquals("f2", second)
+
+        val closed = b.closeBar(first)
+        assertNull(closed.bar(first))
+        assertNull(closed.locate(ToolItem.STATS), "what was on it went with it")
+        assertNotNull(closed.locate(ToolItem.CLEAR), "the other one is untouched")
+
+        val (c, third) = closed.addFloating(ToolItem.FIT, here)
+        assertEquals("f1", third, "the freed name is reused rather than climbing forever")
+        assertEquals(2, c.floating.size)
+    }
+
+    @Test
+    fun `an edge cannot be closed, only emptied`() {
+        val layout = empty.place("left", ToolItem.PEN, 0)
+        val closed = layout.closeBar("left")
+        assertNotNull(closed.bar("left"), "the edge is still there")
+        assertTrue(closed.edge(Dock.LEFT).isEmpty)
+        assertEquals(4, closed.edges.size)
+    }
+
+    @Test
+    fun `moving a bar only moves one that floats`() {
+        val (next, id) = empty.addFloating(ToolItem.STATS, here)
+        val there = BarSpot(0.1f, 0.9f)
+        assertEquals(there, next.moveBar(id, there).bar(id)?.spot)
+        assertNull(next.moveBar("left", there).bar("left")?.spot, "an edge has no position")
+    }
+
+    @Test
+    fun `an emptied floating bar is tidied away, an emptied edge is not`() {
+        val (next, id) = empty.addFloating(ToolItem.STATS, here)
+        val emptied = next.remove(id, 0)
+        assertNotNull(emptied.bar(id), "it survives being empty for as long as the drag might")
+        assertNull(emptied.tidied().bar(id))
+        assertEquals(4, emptied.tidied().edges.size)
+    }
+
+    @Test
+    fun `of keeps the first copy of a duplicated item and drops the rest`() {
+        val layout = DockLayout.of(
+            listOf(
+                Bar("left", Dock.LEFT, null,
+                    ToolbarLayout.of(12, listOf(Placement(ToolItem.ERASER, 0, 1)))),
+                Bar("top", Dock.TOP, null,
+                    ToolbarLayout.of(24, listOf(Placement(ToolItem.ERASER, 5, 1)))),
+            ),
+        )
+        // Edges are filled in in Dock.EDGES order, and left comes first.
+        assertEquals("left", layout.locate(ToolItem.ERASER)?.bar?.id)
+        assertEquals(1, layout.all().size)
     }
 
     @Test
     fun `contains and locate agree with each other`() {
-        val layout = empty.place(Dock.LEFT, ToolItem.PENCIL, 1)
+        val layout = empty.place("left", ToolItem.PENCIL, 1)
         assertTrue(ToolItem.PENCIL in layout)
         assertFalse(ToolItem.PEN in layout)
-        assertEquals(Dock.LEFT, layout.locate(ToolItem.PENCIL)?.dock)
+        assertEquals("left", layout.locate(ToolItem.PENCIL)?.bar?.id)
         assertNull(layout.locate(ToolItem.PEN))
     }
 
     @Test
-    fun `widening keeps every item where it was, in every dock`() {
-        // What DockStore.load does to a layout saved by an older build: nothing
-        // may move, or a release that adds a control silently rearranges
-        // somebody's bars.
+    fun `widening keeps every item where it was, on every bar`() {
         val old = DockLayout.of(
-            mapOf(
-                Dock.LEFT to ToolbarLayout.of(4, listOf(Placement(ToolItem.PEN, 3))),
-                Dock.TOP to ToolbarLayout.of(6, listOf(Placement(ToolItem.UNDO, 5))),
+            listOf(
+                Bar("left", Dock.LEFT, null,
+                    ToolbarLayout.of(4, listOf(Placement(ToolItem.PEN, 3, 1)))),
+                Bar("top", Dock.TOP, null,
+                    ToolbarLayout.of(6, listOf(Placement(ToolItem.UNDO, 5, 1)))),
             ),
         )
-        val grown = old.resized { it.defaultSlots }
+        val grown = old.resized { maxOf(it.slots.slotCount, it.dock.defaultSlots) }
         assertEquals(3, grown.locate(ToolItem.PEN)?.slot)
         assertEquals(5, grown.locate(ToolItem.UNDO)?.slot)
-        assertEquals(Dock.LEFT.defaultSlots, grown.bar(Dock.LEFT).slotCount)
-        assertNotNull(grown.firstFit(Dock.LEFT, ToolItem.ERASER), "the new room is usable")
+        assertEquals(Dock.LEFT.defaultSlots, grown.edge(Dock.LEFT).slots.slotCount)
+        assertNotNull(grown.firstFit("left", ToolItem.ERASER), "the new room is usable")
     }
+
+    // ---- the default -----------------------------------------------------
 
     @Test
     fun `the starter layout survives its own normalisation`() {
-        // A hand-written constant is exactly the kind of thing that quietly
-        // loses an entry to an off-by-one width or a repeated item, and `of`
-        // drops rather than complains — so the counts are asserted here or
-        // nowhere.
         val starter = DockLayout.STARTER
-        assertEquals(18, starter.all().size)
+        assertEquals(14, starter.all().size)
         assertEquals(starter.all().size, starter.all().map { it.item }.toSet().size)
+        assertTrue(starter.floating.isEmpty(), "a floating bar is something the user made")
 
         // The grouping is the feature, so it is pinned rather than left to
         // whatever the constant happens to say next month.
-        assertEquals(Dock.LEFT, starter.locate(ToolItem.PEN)?.dock)
-        assertEquals(Dock.LEFT, starter.locate(ToolItem.PENCIL)?.dock)
-        assertEquals(Dock.LEFT, starter.locate(ToolItem.ERASER)?.dock)
-        assertEquals(Dock.LEFT, starter.locate(ToolItem.COLOUR)?.dock)
-        assertEquals(Dock.TOP, starter.locate(ToolItem.UNDO)?.dock)
-        assertEquals(Dock.TOP, starter.locate(ToolItem.REDO)?.dock)
-        assertEquals(Dock.RIGHT, starter.locate(ToolItem.ZOOM_IN)?.dock)
-        assertEquals(Dock.RIGHT, starter.locate(ToolItem.LAYERS)?.dock)
-        assertEquals(Dock.BOTTOM, starter.locate(ToolItem.ERASER_SIZE)?.dock)
-        assertEquals(Dock.RIGHT, starter.locate(ToolItem.FIT)?.dock)
-        assertEquals(Dock.BOTTOM, starter.locate(ToolItem.SIZE)?.dock)
-        assertEquals(Dock.BOTTOM, starter.locate(ToolItem.GRAIN)?.dock)
-        assertTrue(starter.bar(Dock.FLOATING).isEmpty, "no honest guess at where it goes")
+        for (item in listOf(ToolItem.PEN, ToolItem.PENCIL, ToolItem.ERASER, ToolItem.COLOUR)) {
+            assertEquals("left", starter.locate(item)?.bar?.id, item.id)
+        }
+        for (item in listOf(ToolItem.UNDO, ToolItem.REDO, ToolItem.EXPORT, ToolItem.STATS)) {
+            assertEquals("top", starter.locate(item)?.bar?.id, item.id)
+        }
+        for (item in listOf(ToolItem.ZOOM_IN, ToolItem.ZOOM_OUT, ToolItem.FIT)) {
+            assertEquals("right", starter.locate(item)?.bar?.id, item.id)
+        }
+        for (item in listOf(ToolItem.SIZE, ToolItem.SMOOTHING, ToolItem.GRAIN)) {
+            assertEquals("bottom", starter.locate(item)?.bar?.id, item.id)
+        }
 
-        // Every dock still has somewhere for the next control to land, which is
+        // Every edge still has somewhere for the next control to land, which is
         // the headroom rule Dock.defaultSlots exists for.
-        for (dock in Dock.entries) {
-            assertNotNull(starter.firstFit(dock, ToolItem.CLEAR), dock.id)
+        for (dock in Dock.EDGES) {
+            assertNotNull(starter.firstFit(dock.id, ToolItem.CLEAR), dock.id)
         }
     }
 
@@ -194,9 +277,7 @@ class DockLayoutTest {
         // The separators are load-bearing: out of arrange mode an unfilled slot
         // is drawn as a narrow gap, and that gap is the only thing saying that
         // the eraser and the colour are two ideas rather than a run of four.
-        val left = DockLayout.STARTER.bar(Dock.LEFT)
-        assertNull(left.covering(4), "between the tools and the colour")
-        val top = DockLayout.STARTER.bar(Dock.TOP)
-        assertNull(top.covering(2), "between what you did and what leaves the app")
+        assertNull(DockLayout.STARTER.edge(Dock.LEFT).slots.covering(3))
+        assertNull(DockLayout.STARTER.edge(Dock.TOP).slots.covering(2))
     }
 }

@@ -176,18 +176,35 @@ not have them. `fits` already answers that, the chooser already knows how to
 grey something out, and the popup can say *"no room on this edge"* rather than
 appearing to do nothing.
 
-### The bar stays one slot thick; the panel overhangs
+### The bar is as thick as its thickest item
 
-The bar's translucent ground does not grow. An expanded item draws **its own
-card**, anchored to its slots, extending away from the edge over the canvas.
+> **Corrected after building it.** This section first said the bar's ground
+> would not grow and a panel would overhang it. That cannot be drawn: a bar's
+> run of slots is a scroll container, and a scroll container clips. A panel
+> hanging out of one would be cut off at the bar's edge, and the only ways round
+> it are to un-clip the scroll — which breaks scrolling — or to draw panels in a
+> separate overlay layer positioned from each bar's coordinates, which is a
+> second layout system arriving through the back door.
 
-Two reasons. It is what a docked palette looks like in every program that has
-one, so it needs no explaining. And it means nothing about bar layout changes —
-the run of slots, the scroll, the drop arithmetic fixed in `48c423d`, all of it
-is untouched.
+So the bar grows. Everything that lives inside one is one cell deep and the bar
+is `BAR_THICKNESS`, exactly as before; a panel is eleven cells deep and the bar
+becomes eleven cells deep. A floating bar holding one panel is then a window: a
+translucent frame with a grip and a close button, and the panel inside it.
 
-It also lands exactly on the rule already in force: **the bar is translucent and
-the things on it are opaque.** A panel is a thing on the bar. It is opaque.
+This is a better reading of *"just another Ui element in another toolbar, just a
+little bigger"* than the original was — **a toolbar holding a big thing is a big
+toolbar** — and it is what a docked palette does in every program that has one.
+
+Two consequences, stated rather than discovered:
+
+- **A panel on an edge makes that whole edge deep.** The buttons beside it keep
+  their own size and sit against the screen edge rather than floating in the
+  middle of it, and an empty slot stays one cell deep so a bar does not grow
+  columns of dashed outline. It is still a deep edge, and that is the user's
+  choice to make — *"if it is not a good place, his choice"* — with one drag out
+  of it.
+- **The rule already in force still holds.** The bar is translucent and the
+  things on it are opaque. A panel is a thing on the bar; it is opaque.
 
 ## What it costs
 
@@ -208,17 +225,11 @@ tedious rather than risky — every one of them is a JVM test that fails loudly.
 panel must be 6 × 10, or you are placing something whose size you cannot see.
 Drag and drop are unchanged: it is still one `slot` along one axis.
 
-**Overhangs can collide.** A panel on the top dock and one on the left dock can
-overlap in the corner. The recommendation is to allow it and say so, because the
-alternative is a constraint solver for a situation the user created on purpose
-and can fix with one drag.
-
-**A point over an overhang is not over the bar.** `dockAt` hit-tests bar
-rectangles, and the overhanging part of a panel is outside its bar's rectangle,
-so dropping a control onto a panel would fall through to the floating dock. The
-fix is to include overhangs in the dock's hit rectangle, and it has to be
-remembered at the time or it becomes a bug report about drops landing in the
-wrong dock.
+**Bars can overlap.** Two floating bars, or a floating bar over an edge, can
+land on top of each other. Allowed, and said so here: the alternative is a
+constraint solver for a situation the user created on purpose and can fix with
+one drag. The hit test asks floating bars first so the one you can see is the
+one you hit, and floating bars are drawn after the edges for the same reason.
 
 **The cell is not square.** `Chrome.SLOT` is 44dp along a bar and
 `Chrome.BAR_THICKNESS` is 52dp across it. A footprint in cells has to pick one,
@@ -227,23 +238,54 @@ a unit of layout. A panel's card is then `cellsWide × 44dp` by `cellsTall ×
 44dp`, and it is the bar that is slightly thicker than its own cells, which is
 already true today.
 
-## Open questions that need a human answer
+## The questions, and the answers given
 
-1. **Does fixating put the panel where the button was, or where there is room?**
-   Where the button was is predictable and often refused for want of slots.
-   Where there is room always works and moves the control away from the finger
-   that just asked for it. The cheap answer is: try in place, fall back to the
-   first fit in the same dock, and only then refuse.
+Asked at the end of the analysis above; answered the same day, in the user's
+words, and they change the shape enough to be worth recording verbatim.
 
-2. **Should a panel be allowed on any edge?** A 10-cell-tall panel needs ten
-   slots of a twelve-slot side dock — nearly the whole edge. It fits, and it
-   leaves that edge good for nothing else. Worth allowing anyway, or worth
-   restricting panels to the floating dock and the long edges?
+**1. Where does fixate put it?** *"Fixate puts it into a new toolbar, in the
+neighbourhood of the place it was opened. The user can then drag it where he
+likes. (So the UI should be in arrange mode, when the fixate button is
+pressed.)"*
 
-3. **Does the floating dock become the natural home for panels?** It is the one
-   dock whose position is already the user's own, and a floating panel is what
-   was originally asked for. Making it the default target for fixate would give
-   the original request literally, inside the model this document argues for.
+**2. May a panel go on a short edge?** *"Yes, the user can choose. If it is not a
+good place, his choice."*
+
+**3. Floating?** *"Yes, floating panel. The user should be able to have multiple
+floating panels, just as he likes. He can add them / close them. If the user
+presses fixate on a popup dialog, it is being put into a new floating toolbar by
+default, and the app is 'UI arrange' mode."*
+
+### What those answers change
+
+**There can be more than one floating bar, and they are made and destroyed at
+run time.** `Dock` stops being the identity of a bar and becomes only its
+*attachment*: four edges, or floating. A bar gains an id — `left`, `top`,
+`right`, `bottom` for the edges, `f1`, `f2`, … for the floating ones — and
+`DockLayout` becomes a collection of bars rather than a map keyed by edge. This
+is the single biggest consequence and it is the one the first draft of this
+document did not see coming.
+
+**The `expanded` flag is not needed and is dropped.** The first draft had one
+catalogue entry per idea, collapsing between a button and a panel. But fixate
+now makes a *new* bar rather than growing the button in place, so the button
+stays where it is and keeps working — which means the button and the panel are
+on screen at once, and two things on screen at once cannot be one entry under
+the rule that an item lives in exactly one place.
+
+So they are two entries: `COLOUR` is the one-slot swatch that opens the popup,
+and `COLOUR_PANEL` is the six-by-ten panel. That is simpler than a flag, and it
+falls out of answer 2 as well: if the user may put a panel anywhere, the panel
+has to be something they can pick out of the chooser like anything else.
+
+**Fixate is now three ordinary operations in a row**, none of them new: make a
+floating bar near the popup, place the panel item in it, turn on arrange mode.
+Nothing about closing, moving or saving needs an idea that does not exist.
+
+**Closing a floating bar closes the bar.** An edge cannot be removed — it can
+only be emptied — but a floating bar is a thing the user made, so it gets an X
+beside its grip, and a floating bar left with nothing in it is dropped rather
+than kept as an empty stub.
 
 ## Work plan
 
@@ -251,10 +293,10 @@ Sized against the docking work, which was one sitting and one build.
 
 | Item | What | Unlocks |
 |---|---|---|
-| **P1** | `Placement` gains `span` and `expanded`; `ToolbarLayout` becomes an interval allocator that has never heard of `ToolItem`; tests move over. No rendering, no new items. | everything below |
-| **P2** | `ToolItem` gains `cellsWide`, `cellsTall`, `turnsWithDock`; `DockLayout` computes the span from the dock's axis. `DockCodec` → `v3`. | footprints |
-| **P3** | Render an expanded item as a card overhanging its bar. Arrange mode shows the footprint. Fix `dockAt` to include overhangs. | panels on screen |
-| **P4** | `COLOUR` becomes a panel: 1 × 1 collapsed, 6 × 10 expanded. The popup grows a fixate button; the card grows a collapse. Delete nothing else — the popup stays, because it is still the cheap path. | the feature as asked |
+| **P1** | `Placement` gains `span`; `ToolbarLayout` becomes an interval allocator that has never heard of `ToolItem`; tests move over. No rendering, no new items. | **done** |
+| **P2** | `ToolItem` gains `cellsWide`, `cellsTall`, `turnsWithDock`; `Dock` becomes an attachment and `Bar` an identity, so floating bars can be made and closed; `DockCodec` → `v3`, reading `v2` and `v1`. | **done** |
+| **P3** | A bar takes the depth of its deepest item. Floating bars get a grip that spans them and an X. A drop on bare canvas makes a bar where it landed. | **done** |
+| **P4** | `COLOUR_PANEL`, 6 × 11. The popup grows a fixate button that makes a floating bar beside it and turns on arrange mode. | **done** |
 | **P5** | The tool-settings panel the UI plan's U6 wants, as a second panel, to prove the concept repeats. | U6 |
 
 P1 and P2 are JVM-only and testable without a device, which is the same

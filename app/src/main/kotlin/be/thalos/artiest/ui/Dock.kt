@@ -1,38 +1,26 @@
 package be.thalos.artiest.ui
 
 /**
- * Which way a dock's slots run.
+ * Which way a bar's slots run.
  *
- * This is the one thing [ToolbarLayout] never had to know, and it is the whole
+ * This is the one thing [ToolbarLayout] never has to know, and it is the whole
  * of what a dock adds to it: a bar is a line of slots, and a dock is a line of
- * slots with a direction. Everything else about placement — what fits, what
- * collides, what a saved string means — is unchanged, which is why the docking
- * feature could be built without touching the algebra underneath it.
+ * slots with a direction. Since panels arrived it is also what decides which of
+ * an item's two dimensions is spent on slots — see [ToolItem.slotsIn].
  */
 enum class Axis { HORIZONTAL, VERTICAL }
 
 /**
- * Where a toolbar can attach.
+ * Where a bar is attached.
  *
- * Four edges and a floating panel, which is the set the user asked for. Each
- * one carries its own slot count rather than sharing a constant, because a
- * screen is not square: a bar across the bottom of a tablet in landscape has
- * room for twenty-four 44dp slots and a column up the side has room for about
- * half that, and pretending otherwise would put items past the end of the
- * screen where nothing can reach them.
+ * **This is an attachment, not an identity.** It used to be both: there were
+ * five docks and five bars and the enum was the key. There can now be any number
+ * of floating bars — the user makes them and closes them — so a bar carries an
+ * id of its own and this says only where it sits.
  *
- * **[defaultSlots] is deliberately longer than anything ships filled**, and that
- * headroom is load-bearing rather than tidy. `DockStore` only ever widens a
- * saved layout, never shortens it, so this number is how an existing user gets
- * room for a control that did not exist when they arranged their bars. It is not
- * hypothetical: it is what happened the day Undo and Redo were added to a saved
- * bar with sixteen slots and sixteen in use, and again at W10, when two brush
- * presets wanted four slots that twenty did not have. Raising a number here is
- * the whole of the fix, both times.
- *
- * [id] is persisted, and is deliberately not [name], for the reason
- * [ToolItem.id] is not [ToolItem.name]: renaming a Kotlin constant is a
- * refactor, renaming a persisted key silently empties somebody's toolbar.
+ * [id] is persisted for the four edges, and is deliberately not [name]: renaming
+ * a Kotlin constant is a refactor, renaming a persisted key silently empties
+ * somebody's toolbar.
  */
 enum class Dock(
     val id: String,
@@ -46,11 +34,11 @@ enum class Dock(
     BOTTOM("bottom", "Bottom edge", Axis.HORIZONTAL, 24),
 
     /**
-     * The panel that is not attached to anything.
+     * Not attached to anything, and there may be several.
      *
-     * Short on purpose. A floating bar sits over the drawing, so every slot it
-     * has is paper it is covering, and eight is about as long as one can be
-     * before it stops being a panel and becomes a second toolbar in the way.
+     * A floating bar sits over the drawing, so every slot it has is paper it is
+     * covering. They are made to size rather than to a constant — see
+     * [DockLayout.addFloating] — and [defaultSlots] is only the fallback.
      */
     FLOATING("float", "Floating", Axis.HORIZONTAL, 8),
     ;
@@ -58,6 +46,8 @@ enum class Dock(
     val isEdge: Boolean get() = this != FLOATING
 
     companion object {
+        val EDGES: List<Dock> = entries.filter { it.isEdge }
+
         private val BY_ID: Map<String, Dock> = entries.associateBy { it.id }
 
         fun byId(id: String): Dock? = BY_ID[id]
@@ -65,78 +55,161 @@ enum class Dock(
 }
 
 /**
- * Every dock's bar, and the rule that ties them together.
+ * Where a floating bar sits, as a fraction of the window in each axis.
+ *
+ * Fractions and not pixels, and that is the answer to the question the UI plan
+ * left for a human: *"does the floating dock need to survive rotation, or
+ * reset?"* A fraction survives it, and costs one line rather than a second saved
+ * position per orientation. It is not perfect — a bar three quarters of the way
+ * down a landscape window lands three quarters of the way down a portrait one,
+ * which is further in absolute terms than the user put it — but it is never
+ * off-screen, and the drag to fix it is one gesture.
+ */
+data class BarSpot(val x: Float, val y: Float) {
+    companion object {
+        /** Null for a position that cannot be rendered. Clamped, never thrown. */
+        fun of(x: Float, y: Float): BarSpot? {
+            if (!x.isFinite() || !y.isFinite()) return null
+            return BarSpot(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+        }
+    }
+}
+
+/**
+ * One toolbar: where it is, how long it is, and what is on it.
+ *
+ * [id] is `left`, `top`, `right` or `bottom` for the four edges, and `f1`, `f2`
+ * … for floating bars. It is what everything else keys on, because a floating
+ * bar has no other name and the edges may as well be named the same way.
+ *
+ * [spot] is set for floating bars and null for edges, which is the type saying
+ * out loud that an edge's position is not the user's to choose.
+ */
+class Bar(
+    val id: String,
+    val dock: Dock,
+    val spot: BarSpot?,
+    val slots: ToolbarLayout,
+) {
+    val axis: Axis get() = dock.axis
+    val isEmpty: Boolean get() = slots.isEmpty
+    val isFloating: Boolean get() = dock == Dock.FLOATING
+
+    fun with(slots: ToolbarLayout = this.slots, spot: BarSpot? = this.spot): Bar =
+        Bar(id, dock, spot, slots)
+
+    /** The slots [item] would take on this bar. The second dimension, applied. */
+    fun spanOf(item: ToolItem): Int = item.slotsIn(axis)
+
+    override fun equals(other: Any?): Boolean =
+        other is Bar && other.id == id && other.dock == dock &&
+            other.spot == spot && other.slots == slots
+
+    override fun hashCode(): Int = listOf(id, dock, spot, slots).hashCode()
+
+    override fun toString(): String = "$id($dock${spot?.let { "@$it" } ?: ""}, $slots)"
+}
+
+/** A placement and the bar it is on. The answer [DockLayout.locate] gives. */
+data class DockedItem(val bar: Bar, val placement: Placement) {
+    val item: ToolItem get() = placement.item
+    val slot: Int get() = placement.slot
+}
+
+/**
+ * Every bar, and the rules that tie them together.
  *
  * ## What this is, and what it deliberately is not
  *
- * It is a `Map<Dock, ToolbarLayout>` with three operations on top. It is **not**
- * a new layout engine: [fits] and [place] delegate straight to the bar for the
- * dock in question, so every edge case about widths, collisions and the end of
- * the bar is answered by the code that already answers it, and by the tests
- * that already test it. A dock is one more axis on a structure that had none.
+ * A list of [Bar]s with a handful of operations on top. It is **not** a layout
+ * engine: [fits] and [place] delegate straight to the bar in question, so every
+ * edge case about spans, collisions and the end of a bar is answered by
+ * [ToolbarLayout], and by the tests that already cover it. What this adds is
+ * which bar, and the arithmetic that turns an item into a span.
  *
  * ## The one rule a single bar did not need
  *
- * **An item appears in at most one place.** [ToolbarLayout] allows the same
- * item twice, and on a single bar that is merely odd. Across five docks it is a
- * bug with a face: two Eraser buttons in different corners, one of them lit and
- * one of them not, both of them real. So [place] removes the item from wherever
- * else it was, and [of] drops the later of two copies.
+ * **An item appears in at most one place.** [ToolbarLayout] allows the same item
+ * twice, and on one bar that is merely odd. Across several it is a bug with a
+ * face: two Eraser buttons in different corners, one lit and one not, both real.
+ * So [place] removes the item from wherever else it was, and [of] drops the
+ * later of two copies.
  *
  * That rule is also what makes dragging work without any code for dragging.
- * Moving an item from the left edge to the bottom is [place] on the bottom —
- * the removal from the left falls out of the rule, and there is no second path
+ * Moving an item from the left edge to a floating panel is [place] on the
+ * floating bar — the removal falls out of the rule, and there is no second path
  * through which a move can go wrong.
  *
- * Immutable, like the bar it is built from, so it can be Compose state and so
- * that every test is one expression.
+ * ## Bars come and go
+ *
+ * The four edges always exist, in [Dock.EDGES] order, and can only be emptied.
+ * Floating bars are made by [addFloating] and destroyed by [closeBar], which is
+ * how "fixate" and "close" are ordinary operations rather than new ideas.
+ *
+ * Immutable, so it can be Compose state and so that every test is one
+ * expression.
  */
-class DockLayout private constructor(private val bars: Map<Dock, ToolbarLayout>) {
+class DockLayout private constructor(val bars: List<Bar>) {
 
-    /** The bar at [dock]. Never null: an unmentioned dock is an empty one. */
-    fun bar(dock: Dock): ToolbarLayout = bars.getValue(dock)
+    val isEmpty: Boolean get() = bars.all { it.isEmpty }
 
-    val isEmpty: Boolean get() = bars.values.all { it.isEmpty }
+    /** The four edges, always present, always in the same order. */
+    val edges: List<Bar> get() = bars.filter { !it.isFloating }
 
-    /** Every placed item, with the dock it sits in. Sorted by dock, then slot. */
-    fun all(): List<DockedItem> = Dock.entries.flatMap { dock ->
-        bar(dock).placements.map { DockedItem(dock, it) }
-    }
+    /** The bars the user made, oldest first. */
+    val floating: List<Bar> get() = bars.filter { it.isFloating }
+
+    fun bar(id: String): Bar? = bars.firstOrNull { it.id == id }
+
+    /** The bar on [dock]. Only meaningful for the four edges. */
+    fun edge(dock: Dock): Bar = bars.first { it.dock == dock && !it.isFloating }
+
+    /** Every placed item, with the bar it is on. */
+    fun all(): List<DockedItem> = bars.flatMap { b -> b.slots.placements.map { DockedItem(b, it) } }
 
     /** Where [item] currently is, or null if it is on no bar. */
-    fun locate(item: ToolItem): DockedItem? = all().firstOrNull { it.placement.item == item }
+    fun locate(item: ToolItem): DockedItem? = all().firstOrNull { it.item == item }
 
     /** True if [item] is on some bar. What the chooser ticks. */
     operator fun contains(item: ToolItem): Boolean = locate(item) != null
 
     /**
-     * Would [item] go at [slot] in [dock]?
+     * Would [item] go at [slot] on the bar [barId]?
      *
-     * The `ignoringSlot` of [ToolbarLayout.fits] is passed through unchanged,
-     * and there is a second exemption here that a single bar could not have:
-     * an item already in *this* dock does not collide with itself when it is
-     * being moved a few slots along. Without that, dragging Undo two slots to
-     * the right would be refused by the copy of Undo that the drag is about to
-     * remove.
+     * The item is taken out of that bar first when it is already on it, because
+     * [place] moves rather than copies: by the time it lands, the slots it used
+     * to hold are free, so a `fits` that still sees it there refuses placements
+     * that would in fact succeed. Dragging a four-slot slider two slots along
+     * its own bar is exactly that case, and it is the one a hand tries first.
      */
-    fun fits(dock: Dock, item: ToolItem, slot: Int, ignoringSlot: Int? = null): Boolean =
-        withoutItemIn(dock, item).fits(item, slot, ignoringSlot = ignoringSlot)
-
-    /**
-     * Put [item] at [slot] in [dock], taking it out of wherever it was.
-     *
-     * Throws if it does not fit, exactly as [ToolbarLayout.place] does and for
-     * the same reason: a control that silently declines to appear cannot be
-     * told apart from one that is broken.
-     */
-    fun place(dock: Dock, item: ToolItem, slot: Int): DockLayout {
-        val cleared = locate(item)?.let { withBar(it.dock, bar(it.dock).remove(it.placement.slot)) }
-            ?: this
-        return cleared.withBar(dock, cleared.bar(dock).place(item, slot))
+    fun fits(barId: String, item: ToolItem, slot: Int, ignoringSlot: Int? = null): Boolean {
+        val bar = bar(barId) ?: return false
+        return without(bar, item).fits(bar.spanOf(item), slot, ignoringSlot = ignoringSlot)
     }
 
-    /** Empty the slot [slot] falls in, in [dock]. A no-op on an empty slot. */
-    fun remove(dock: Dock, slot: Int): DockLayout = withBar(dock, bar(dock).remove(slot))
+    /**
+     * Put [item] at [slot] on [barId], taking it out of wherever it was.
+     *
+     * Throws if it does not fit, exactly as [ToolbarLayout.place] does and for
+     * the same reason: a control that silently declines to appear cannot be told
+     * apart from one that is broken.
+     */
+    fun place(barId: String, item: ToolItem, slot: Int): DockLayout {
+        val target = bar(barId) ?: return this
+        val cleared = locate(item)
+            ?.let { withBar(it.bar.with(slots = it.bar.slots.remove(it.slot))) }
+            ?: this
+        val fresh = cleared.bar(barId) ?: target
+        return cleared.withBar(
+            fresh.with(slots = fresh.slots.place(Placement(item, slot, fresh.spanOf(item))))
+        )
+    }
+
+    /** Empty the slot [slot] falls in on [barId]. A no-op on an empty slot. */
+    fun remove(barId: String, slot: Int): DockLayout {
+        val bar = bar(barId) ?: return this
+        return withBar(bar.with(slots = bar.slots.remove(slot)))
+    }
 
     /**
      * Send whatever is in [slot] of [from] to [to], at the first slot it fits.
@@ -147,164 +220,202 @@ class DockLayout private constructor(private val bars: Map<Dock, ToolbarLayout>)
      * [place], this is reached by a gesture, and a gesture that lands somewhere
      * full is a normal thing for a hand to do.
      */
-    fun move(from: Dock, slot: Int, to: Dock, toSlot: Int? = null): DockLayout? {
-        val moving = bar(from).covering(slot) ?: return null
+    fun move(from: String, slot: Int, to: String, toSlot: Int? = null): DockLayout? {
+        val source = bar(from) ?: return null
+        val moving = source.slots.covering(slot) ?: return null
         val target = toSlot?.takeIf { fits(to, moving.item, it) }
             ?: firstFit(to, moving.item)
             ?: return null
         return place(to, moving.item, target)
     }
 
-    /** The first slot in [dock] that [item] would fit in, or null. */
-    fun firstFit(dock: Dock, item: ToolItem): Int? = withoutItemIn(dock, item).firstFit(item)
-
-    /**
-     * [dock]'s bar with [item] taken out of it, if it was in it.
-     *
-     * Every question about whether an item can go somewhere is asked of this
-     * rather than of the bar itself, because [place] moves rather than copies:
-     * by the time the item lands, the slots it used to hold are free, so a
-     * `fits` that still sees it there refuses placements that would in fact
-     * succeed. Dragging a four-slot slider two slots along its own dock is
-     * exactly that case, and it is the one a hand tries first.
-     */
-    private fun withoutItemIn(dock: Dock, item: ToolItem): ToolbarLayout {
-        val here = locate(item) ?: return bar(dock)
-        return if (here.dock == dock) bar(dock).remove(here.slot) else bar(dock)
+    /** The first slot on [barId] that [item] would fit in, or null. */
+    fun firstFit(barId: String, item: ToolItem): Int? {
+        val bar = bar(barId) ?: return null
+        return without(bar, item).firstFit(bar.spanOf(item))
     }
 
-    /** Every dock emptied. What a reset that keeps the slot counts looks like. */
-    fun cleared(): DockLayout = of(bars.mapValues { (_, bar) -> bar.cleared() })
+    /**
+     * Make a floating bar holding [item], at [spot], and say what it is called.
+     *
+     * This is the whole of "fixate". The bar is sized to the item plus a little
+     * room, rather than to a constant: a floating bar is paper the drawing
+     * cannot use, so it is as long as it has to be and no longer, and the spare
+     * slots are there so that something else can be dropped in beside it.
+     */
+    fun addFloating(item: ToolItem, spot: BarSpot): Pair<DockLayout, String> {
+        val id = nextFloatingId()
+        val span = item.slotsIn(Dock.FLOATING.axis)
+        val bar = Bar(id, Dock.FLOATING, spot, ToolbarLayout.empty(span + SPARE_SLOTS))
+        return DockLayout(bars + bar).place(id, item, 0) to id
+    }
+
+    /** Move a floating bar. A no-op on an edge, whose position is not the user's. */
+    fun moveBar(barId: String, spot: BarSpot): DockLayout {
+        val bar = bar(barId) ?: return this
+        if (!bar.isFloating) return this
+        return withBar(bar.with(spot = spot))
+    }
 
     /**
-     * The same items in docks of different lengths.
+     * Close a floating bar, and everything on it.
+     *
+     * An edge cannot be closed — there is nowhere for it to go and no way to get
+     * it back — so this empties it instead. A floating bar is a thing the user
+     * made, so closing it is closing it.
+     */
+    fun closeBar(barId: String): DockLayout {
+        val bar = bar(barId) ?: return this
+        return if (bar.isFloating) {
+            DockLayout(bars.filter { it.id != barId })
+        } else {
+            withBar(bar.with(slots = bar.slots.cleared()))
+        }
+    }
+
+    /** Every bar emptied, and every floating bar gone. */
+    fun cleared(): DockLayout = of(edges.map { it.with(slots = it.slots.cleared()) })
+
+    /**
+     * Floating bars with nothing left on them, dropped.
+     *
+     * Dragging the last control off a floating bar leaves a strip of empty slots
+     * over the drawing that does nothing. It is not deleted as it happens — the
+     * bar has to survive being empty for as long as the drag is being undone —
+     * so it is tidied when the layout is saved.
+     */
+    fun tidied(): DockLayout = of(bars.filter { !it.isFloating || !it.isEmpty })
+
+    /**
+     * The same items on bars of different lengths.
      *
      * Used by the store, which widens a saved layout to the current defaults so
      * that a release adding a control does not strand a user whose bars are
      * full. Anything that no longer reaches is dropped, by [ToolbarLayout.of].
      */
-    fun resized(slotsOf: (Dock) -> Int): DockLayout =
-        of(bars.mapValues { (dock, bar) -> bar.resized(slotsOf(dock)) })
+    fun resized(slotsOf: (Bar) -> Int): DockLayout =
+        of(bars.map { it.with(slots = it.slots.resized(slotsOf(it))) })
 
-    private fun withBar(dock: Dock, bar: ToolbarLayout): DockLayout =
-        DockLayout(bars + (dock to bar))
+    private fun without(bar: Bar, item: ToolItem): ToolbarLayout {
+        val here = locate(item) ?: return bar.slots
+        return if (here.bar.id == bar.id) bar.slots.remove(here.slot) else bar.slots
+    }
+
+    private fun withBar(bar: Bar): DockLayout =
+        DockLayout(bars.map { if (it.id == bar.id) bar else it })
+
+    private fun nextFloatingId(): String {
+        val taken = floating.mapNotNull { it.id.removePrefix(FLOAT_PREFIX).toIntOrNull() }.toSet()
+        var n = 1
+        while (n in taken) n++
+        return "$FLOAT_PREFIX$n"
+    }
 
     override fun equals(other: Any?): Boolean = other is DockLayout && other.bars == bars
 
     override fun hashCode(): Int = bars.hashCode()
 
-    override fun toString(): String =
-        "DockLayout(" + Dock.entries.joinToString("; ") { "${it.id}:${bar(it)}" } + ")"
+    override fun toString(): String = "DockLayout(" + bars.joinToString("; ") + ")"
 
     companion object {
+        /** Floating bar ids are this and a number. Persisted, so it does not move. */
+        const val FLOAT_PREFIX = "f"
+
+        /** Room to drop something else in beside a freshly fixated panel. */
+        private const val SPARE_SLOTS = 2
 
         /**
          * Build a layout from whatever bars are supplied, filling in the rest.
          *
-         * Two normalisations, both of them the reason a codec can be careless
-         * with its input: a dock nobody mentioned becomes an empty bar of that
-         * dock's default length, and an item that appears twice keeps only its
-         * first appearance in dock declaration order. Neither raises.
+         * Three normalisations, and together they are why a codec can be
+         * careless with its input: a missing edge becomes an empty bar of that
+         * edge's default length, a floating bar without a position gets one, and
+         * an item that appears twice keeps only its first appearance. None of
+         * them raises.
          */
-        fun of(bars: Map<Dock, ToolbarLayout>): DockLayout {
+        fun of(bars: List<Bar>): DockLayout {
             val seen = HashSet<ToolItem>()
-            val filled = LinkedHashMap<Dock, ToolbarLayout>(Dock.entries.size)
-            for (dock in Dock.entries) {
-                val bar = bars[dock] ?: ToolbarLayout.of(dock.defaultSlots, emptyList())
-                val kept = bar.placements.filter { seen.add(it.item) }
-                filled[dock] = if (kept.size == bar.placements.size) {
+            val out = ArrayList<Bar>(bars.size + Dock.EDGES.size)
+
+            fun keep(bar: Bar) {
+                val kept = bar.slots.placements.filter { seen.add(it.item) }
+                out += if (kept.size == bar.slots.placements.size) {
                     bar
                 } else {
-                    ToolbarLayout.of(bar.slotCount, kept)
+                    bar.with(slots = ToolbarLayout.of(bar.slots.slotCount, kept))
                 }
             }
-            return DockLayout(filled)
+
+            for (dock in Dock.EDGES) {
+                keep(
+                    bars.firstOrNull { it.dock == dock && !it.isFloating }
+                        ?: Bar(dock.id, dock, null, ToolbarLayout.empty(dock.defaultSlots))
+                )
+            }
+            val ids = HashSet<String>(out.map { it.id })
+            for (bar in bars.filter { it.isFloating }) {
+                if (!ids.add(bar.id)) continue
+                keep(bar.with(spot = bar.spot ?: BarSpot(DEFAULT_X, DEFAULT_Y)))
+            }
+            return DockLayout(out)
         }
 
-        /** Every dock empty, at its default length. */
-        val EMPTY: DockLayout get() = of(emptyMap())
+        /** Just the four empty edges. */
+        val EMPTY: DockLayout get() = of(emptyList())
 
         /**
          * A fresh install, and it is **not** empty.
          *
-         * `ToolbarLayout.DEFAULT` is empty, and on one bar that was defensible:
-         * a single row of dashed slots reads as *tap me*, and the user's own
-         * description of the feature was "we have a empty toolbar with slots".
-         * Five empty docks is five times that bet and it is not a bet worth
-         * taking — a first run that shows four empty frames around a white page
-         * looks broken rather than inviting.
+         * `ToolbarLayout` used to default to empty, and on one bar that was
+         * defensible: a single row of dashed slots reads as *tap me*. Four empty
+         * edges is four times that bet and it is not one worth taking — a first
+         * run that shows empty frames around a white page looks broken rather
+         * than inviting.
          *
-         * So the default is a working set, arranged by what the control is for,
-         * because that is what was asked for in as many words. The grouping is
-         * the whole point and is worth stating:
+         * So the default is a working set, arranged by what the control is for:
          *
-         * - **Left edge — what is in your hand.** Pen, pencil, eraser, colour.
-         *   The most-used controls, under the non-drawing hand, and the two
-         *   halves separated by an empty slot so the tool group and the colour
-         *   do not read as one run of four.
-         * - **Top edge — what you did, and what leaves the app.** Undo, redo,
+         * - **Left edge — what is in your hand.** Pen, pencil, eraser, colour,
+         *   with an empty slot separating the tools from the colour so the four
+         *   do not read as one run.
+         * - **Top edge — what you did, and what leaves the app.** Undo and redo,
          *   then export and the instruments, with a gap between the two ideas.
-         * - **Right edge — where you are looking.** Zoom and fit. Deliberately
+         * - **Right edge — where you are looking.** Zoom and fit, deliberately
          *   opposite the tools: changing the view is not changing the mark, and
          *   putting them on the same edge is how you zoom when you meant to
          *   erase.
-         * - **Bottom edge — how the mark comes out.** Size, stabilisation,
-         *   grain. The sliders, along the long axis, where a slider has room to
-         *   be a slider.
-         * - **Floating — empty**, because it is the one dock whose position is
-         *   the user's own and there is no sensible guess at it.
+         * - **Bottom edge — how the mark comes out.** The sliders, along the
+         *   long axis, where a slider has room to be a slider.
+         * - **No floating bars**, because a floating bar is something the user
+         *   made and there is no honest guess at one.
          */
         val STARTER: DockLayout
             get() = of(
-                mapOf(
-                    Dock.LEFT to ToolbarLayout.of(
-                        Dock.LEFT.defaultSlots,
-                        listOf(
-                            Placement(ToolItem.PEN, 0),
-                            Placement(ToolItem.PENCIL, 1),
-                            Placement(ToolItem.MARKER, 2),
-                            Placement(ToolItem.ERASER, 3),
-                            Placement(ToolItem.COLOUR, 5),
-                        ),
-                    ),
-                    Dock.TOP to ToolbarLayout.of(
-                        Dock.TOP.defaultSlots,
-                        listOf(
-                            Placement(ToolItem.UNDO, 0),
-                            Placement(ToolItem.REDO, 1),
-                            Placement(ToolItem.IMPORT, 3),
-                            Placement(ToolItem.EXPORT, 4),
-                            Placement(ToolItem.STATS, 5),
-                        ),
-                    ),
-                    Dock.RIGHT to ToolbarLayout.of(
-                        Dock.RIGHT.defaultSlots,
-                        listOf(
-                            Placement(ToolItem.ZOOM_IN, 0),
-                            Placement(ToolItem.ZOOM_OUT, 1),
-                            Placement(ToolItem.FIT, 2),
-                            Placement(ToolItem.LAYERS, 4),
-                        ),
-                    ),
-                    Dock.BOTTOM to ToolbarLayout.of(
-                        Dock.BOTTOM.defaultSlots,
-                        listOf(
-                            Placement(ToolItem.SIZE, 0),
-                            Placement(ToolItem.SMOOTHING, 4),
-                            Placement(ToolItem.GRAIN, 8),
-                            Placement(ToolItem.ERASER_SIZE, 12),
-                        ),
-                    ),
+                listOf(
+                    edgeOf(Dock.LEFT, ToolItem.PEN to 0, ToolItem.PENCIL to 1,
+                        ToolItem.ERASER to 2, ToolItem.COLOUR to 4),
+                    edgeOf(Dock.TOP, ToolItem.UNDO to 0, ToolItem.REDO to 1,
+                        ToolItem.EXPORT to 3, ToolItem.STATS to 4),
+                    edgeOf(Dock.RIGHT, ToolItem.ZOOM_IN to 0, ToolItem.ZOOM_OUT to 1,
+                        ToolItem.FIT to 2),
+                    edgeOf(Dock.BOTTOM, ToolItem.SIZE to 0, ToolItem.SMOOTHING to 4,
+                        ToolItem.GRAIN to 8),
                 ),
             )
 
         /** What a fresh install gets. See [STARTER] for why it is not [EMPTY]. */
         val DEFAULT: DockLayout get() = STARTER
-    }
-}
 
-/** A placement and the dock it is in. The answer [DockLayout.locate] gives. */
-data class DockedItem(val dock: Dock, val placement: Placement) {
-    val item: ToolItem get() = placement.item
-    val slot: Int get() = placement.slot
+        private fun edgeOf(dock: Dock, vararg at: Pair<ToolItem, Int>): Bar =
+            Bar(
+                dock.id, dock, null,
+                ToolbarLayout.of(
+                    dock.defaultSlots,
+                    at.map { (item, slot) -> Placement(item, slot, item.slotsIn(dock.axis)) },
+                ),
+            )
+
+        /** Clear of the left tools and above the bottom sliders, on a first run. */
+        private const val DEFAULT_X = 0.32f
+        private const val DEFAULT_Y = 0.42f
+    }
 }

@@ -71,10 +71,12 @@ import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
+import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
+import be.thalos.artiest.ui.ColourPanelCard
 import be.thalos.artiest.ui.DockHost
 import be.thalos.artiest.ui.DockLayout
 import be.thalos.artiest.ui.DockStore
@@ -401,10 +403,6 @@ private fun CanvasScreen(
     val store = remember { DockStore(context) }
     var docks by remember { mutableStateOf(store.load()) }
     var arranging by remember { mutableStateOf(false) }
-    var floatingAt by remember {
-        val (x, y) = store.loadFloatingAt()
-        mutableStateOf(Offset(x, y))
-    }
 
     // The colours mixed on the wheel. Pushed when the panel closes rather than
     // on every sample of a drag -- see ColourButton for why.
@@ -774,8 +772,6 @@ private fun CanvasScreen(
             onLayout = { docks = it; store.save(it) },
             arranging = arranging,
             onArranging = { arranging = it },
-            floatingAt = floatingAt,
-            onFloatingAt = { floatingAt = it; store.saveFloatingAt(it.x, it.y) },
         ) { item, axis ->
                 ToolSlot(
                     item = item,
@@ -783,6 +779,16 @@ private fun CanvasScreen(
                     ink = ink,
                     recentInks = recentInks,
                     onInkCommitted = { recentInks = store.pushRecentColour(it) },
+                    onFixate = { spot ->
+                        // Three ordinary operations and no new idea: make a
+                        // floating bar, put the panel on it, and turn on
+                        // arrange mode so the next thing the hand does is move
+                        // it somewhere better.
+                        val (next, _) = docks.addFloating(ToolItem.COLOUR_PANEL, spot)
+                        docks = next
+                        store.save(next)
+                        arranging = true
+                    },
                     onInk = { ink = it },
                     sizeMax = sizeMax,
                     onSizeMax = { sizeMax = it },
@@ -902,6 +908,7 @@ private fun ToolSlot(
     onInk: (Int) -> Unit,
     recentInks: List<Int>,
     onInkCommitted: (Int) -> Unit,
+    onFixate: (BarSpot) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
     eraserSize: Float,
@@ -946,6 +953,20 @@ private fun ToolSlot(
             palette = PALETTE,
             recent = recentInks,
             onCommit = onInkCommitted,
+            onFixate = onFixate,
+        )
+
+        /**
+         * The same picker, kept. It is a separate catalogue entry rather than a
+         * bigger [ToolItem.COLOUR] because fixate leaves the swatch where it
+         * was — two things on screen at once cannot be one item under the rule
+         * that an item lives in exactly one place.
+         */
+        ToolItem.COLOUR_PANEL -> ColourPanelCard(
+            ink = ink,
+            onInk = onInk,
+            palette = PALETTE,
+            recent = recentInks,
         )
 
         ToolItem.SIZE -> ToolSlider(

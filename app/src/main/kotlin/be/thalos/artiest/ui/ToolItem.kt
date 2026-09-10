@@ -75,7 +75,19 @@ package be.thalos.artiest.ui
  * showing the current colour *is* the icon, and a palette symbol sitting next to
  * a colour would be a label for something already visible.
  */
-enum class ToolKind { BUTTON, TOGGLE, SLIDER, SWATCH }
+enum class ToolKind {
+    BUTTON,
+    TOGGLE,
+    SLIDER,
+    SWATCH,
+
+    /**
+     * Bigger than a slot in both directions, and drawn as a card that overhangs
+     * the bar it is anchored to. The bar's own ground does not grow — see
+     * `docs/panels-plan.md` for why the panel hangs off it instead.
+     */
+    PANEL,
+}
 
 enum class ToolItem(
     /** Stable across renames and releases. See rule 2 above. */
@@ -84,11 +96,25 @@ enum class ToolItem(
     val label: String,
     /** What fits on the slot itself, which for a one-slot button is 44dp. */
     val short: String,
-    /** Length along the dock's axis, in slots. */
-    val slots: Int,
+    /** Width on screen, in 44dp cells, as it would sit on a horizontal bar. */
+    val cellsWide: Int,
     val group: ToolGroup,
     /** How it behaves. See [ToolKind]. */
     val kind: ToolKind = ToolKind.BUTTON,
+    /** Height on screen, in cells. One for everything that lives inside a bar. */
+    val cellsTall: Int = 1,
+    /**
+     * Whether the footprint turns when the bar does.
+     *
+     * True for a slider, which is a one-dimensional control and wants its long
+     * axis to follow the bar: four cells across the bottom, four cells down the
+     * left. False for a panel, which has a shape of its own and must keep it —
+     * a colour wheel is the same wheel on every edge, and only which of its two
+     * dimensions is spent on slots changes.
+     *
+     * Meaningless for a one-by-one button, which is why the default is free.
+     */
+    val turnsWithDock: Boolean = false,
 ) {
     UNDO("undo", "Undo", "Undo", 1, ToolGroup.EDIT),
     REDO("redo", "Redo", "Redo", 1, ToolGroup.EDIT),
@@ -104,8 +130,8 @@ enum class ToolItem(
      * what colour it is right now.
      */
     COLOUR("colour", "Colour", "Colour", 1, ToolGroup.DRAW, ToolKind.SWATCH),
-    SIZE("size", "Size", "Size", 4, ToolGroup.DRAW, ToolKind.SLIDER),
-    SMOOTHING("smoothing", "Stabilisation", "Smooth", 4, ToolGroup.DRAW, ToolKind.SLIDER),
+    SIZE("size", "Size", "Size", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    SMOOTHING("smoothing", "Stabilisation", "Smooth", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
 
     /**
      * W7. The tripwire is paid: these two exist because the scratch buffer
@@ -119,8 +145,8 @@ enum class ToolItem(
      * shortcut that makes a pencil impossible: graphite is low flow under a
      * high ceiling.
      */
-    OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW, ToolKind.SLIDER),
-    FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW, ToolKind.SLIDER),
+    OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
 
     /**
      * W8. The paper's tooth, as one slider from smooth to full depth.
@@ -129,7 +155,7 @@ enum class ToolItem(
      * the format carries, but a toolbar with four grain sliders is a
      * synthesiser, not a pencil. W10's preset sets the other three.
      */
-    GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW, ToolKind.SLIDER),
+    GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
 
     /**
      * W10's two tools, and the third that joined them later. The original
@@ -165,7 +191,7 @@ enum class ToolItem(
      * panel because "the eraser is too small for this" is a thought you have
      * mid-rub, with the pen already on the glass.
      */
-    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER),
+    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
 
     /**
      * The layers panel, as a button that opens it.
@@ -176,6 +202,27 @@ enum class ToolItem(
      * show about layers at a glance is nothing, so it shows a way in.
      */
     LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
+
+    /**
+     * The colour wheel as a control you can keep, rather than a popup you
+     * re-open. Six cells by eleven, which is 264 by 484dp.
+     *
+     * Eleven and not ten because ten clipped the recents row off the bottom,
+     * which is the row that is only there once you have mixed something and so
+     * the one nobody would have noticed missing until they wanted it.
+     *
+     * It is a **separate entry from [COLOUR]**, not a bigger version of it, and
+     * that follows from how it gets on screen: fixate builds a new floating bar
+     * and puts this in it, so the swatch stays where it was and keeps working.
+     * Two things on screen at once cannot be one entry under the rule that an
+     * item lives in exactly one place. It also means the chooser can offer it
+     * like anything else, which is what makes "put it wherever you like" true
+     * rather than a special case of one button.
+     */
+    COLOUR_PANEL(
+        "colour_panel", "Colour panel", "Colour", 6, ToolGroup.DRAW,
+        ToolKind.PANEL, cellsTall = 11,
+    ),
 
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
@@ -198,8 +245,23 @@ enum class ToolItem(
     ;
 
     init {
-        require(slots >= 1) { "$id occupies $slots slots" }
+        require(cellsWide >= 1 && cellsTall >= 1) { "$id is ${cellsWide}x$cellsTall cells" }
     }
+
+    /**
+     * How many slots this takes on a bar running along [axis].
+     *
+     * The whole of the second dimension is these two functions. A horizontal bar
+     * spends the item's width on slots and lets its height hang off the edge; a
+     * vertical bar does the opposite — unless the item [turnsWithDock], in which
+     * case it rotates and its width is still what runs along the bar.
+     */
+    fun slotsIn(axis: Axis): Int =
+        if (axis == Axis.HORIZONTAL || turnsWithDock) cellsWide else cellsTall
+
+    /** How far this sticks out from the bar it is on, in cells. See [slotsIn]. */
+    fun depthIn(axis: Axis): Int =
+        if (axis == Axis.HORIZONTAL || turnsWithDock) cellsTall else cellsWide
 
     companion object {
         /** The catalogue keyed by [id], for the codec. Unknown ids decode to null. */
