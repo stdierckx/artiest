@@ -7,7 +7,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -49,8 +52,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
@@ -114,17 +120,16 @@ fun DockHost(
     val density = LocalDensity.current
     val drag = remember { DockDrag() }
     val slotPx = with(density) { Chrome.SLOT.toPx() }
-    val padPx = with(density) { Chrome.BAR_PADDING.toPx() }
-    SideEffect {
-        drag.slotPx = slotPx
-        drag.padPx = padPx
-    }
+    SideEffect { drag.slotPx = slotPx }
 
     Box(
         modifier
             .fillMaxSize()
             .systemBarsPadding()
-            .onGloballyPositioned { drag.hostOrigin = it.boundsInRoot().topLeft },
+            // positionInRoot, not boundsInRoot: the second is clipped to the
+            // parent, so on a screen where this box is inset the ghost would be
+            // drawn against a frame that is not the one it is measured in.
+            .onGloballyPositioned { drag.hostOrigin = it.positionInRoot() },
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val hostWidth = with(density) { maxWidth.toPx() }
@@ -255,11 +260,6 @@ private fun DockRun(
     val bar = layout.bar(dock)
     val vertical = dock.axis == Axis.VERTICAL
     val scroll = rememberScrollState()
-    // In a SideEffect and not inline: this writes snapshot state, and writing
-    // snapshot state from inside composition is how a recomposition loop starts.
-    // The value is only ever read from a drop callback, so it does not have to
-    // be current until the finger comes up.
-    SideEffect { drag.scrollPx[dock] = scroll.value.toFloat() }
 
     // Only as far as the last item, unless arranging. See the file KDoc.
     val extent = if (arranging) bar.slotCount else bar.placements.maxOfOrNull { it.endSlot } ?: 0
@@ -290,7 +290,8 @@ private fun DockRun(
             modifier = Modifier
                 .width(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2)
                 .heightIn(max = 640.dp)
-                .verticalScroll(scroll),
+                .verticalScroll(scroll)
+                .onGloballyPositioned { drag.runOrigin[dock] = it.positionInRoot() },
         ) { cells() }
     } else {
         Row(
@@ -299,7 +300,13 @@ private fun DockRun(
             modifier = Modifier
                 .height(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2)
                 .widthIn(max = 1000.dp)
-                .horizontalScroll(scroll),
+                .horizontalScroll(scroll)
+                // Inside the scroll, so this moves as the bar is scrolled and
+                // the slot arithmetic never has to know a scroll offset exists.
+                // positionInRoot and not boundsInRoot: the second is clipped to
+                // the viewport, so a bar scrolled off its start would report the
+                // visible edge and every drop would land short.
+                .onGloballyPositioned { drag.runOrigin[dock] = it.positionInRoot() },
         ) { cells() }
     }
 }
@@ -407,7 +414,10 @@ private fun ArrangeChip(
     onLayout: (DockLayout) -> Unit,
     onClick: () -> Unit,
 ) {
-    var origin by remember { mutableStateOf(Offset.Zero) }
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Stands in for the ripple that went with Modifier.clickable. See
+    // carryGesture for why the clickable had to go.
+    var pressed by remember { mutableStateOf(false) }
     val lifted = drag.carrying?.dock == dock && drag.carrying?.slot == slot
 
     Box(
@@ -416,30 +426,34 @@ private fun ArrangeChip(
             .fillMaxSize()
             .padding(1.dp)
             .clip(RoundedCornerShape(13.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(
+                if (pressed) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                }
+            )
             .border(
                 1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                MaterialTheme.colorScheme.primary.copy(alpha = if (pressed) 1f else 0.55f),
                 RoundedCornerShape(13.dp),
             )
             .alpha(if (lifted) 0.25f else 1f)
-            .onGloballyPositioned { origin = it.boundsInRoot().topLeft }
+            .onGloballyPositioned { coords = it }
             .pointerInput(item, dock, slot) {
-                detectDragGestures(
-                    onDragStart = { local ->
-                        drag.carrying = DockedItem(dock, Placement(item, slot))
-                        drag.pointer = origin + local
+                carryGesture(
+                    coords = { coords },
+                    onPressed = { pressed = it },
+                    onPick = { drag.carrying = DockedItem(dock, Placement(item, slot)) },
+                    onMove = { root ->
+                        drag.pointer = root
+                        drag.hover = drag.dockAt(root)
                     },
-                    onDrag = { change, delta ->
-                        change.consume()
-                        drag.pointer += delta
-                        drag.hover = drag.dockAt(drag.pointer)
-                    },
-                    onDragEnd = { onLayout(drag.drop(layout) ?: layout) },
-                    onDragCancel = { drag.clear() },
+                    onDrop = { onLayout(drag.drop(layout) ?: layout) },
+                    onCancel = { drag.clear() },
+                    onTap = onClick,
                 )
-            }
-            .clickable(onClick = onClick),
+            },
     ) {
         val glyph = ToolIcons.of(item)
         if (glyph != null && item.slots <= 1) {
@@ -478,6 +492,85 @@ private fun EmptyTarget(onClick: () -> Unit) {
             Modifier.size(15.dp),
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
         )
+    }
+}
+
+/**
+ * Pick a control up, carry it, put it down — or, if it never moved, a tap.
+ *
+ * ## Why this is written out rather than `detectDragGestures`
+ *
+ * Two bugs, both of which made docking by drag impossible, and both of which
+ * came from the convenient version rather than from anything about docks.
+ *
+ * **The first movement counted twice.** `detectDragGestures` calls
+ * `onDragStart` with the pointer's position at the moment the drag threshold is
+ * crossed, and then *immediately* calls `onDrag` with the amount by which that
+ * same movement overshot the threshold. Seeding a position from the first and
+ * adding the second puts the carried control ahead of the finger by exactly how
+ * far past the threshold the first flick went — a few pixels if you start
+ * slowly, most of a button if you start fast. Measured on the tablet at 78 and
+ * at 125 pixels on two drags, each within a pixel of that prediction.
+ *
+ * **Accumulating deltas is wrong whenever anything moves underneath.** A bar is
+ * a scroll container, and while a chip is being dragged along its own bar the
+ * bar can scroll — so the chip moves under the finger, and the per-event delta,
+ * which is measured in the chip's own coordinates, reports *less* than the
+ * finger travelled. The control then trails the hand, which is the half of this
+ * that a user actually notices.
+ *
+ * So: the position is read absolutely, every event, through
+ * [LayoutCoordinates.localToRoot]. It cannot drift, because nothing is being
+ * added up. And the gesture is consumed from the pointer-down, so the bar
+ * underneath never starts scrolling in the first place — a child sees the main
+ * pass before its parent, and a consumed move cancels the parent's own
+ * threshold detection.
+ *
+ * ## What consuming the down costs
+ *
+ * `Modifier.clickable`, which is why [onTap] exists: with the down consumed,
+ * nothing downstream will ever see a click, so the tap has to be recognised
+ * here. [onPressed] is the other half of the same bill — the ripple goes with
+ * the `clickable`, and a control that does not acknowledge being touched reads
+ * as broken long before anybody works out that it was a gesture conflict.
+ */
+private suspend fun PointerInputScope.carryGesture(
+    coords: () -> LayoutCoordinates?,
+    onPressed: (Boolean) -> Unit = {},
+    onPick: () -> Unit,
+    onMove: (Offset) -> Unit,
+    onDrop: () -> Unit,
+    onCancel: () -> Unit,
+    onTap: () -> Unit,
+) {
+    val slop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        down.consume()
+        onPressed(true)
+
+        var carrying = false
+        val lifted = drag(down.id) { change ->
+            change.consume()
+            if (!carrying && (change.position - down.position).getDistance() > slop) {
+                carrying = true
+                onPick()
+            }
+            if (carrying) {
+                // localToRoot every time, rather than a running total. The
+                // fallback is the raw local position, which is only reached
+                // before the first layout pass and is wrong by an inset rather
+                // than by a whole gesture.
+                onMove(coords()?.localToRoot(change.position) ?: change.position)
+            }
+        }
+
+        onPressed(false)
+        when {
+            carrying && lifted -> onDrop()
+            carrying -> onCancel()
+            lifted -> onTap()
+        }
     }
 }
 
@@ -861,11 +954,21 @@ private class DockDrag {
     var hover by mutableStateOf<Dock?>(null)
     var hostOrigin by mutableStateOf(Offset.Zero)
 
+    /** Each bar's visible rectangle, for deciding which dock a point is over. */
     val bounds = mutableStateMapOf<Dock, Rect>()
-    val scrollPx = mutableStateMapOf<Dock, Float>()
+
+    /**
+     * Where each dock's run of slots begins, in root coordinates.
+     *
+     * Reported by the run itself from inside its own scroll container, so it
+     * already carries the scroll offset and the bar's padding and any handle
+     * sitting in front of it. That is the whole reason it exists: the slot
+     * arithmetic used to add a padding constant and a scroll value back by
+     * hand, and every one of those terms was a chance to be a few slots out.
+     */
+    val runOrigin = mutableStateMapOf<Dock, Offset>()
 
     var slotPx: Float = 0f
-    var padPx: Float = 0f
 
     fun dockAt(point: Offset): Dock? =
         Dock.entries.firstOrNull { bounds[it]?.contains(point) == true }
@@ -874,16 +977,15 @@ private class DockDrag {
      * Which slot of [dock] the point is over.
      *
      * The inverse of [SlotCell]'s sizing, and it is only correct because that
-     * sizing is `slots × SLOT` with no exceptions. The scroll offset is added
-     * back because the bar may have been scrolled, and a bar scrolled by three
-     * slots would otherwise drop everything three slots early.
+     * sizing is `slots × SLOT` with no exceptions. Measured from [runOrigin],
+     * which is the run's own position and therefore already scrolled — there is
+     * nothing here to add back and nothing to get wrong.
      */
     fun slotAt(dock: Dock, point: Offset): Int? {
-        val rect = bounds[dock] ?: return null
+        val origin = runOrigin[dock] ?: return null
         if (slotPx <= 0f) return null
-        val along = if (dock.axis == Axis.HORIZONTAL) point.x - rect.left else point.y - rect.top
-        val scrolled = along - padPx + (scrollPx[dock] ?: 0f)
-        return (scrolled / slotPx).toInt().coerceAtLeast(0)
+        val along = if (dock.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
+        return (along / slotPx).toInt().coerceAtLeast(0)
     }
 
     /**
