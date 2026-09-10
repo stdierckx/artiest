@@ -136,12 +136,14 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// Writes docs/catalogue.json from the ToolItem catalogue.
+// Writes the two generated documents into docs/.
 //
-// The published vocabulary — every tool, group, kind, fill order and anchor —
-// as a file that can be read without building the app, which is half of what
-// makes "hand it to a model and ask for a workspace" a real sentence. The other
-// half is docs/workspace-format.md.
+// catalogue.json is the published vocabulary — every tool, group, kind, fill
+// order and anchor — as a file that can be read without building the app, which
+// is half of what makes "hand it to a model and ask for a workspace" a real
+// sentence. workspace-example.json is one real workspace written by the real
+// encoder, which docs/workspace-format.md quotes: a worked example a person
+// copies from has to be one the app would actually produce.
 //
 // It runs on the *unit test* classpath, because that is the one classpath in
 // this module that is a plain JVM, and the entry point lives in the test source
@@ -154,14 +156,12 @@ tasks.withType<Test>().configureEach {
 // passing would be a generator nobody could use.
 tasks.register<JavaExec>("catalogueJson") {
     group = "documentation"
-    description = "Writes docs/catalogue.json from the ToolItem catalogue."
+    description = "Writes docs/catalogue.json and docs/workspace-example.json."
     dependsOn("compileDebugUnitTestKotlin")
     val unitTest = tasks.named<Test>("testDebugUnitTest")
     classpath = files(provider { unitTest.get().classpath })
     mainClass.set("be.thalos.artiest.ui.CatalogueMainKt")
     argumentProviders.add(
-        CommandLineArgumentProvider {
-            listOf(rootProject.file("docs/catalogue.json").absolutePath)
-        }
+        CommandLineArgumentProvider { listOf(rootProject.file("docs").absolutePath) }
     )
 }

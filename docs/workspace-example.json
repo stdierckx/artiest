@@ -1,0 +1,60 @@
+{
+  "artiest_workspace": 1,
+  "catalogue": 1,
+  "id": "example",
+  "name": "Example",
+  "description": "Every field in the reference, in one file.",
+  "author": "artiest",
+  "revision": 1,
+  "filter": {"groups": ["edit", "draw"], "hide": ["grain"], "show": ["layers_panel"]},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": 0.35},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 9], [0, 9, 5, 1]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil", "at": [0, 1]},
+        {"id": "eraser", "at": [0, 2]},
+        {"id": "size", "at": [0, 4]},
+        {"id": "colour", "at": [0, 9]}
+      ]
+    },
+    {
+      "id": "top",
+      "dock": "top",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "undo", "at": [0, 0]},
+        {"id": "redo", "at": [1, 0]}
+      ]
+    },
+    {
+      "id": "right",
+      "dock": "right",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": []
+    },
+    {
+      "id": "bottom",
+      "dock": "bottom",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": []
+    },
+    {
+      "id": "f1",
+      "dock": "float",
+      "at": [0.72, 0.18],
+      "rects": [[0, 0, 8, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "layers_panel", "at": [0, 0], "size": [8, 9]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "artiest_workspace": 1,
+  "name": "Impossible",
+  "surfaces": [
+    {"id": "left", "dock": "left",
+     "rects": [[0, 0, -4, 12], [0, 0, 1, 0], [-9, -9, 2, 2], [0, 0, 1, 6]],
+     "tools": [{"id": "pen"}]}
+  ]
+}

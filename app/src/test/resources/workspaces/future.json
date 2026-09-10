@@ -1,0 +1,21 @@
+{
+  "artiest_workspace": 2,
+  "id": "inker",
+  "name": "Inker",
+  "author": "somebody else",
+  "revision": 11,
+  "perspective": {"vanishing_points": 3},
+  "filter": {"groups": ["draw"], "hide": [], "show": ["perspective_ruler"], "invert": true},
+  "defaults": {"brush": "nib-fine", "stabilisation": 0.8, "paper": "bristol"},
+  "surfaces": [
+    {
+      "id": "left", "dock": "left", "rects": [[0, 0, 1, 12]], "flow": "down_right",
+      "opacity": 0.5,
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "perspective_ruler", "at": [0, 1]},
+        {"id": "eraser", "at": [0, 2], "colour": "#ff0000"}
+      ]
+    }
+  ]
+}

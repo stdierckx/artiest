@@ -1,0 +1,12 @@
+{
+  "artiest_workspace": 1,
+  "name": "Twice",
+  "surfaces": [
+    {"id": "left", "dock": "left", "rects": [[0, 0, 1, 12]],
+     "tools": [{"id": "pen", "at": [0, 0]}]},
+    {"id": "left", "dock": "left", "rects": [[0, 0, 1, 12]],
+     "tools": [{"id": "pencil", "at": [0, 0]}]},
+    {"id": "top", "dock": "top", "rects": [[0, 0, 24, 1]],
+     "tools": [{"id": "pen", "at": [5, 0]}]}
+  ]
+}
