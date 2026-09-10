@@ -73,12 +73,14 @@ import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
 import be.thalos.artiest.canvas.MarqueeShape
 import be.thalos.artiest.canvas.setDocToView
+import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.SelectionButton
 import be.thalos.artiest.ui.SelectionOverlay
+import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushStore
@@ -416,6 +418,13 @@ private fun CanvasScreen(
     var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
     val outlineTick = remember { mutableIntStateOf(0) }
 
+    // The floating pixels, as the chrome sees them: the rectangle they were
+    // lifted from, and a token that changes when a different float is lifted so
+    // the transform box starts over rather than inheriting the last one's
+    // matrix.
+    var floatingBox by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    var floatToken by remember { mutableIntStateOf(0) }
+
     // Document-to-view, rebuilt only when the canvas actually moves. A `Matrix`
     // is mutable native state and this one is written on the UI thread and read
     // on the UI thread, in a draw lambda, so one instance is enough -- but it
@@ -567,6 +576,15 @@ private fun CanvasScreen(
                 selectionShape = snap
                 outlineTick.intValue++
             }
+            // The float is picked up on the same poll. Its bounds never change
+            // once lifted -- the matrix moves, not the source -- so a reference
+            // comparison is enough and a new box means a new gesture.
+            val box = document.floating?.sourceBounds
+            if (box !== floatingBox) {
+                floatingBox = box
+                floatToken++
+                outlineTick.intValue++
+            }
         }
     }
 
@@ -647,6 +665,13 @@ private fun CanvasScreen(
         // scheduled and then deferred, and it is a no-op when there is no
         // surface - which is the only state in which the queue is reliably
         // non-empty, and also the one in which this button cannot be pressed.
+        // Pixels still in the air are put down first. The export composites
+        // sheets and knows nothing about a float, and the alternatives are
+        // both worse: exporting without it saves a drawing with a hole in it,
+        // and teaching the exporter to read a bitmap the render thread may
+        // recycle at any moment is a race for a case that has an obvious
+        // answer. Pressing Save while transforming commits the transform.
+        if (document.floating != null) surface?.float(FloatOp.Drop)
         surface?.redrawDry()
         exporting = true
         export = null
@@ -701,7 +726,10 @@ private fun CanvasScreen(
         SelectionOverlay(
             selection = {
                 outlineTick.intValue
-                selectionShape.path
+                // Hidden while pixels are in the air: the transform box is the
+                // outline then, and two rectangles -- one around the hole, one
+                // around what came out of it -- is a picture nobody can read.
+                if (floatingBox != null) null else selectionShape.path
             },
             marquee = {
                 outlineTick.intValue
@@ -716,6 +744,20 @@ private fun CanvasScreen(
             // rather than once per frame -- and it is what stops the ants
             // ticking over a page with nothing on it.
             showing = selectionShape.active || selecting,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Over the outline, because it is the thing being dragged, and it
+        // takes the pen while it is there. Absent -- and consuming nothing --
+        // whenever there is no float.
+        TransformBox(
+            sourceBounds = floatingBox,
+            token = floatToken,
+            docToView = {
+                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                outlineMatrix
+            },
+            onMatrix = { m -> surface?.float(FloatOp.Move(m)) },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -937,6 +979,11 @@ private fun CanvasScreen(
                         generation++
                     },
                     hasSelection = selectionShape.active,
+                    floating = floatingBox != null,
+                    onFloatOp = { op ->
+                        surface?.float(op)
+                        generation++
+                    },
                     onSelectOp = { op ->
                         surface?.select(op)
                         // Not waited for: the op is queued and the render
@@ -1056,6 +1103,8 @@ private fun ToolSlot(
     marqueeMode: SelectMode,
     onMarqueeMode: (SelectMode) -> Unit,
     hasSelection: Boolean,
+    floating: Boolean,
+    onFloatOp: (FloatOp) -> Unit,
     onSelectOp: (SelectOp) -> Unit,
     smoothing: Float,
     onSmoothing: (Float) -> Unit,
@@ -1183,9 +1232,11 @@ private fun ToolSlot(
             mode = marqueeMode,
             selecting = selecting,
             hasSelection = hasSelection,
+            floating = floating,
             onShape = onMarqueeShape,
             onMode = onMarqueeMode,
             onOp = onSelectOp,
+            onFloatOp = onFloatOp,
             onSelecting = onSelecting,
         )
         ToolItem.LAYERS -> LayersButton(

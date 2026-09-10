@@ -559,6 +559,10 @@ class PngExporterTest {
                 document.selection.apply(op)
             }
 
+            override fun onFloat(op: be.thalos.artiest.doc.FloatOp) {
+                document.applyFloat(op)
+            }
+
             override fun onUndo() {
                 document.applyUndo()
             }

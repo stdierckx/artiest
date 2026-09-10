@@ -230,6 +230,27 @@ class Selection(
         if (active) canvas.clipPath(path)
     }
 
+    /**
+     * Move the stencil to where the floating pixels landed. **Render thread.**
+     *
+     * Called once, from the drop. Without it the marching ants stay around the
+     * hole the pixels came out of, which is not where the user is looking and
+     * not what any editor does — a moved selection takes its outline with it,
+     * because the outline *is* the selection and the selection is now over
+     * there.
+     *
+     * Returns false when there is nothing to move.
+     */
+    internal fun transformBy(matrix: android.graphics.Matrix): Boolean {
+        if (!active) return false
+        if (matrix.isIdentity) return false
+        path.transform(matrix)
+        active = !path.isEmpty
+        if (!active) path.rewind()
+        rebuild()
+        return true
+    }
+
     // ---- internals ----------------------------------------------------------
 
     private fun combine(shape: Path, mode: SelectMode) {

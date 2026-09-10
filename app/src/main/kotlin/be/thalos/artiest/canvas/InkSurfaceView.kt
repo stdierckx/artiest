@@ -15,6 +15,7 @@ import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
@@ -475,8 +476,19 @@ class InkSurfaceView(
          * changes is where the *next* stroke may land, and the marching ants,
          * which are the chrome's and read the published snapshot.
          */
-        override fun onSelect(op: be.thalos.artiest.doc.SelectOp) {
+        override fun onSelect(op: SelectOp) {
             document.selection.apply(op)
+        }
+
+        /**
+         * A lift, a move, a drop or a cancel, in its place in the queue. See
+         * `CommitQueue.Commit.Float`.
+         *
+         * The thumbnail is marked stale by `Document.applyFloat` itself, at the
+         * one place a float actually writes pixels.
+         */
+        override fun onFloat(op: FloatOp) {
+            document.applyFloat(op)
         }
     }
 
@@ -871,6 +883,7 @@ class InkSurfaceView(
             document.heightPx,
             wetInk,
             l, t, r, b,
+            document.floating,
         )
         drySheets = compositor.sheetsPainted
     }
@@ -1563,6 +1576,20 @@ class InkSurfaceView(
     fun select(op: be.thalos.artiest.doc.SelectOp) {
         router.abandon()
         document.requestSelect(op)
+        redrawDry()
+    }
+
+    /**
+     * Lift, move, drop or cancel the floating pixels, and redraw.
+     *
+     * The open stroke is abandoned for lifts and drops, which write pixels, and
+     * for the same reason [undo] abandons one. A [FloatOp.Move] does not: it
+     * arrives eight times a second while the transform box is being dragged,
+     * and there is no stroke open then anyway — the box owns the pen.
+     */
+    fun float(op: FloatOp) {
+        if (op !is FloatOp.Move) router.abandon()
+        document.requestFloat(op)
         redrawDry()
     }
 

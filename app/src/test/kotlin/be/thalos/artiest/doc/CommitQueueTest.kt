@@ -68,6 +68,10 @@ class CommitQueueTest {
             // against the wrong order.
             log.append('M')
         }
+
+        override fun onFloat(op: FloatOp) {
+            log.append('F')
+        }
     }
 
     @Test
@@ -212,6 +216,7 @@ class CommitQueueTest {
             override fun onRedo() = Unit
             override fun onLayers(op: LayerOp) = Unit
             override fun onSelect(op: SelectOp) = Unit
+            override fun onFloat(op: FloatOp) = Unit
         }
         val sent = ArrayList<Stroke>(total)
         repeat(total) { sent.add(stroke(it.toFloat())) }

@@ -102,6 +102,15 @@ class StackCompositor {
         top: Float,
         right: Float,
         bottom: Float,
+        /**
+         * Pixels lifted off a sheet and not yet put back, or null.
+         *
+         * They are drawn *in that sheet's place* with the source region punched
+         * out, so a selection being moved reads as a hole and a shape over it
+         * rather than as a copy — and so the sheets above it still cover it.
+         * The export passes null and drops the float first; see `PngExporter`.
+         */
+        floating: FloatingPixels? = null,
     ): Boolean {
         // The paper is the bottom of the stack and not a backdrop slid under it
         // afterwards. See the class header: it is the same image today and a
@@ -120,9 +129,31 @@ class StackCompositor {
             // blit that cannot change a pixel.
             if (alpha <= 0) continue
             painted++
-            if (i != wetAt) {
+            val float = if (floating != null && floating.isOpen &&
+                floating.sourceLayerId == entry.id
+            ) {
+                floating
+            } else {
+                null
+            }
+            if (i != wetAt && float == null) {
                 sheetPaint.alpha = alpha
                 if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
+                continue
+            }
+            if (float != null) {
+                // The hole and the float, inside one offscreen layer. `DST_OUT`
+                // straight onto the frame would cut through the paper and every
+                // sheet already painted, which is the same trap the eraser's wet
+                // pass documents -- and the float has to go *inside* the group
+                // so a sheet above it still covers it.
+                val save = canvas.saveLayerAlpha(left, top, right, bottom, alpha)
+                sheetPaint.alpha = 255
+                if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
+                float.punchInto(canvas)
+                float.drawInto(canvas)
+                if (i == wetAt) wet!!.draw(canvas)
+                canvas.restoreToCount(save)
                 continue
             }
             // An offscreen layer only when it buys something: it is what scopes

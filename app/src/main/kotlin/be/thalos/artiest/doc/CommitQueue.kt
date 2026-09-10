@@ -94,6 +94,18 @@ class CommitQueue {
          * lets that class be an ordinary unsynchronized object.
          */
         class Select(val op: SelectOp) : Commit
+
+        /**
+         * Lift, move, drop or cancel the floating pixels.
+         *
+         * Queued for the fourth time for the same reason the other three are.
+         * A lift reads the sheet and a drop writes it, so both are pixel
+         * operations that must land in the order the user asked for them
+         * against everything else that touches pixels — and the move that
+         * arrives eight times a second between them has to arrive in order too,
+         * or the pixels are dropped at a transform the user has already changed.
+         */
+        class Float(val op: FloatOp) : Commit
     }
 
     /**
@@ -111,6 +123,7 @@ class CommitQueue {
         fun onRedo()
         fun onLayers(op: LayerOp)
         fun onSelect(op: SelectOp)
+        fun onFloat(op: FloatOp)
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
@@ -156,6 +169,11 @@ class CommitQueue {
         queue.add(Commit.Select(op))
     }
 
+    /** UI thread, from the transform box. See [Commit.Float]. */
+    fun float(op: FloatOp) {
+        queue.add(Commit.Float(op))
+    }
+
     /**
      * Render thread. Applies every commit queued so far, in order, and returns
      * how many.
@@ -176,6 +194,7 @@ class CommitQueue {
                 Commit.Redo -> sink.onRedo()
                 is Commit.Layers -> sink.onLayers(commit.op)
                 is Commit.Select -> sink.onSelect(commit.op)
+                is Commit.Float -> sink.onFloat(commit.op)
             }
             applied++
         }

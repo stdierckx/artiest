@@ -173,6 +173,10 @@ class DocumentTest {
             // against the wrong order.
             log.append('M')
         }
+
+        override fun onFloat(op: FloatOp) {
+            log.append('F')
+        }
     }
 
     @Test

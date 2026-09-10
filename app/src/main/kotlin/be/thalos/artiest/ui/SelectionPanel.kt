@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import be.thalos.artiest.canvas.MarqueeShape
+import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 
@@ -60,9 +61,11 @@ fun SelectionButton(
     mode: SelectMode,
     selecting: Boolean,
     hasSelection: Boolean,
+    floating: Boolean,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onOp: (SelectOp) -> Unit,
+    onFloatOp: (FloatOp) -> Unit,
     onSelecting: (Boolean) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -80,12 +83,14 @@ fun SelectionButton(
                 mode = mode,
                 selecting = selecting,
                 hasSelection = hasSelection,
+                floating = floating,
                 onShape = {
                     onShape(it)
                     onSelecting(true)
                 },
                 onMode = onMode,
                 onOp = onOp,
+                onFloatOp = onFloatOp,
                 onDismiss = { open = false },
             )
         }
@@ -98,9 +103,11 @@ private fun SelectionPanel(
     mode: SelectMode,
     selecting: Boolean,
     hasSelection: Boolean,
+    floating: Boolean,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onOp: (SelectOp) -> Unit,
+    onFloatOp: (FloatOp) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.roundToPx() }
@@ -158,6 +165,29 @@ private fun SelectionPanel(
                     Word("All", false) { onOp(SelectOp.All) }
                     Word("None", false, enabled = hasSelection) { onOp(SelectOp.None) }
                     Word("Flip", false, enabled = hasSelection) { onOp(SelectOp.Invert) }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Label("Move and turn")
+                Spacer(Modifier.height(6.dp))
+                // Lift is one button and its two endings are the other two.
+                // Nothing here is a mode the user can be left in by accident:
+                // while pixels are in the air the box is on the canvas saying
+                // so, and both ways out are in front of them.
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Word("Lift", false, enabled = hasSelection && !floating) {
+                        onFloatOp(FloatOp.LiftSelection)
+                        onDismiss()
+                    }
+                    Word("Sheet", false, enabled = !floating) {
+                        onFloatOp(FloatOp.LiftLayer)
+                        onDismiss()
+                    }
+                    Word("Drop", false, enabled = floating) { onFloatOp(FloatOp.Drop) }
+                    // "Cancel" and not "Undo": there is a real Undo on the top
+                    // bar, and this is not it -- nothing has been written, so
+                    // there is nothing in the history to walk back.
+                    Word("Cancel", false, enabled = floating) { onFloatOp(FloatOp.Cancel) }
                 }
             }
         }

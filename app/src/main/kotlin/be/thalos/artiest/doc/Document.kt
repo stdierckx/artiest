@@ -1,6 +1,7 @@
 package be.thalos.artiest.doc
 
 import android.graphics.Color
+import android.graphics.Rect
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
 
@@ -92,6 +93,18 @@ class Document(
      * through several layers.
      */
     val selection: Selection = Selection(widthPx, heightPx)
+
+    /**
+     * Pixels lifted off a sheet and not yet put back, or null.
+     *
+     * **Render thread**, like everything else that touches pixels — but read by
+     * the UI thread as well, which is what the volatile is for: the transform
+     * box has to know whether there is anything to transform, and the export
+     * has to know whether to drop one first.
+     */
+    @Volatile
+    var floating: FloatingPixels? = null
+        private set
 
     /**
      * The sheet the pen is on.
@@ -419,6 +432,103 @@ class Document(
         commits.select(op)
     }
 
+    /** Queue a change to the floating pixels. UI thread. See [CommitQueue.Commit.Float]. */
+    fun requestFloat(op: FloatOp) {
+        commits.float(op)
+    }
+
+    /**
+     * Apply one float operation. **Render thread**, from the commit sink.
+     *
+     * Returns true if anything changed, which is what the caller uses to decide
+     * whether a redraw is worth asking for.
+     */
+    fun applyFloat(op: FloatOp): Boolean {
+        val current = floating
+        return when (op) {
+            FloatOp.LiftSelection -> {
+                if (current != null) return false
+                val lifted = FloatingPixels.lift(layers.active, selection) ?: return false
+                floating = lifted
+                true
+            }
+
+            FloatOp.LiftLayer -> {
+                if (current != null) return false
+                val lifted = FloatingPixels.liftWhole(layers.active, widthPx, heightPx)
+                    ?: return false
+                floating = lifted
+                true
+            }
+
+            is FloatOp.Move -> {
+                if (current == null) return false
+                current.matrix = op.matrix
+                true
+            }
+
+            FloatOp.Drop -> {
+                if (current == null) return false
+                // The stencil follows the pixels. Read before the drop closes
+                // the float, because `release` is the last thing `dropFloat`
+                // does and a matrix read after it would be reading a corpse.
+                val moved = current.matrix
+                dropFloat(current)
+                selection.transformBy(moved)
+                floating = null
+                true
+            }
+
+            FloatOp.Cancel -> {
+                // Nothing to undo: the sheet was never written. That is the
+                // whole point of leaving the source in place -- see
+                // [FloatingPixels].
+                if (current == null) return false
+                current.release()
+                floating = null
+                true
+            }
+        }
+    }
+
+    /**
+     * The one write a transform makes, and the one undo step it records.
+     *
+     * The patch covers the union of where the pixels were and where they went,
+     * taken **before** either half of the write. Two patches would be two
+     * presses of undo for one move, which is not what the hand did.
+     */
+    private fun dropFloat(float: FloatingPixels) {
+        val entry = layers.byId(float.sourceLayerId)
+        if (entry == null) {
+            // The sheet was deleted while the pixels were in the air. There is
+            // nowhere to put them and nothing to undo.
+            float.release()
+            return
+        }
+        val union = Rect(float.sourceBounds)
+        val moved = Rect()
+        float.transformedBounds(moved)
+        union.union(moved)
+        val patch = PixelPatch.capture(
+            float.sourceLayerId,
+            entry.layer,
+            Bounds.of(
+                union.left.toFloat(), union.top.toFloat(),
+                union.right.toFloat(), union.bottom.toFloat(),
+            ),
+            widthPx,
+            heightPx,
+        )
+        float.dropInto(entry.layer)
+        float.release()
+        if (patch != null) {
+            history.record(patch)
+            publishHistory()
+        }
+        layers.touchActive()
+    }
+
     /** A fresh empty sheet, allocated by the UI thread. See [LayerStack]. */
     fun newLayer(): Layer = layers.newLayer()
 
@@ -461,6 +571,8 @@ class Document(
         publishHistory()
         layers.close()
         selection.close()
+        floating?.release()
+        floating = null
     }
 
     companion object {
