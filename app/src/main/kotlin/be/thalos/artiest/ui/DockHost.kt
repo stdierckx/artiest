@@ -165,16 +165,27 @@ fun DockHost(
             val gridW = (hostWidth / slotPx).toInt().coerceAtLeast(1)
             val gridH = (hostHeight / slotPx).toInt().coerceAtLeast(1)
 
-            for (bar in layout.edges) {
+            // Clamp, overflow, say so — and **clamp for the screen, not for the
+            // file**. A workspace made on a tablet and opened on a phone has to
+            // come back whole when it goes home again, so what is cut here is
+            // cut on the way to the glass and `layout` is untouched. When
+            // nothing has to be cut, `fitted.layout` is the same instance that
+            // came in, which is what makes "a layout that fits both ways round
+            // does not move" true rather than merely likely.
+            val fitted = remember(layout, gridW, gridH) { layout.fittedTo(gridW, gridH) }
+            val shown = fitted.layout
+
+            for (bar in shown.edges) {
                 BarView(
                     bar = bar,
-                    layout = layout,
+                    layout = shown,
                     onLayout = onLayout,
                     arranging = arranging,
                     onDraw = { shaping = bar.id },
                     drag = drag,
                     filter = filter,
                     onFilter = onFilter,
+                    overflow = fitted.overflow[bar.id].orEmpty(),
                     modifier = Modifier
                         .align(bar.dock.alignment())
                         .padding(Chrome.EDGE_INSET)
@@ -198,16 +209,17 @@ fun DockHost(
 
             // After the edges, so a bar the user placed himself wins the
             // overlap. He put it there; the edge was always going to be there.
-            for (bar in layout.floating) {
+            for (bar in shown.floating) {
                 FloatingBarView(
                     bar = bar,
-                    layout = layout,
+                    layout = shown,
                     onLayout = onLayout,
                     arranging = arranging,
                     onDraw = { shaping = bar.id },
                     drag = drag,
                     filter = filter,
                     onFilter = onFilter,
+                    overflow = fitted.overflow[bar.id].orEmpty(),
                     hostWidth = hostWidth,
                     hostHeight = hostHeight,
                     slotContent = slotContent,
@@ -244,7 +256,7 @@ fun DockHost(
             // Last, and over everything: while a shape is being drawn it is the
             // only thing on the screen that answers a pointer.
             shaping?.let { id ->
-                val surface = layout.surface(id)
+                val surface = shown.surface(id)
                 if (surface == null) {
                     shaping = null
                 } else {
@@ -306,30 +318,26 @@ private fun BarView(
     drag: DockDrag,
     filter: CatalogueFilter,
     onFilter: (CatalogueFilter) -> Unit,
+    overflow: List<ToolItem>,
     modifier: Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    if (bar.isEmpty && !arranging) return
+    if (bar.isEmpty && !arranging && overflow.isEmpty()) return
 
-    val shapeButton: @Composable () -> Unit = {
-        ShapeButton(bar, layout, onLayout, onDraw)
-    }
+    // The furniture that sits beside the run rather than on it: a button
+    // covering a cell is a cell nothing can be dropped into. The shape button
+    // is arrange-only; the chevron is never optional, because it is the
+    // promise that no control silently disappears.
+    val leading: @Composable () -> Unit = { if (arranging) ShapeButton(bar, layout, onLayout, onDraw) }
+    val trailing: @Composable () -> Unit = { OverflowChevron(overflow, bar.axis, Modifier, slotContent) }
 
     if (!bar.region.isStrip) {
-        if (!arranging) {
+        Row(verticalAlignment = Alignment.Top, modifier = modifier) {
+            leading()
             ChromeSurface(
-                bar, layout, onLayout, arranging, drag, filter, onFilter, modifier, slotContent,
+                bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
             )
-        } else {
-            // Beside the shape rather than on it: a button covering a cell is a
-            // cell nothing can be dropped into, and arrange mode is when
-            // dropping happens.
-            Row(verticalAlignment = Alignment.Top, modifier = modifier) {
-                shapeButton()
-                ChromeSurface(
-                    bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
-                )
-            }
+            trailing()
         }
         return
     }
@@ -340,17 +348,17 @@ private fun BarView(
             .onGloballyPositioned { drag.bounds[bar.id] = it.boundsInRoot() }
             .padding(Chrome.BAR_PADDING),
     ) {
-        if (!arranging) {
-            BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
-        } else if (bar.axis == Axis.VERTICAL) {
+        if (bar.axis == Axis.VERTICAL) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                shapeButton()
+                leading()
                 BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
+                trailing()
             }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                shapeButton()
+                leading()
                 BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
+                trailing()
             }
         }
     }
@@ -789,6 +797,7 @@ private fun FloatingBarView(
     drag: DockDrag,
     filter: CatalogueFilter,
     onFilter: (CatalogueFilter) -> Unit,
+    overflow: List<ToolItem>,
     hostWidth: Float,
     hostHeight: Float,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
@@ -863,6 +872,8 @@ private fun FloatingBarView(
         } else {
             BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
         }
+
+        OverflowChevron(overflow, bar.axis, Modifier, slotContent)
 
         if (arranging) {
             // A bar has a length and a depth, so it can be dragged bigger. A

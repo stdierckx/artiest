@@ -527,6 +527,54 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     fun reshaped(regionOf: (Surface) -> CellRegion): DockLayout =
         of(surfaces.map { it.reshaped(regionOf(it)) })
 
+    /**
+     * The same layout on a grid this size, and what would not fit.
+     *
+     * **Clamp, overflow, say so** — the rule from `docs/workspace-plan.md`, in
+     * that order, and this is the first two thirds of it. Every shape is cut to
+     * the cells that exist; anything standing on a cell that has gone is
+     * handed back so the caller can show it rather than lose it.
+     *
+     * **This is for drawing, and it is never saved.** A workspace made on a
+     * tablet and opened on a phone must come back whole when it goes home
+     * again, so the clamp is applied on the way to the screen and the layout on
+     * disk is untouched. That is also why [Fitted.layout] is `this` — the same
+     * instance, not an equal one — when nothing had to be cut: a rotation that
+     * changes nothing must not recompose the chrome, and a layout that fits
+     * both ways round must not move.
+     */
+    fun fittedTo(gridW: Int, gridH: Int): Fitted {
+        if (gridW < 1 || gridH < 1) return Fitted(this, emptyMap())
+        var cut = false
+        val overflow = LinkedHashMap<String, List<ToolItem>>()
+        val out = ArrayList<Surface>(surfaces.size)
+        for (surface in surfaces) {
+            val region = surface.region.clampedTo(gridW, gridH)
+            if (region == surface.region) {
+                out += surface
+                continue
+            }
+            cut = true
+            val fits = surface.slots.placements.filter { region.accepts(it.x, it.y, it.w, it.h) }
+            val lost = surface.slots.placements
+                .filter { it !in fits }
+                .sortedWith(compareBy({ it.y }, { it.x }))
+                .map { it.item }
+            if (lost.isNotEmpty()) overflow[surface.id] = lost
+            out += surface.with(slots = SurfaceLayout.of(region, fits))
+        }
+        return Fitted(if (cut) DockLayout(out) else this, overflow)
+    }
+
+    /** A layout cut to a screen, and the controls that did not survive the cut. */
+    data class Fitted(
+        val layout: DockLayout,
+        /** By surface id, in flow order. What the overflow chevron lists. */
+        val overflow: Map<String, List<ToolItem>>,
+    ) {
+        val isWhole: Boolean get() = overflow.isEmpty()
+    }
+
     private fun without(surface: Surface, item: ToolItem): SurfaceLayout {
         val here = locate(item) ?: return surface.slots
         return if (here.surface.id == surface.id) surface.slots.remove(here.cell) else surface.slots
