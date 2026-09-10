@@ -74,6 +74,7 @@ import be.thalos.artiest.ui.Axis
 import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.LayersButton
+import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
@@ -779,12 +780,14 @@ private fun CanvasScreen(
                     ink = ink,
                     recentInks = recentInks,
                     onInkCommitted = { recentInks = store.pushRecentColour(it) },
-                    onFixate = { spot ->
+                    onFixate = { panel, spot ->
                         // Three ordinary operations and no new idea: make a
                         // floating bar, put the panel on it, and turn on
                         // arrange mode so the next thing the hand does is move
-                        // it somewhere better.
-                        val (next, _) = docks.addFloating(ToolItem.COLOUR_PANEL, spot)
+                        // it somewhere better. Every panel is fixated through
+                        // this one path, which is what makes adding the next
+                        // one a catalogue entry rather than a feature.
+                        val (next, _) = docks.addFloating(panel, spot)
                         docks = next
                         store.save(next)
                         arranging = true
@@ -908,7 +911,7 @@ private fun ToolSlot(
     onInk: (Int) -> Unit,
     recentInks: List<Int>,
     onInkCommitted: (Int) -> Unit,
-    onFixate: (BarSpot) -> Unit,
+    onFixate: (ToolItem, BarSpot) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
     eraserSize: Float,
@@ -953,7 +956,7 @@ private fun ToolSlot(
             palette = PALETTE,
             recent = recentInks,
             onCommit = onInkCommitted,
-            onFixate = onFixate,
+            onFixate = { onFixate(ToolItem.COLOUR_PANEL, it) },
         )
 
         /**
@@ -1031,6 +1034,18 @@ private fun ToolSlot(
             IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
 
         ToolItem.LAYERS -> LayersButton(
+            layers = layerRows,
+            activeId = activeLayer,
+            maxLayers = LayerStack.MAX_LAYERS,
+            onOp = onLayerOp,
+            onAdd = onLayerAdd,
+            onDuplicate = onLayerDuplicate,
+            onOpenChange = onLayersOpen,
+            onFixate = { onFixate(ToolItem.LAYERS_PANEL, it) },
+        )
+
+        /** The same list, kept. See [ToolItem.LAYERS_PANEL]. */
+        ToolItem.LAYERS_PANEL -> LayersPanelCard(
             layers = layerRows,
             activeId = activeLayer,
             maxLayers = LayerStack.MAX_LAYERS,

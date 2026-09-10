@@ -53,6 +53,7 @@ object ToolIcons {
         ToolItem.ERASER -> eraser
         ToolItem.ERASER_SIZE -> eraser
         ToolItem.LAYERS -> layers
+        ToolItem.LAYERS_PANEL -> layers
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.
@@ -414,6 +415,27 @@ object ToolIcons {
                 moveTo(18.0f, 8.8f)
                 lineTo(21.2f, 12f)
                 lineTo(18.0f, 15.2f)
+            }
+        }
+    }
+
+    /**
+     * A corner being pulled: two strokes across the angle, and an arrow out of
+     * it. What you grab to make a floating toolbar bigger.
+     */
+    val resize: ImageVector by lazy {
+        icon("resize") {
+            stroke {
+                moveTo(21.0f, 12.0f)
+                lineTo(12.0f, 21.0f)
+                moveTo(21.0f, 17.4f)
+                lineTo(17.4f, 21.0f)
+                moveTo(21.0f, 6.6f)
+                lineTo(6.6f, 21.0f)
+                moveTo(21.0f, 6.6f)
+                lineTo(15.6f, 6.6f)
+                moveTo(21.0f, 6.6f)
+                lineTo(21.0f, 12.0f)
             }
         }
     }

@@ -201,6 +201,79 @@ class DockLayoutTest {
     }
 
     @Test
+    fun `resizing a floating bar resizes the panel that is its whole reason`() {
+        val (next, id) = empty.addFloating(ToolItem.COLOUR_PANEL, here)
+        val bigger = next.resizeFloating(id, 9, 14)
+        assertEquals(9, bigger.bar(id)?.slots?.covering(0)?.span)
+        assertEquals(14, bigger.bar(id)?.slots?.covering(0)?.depth)
+        assertEquals(9, bigger.bar(id)?.slots?.slotCount, "the bar is the panel's window")
+        assertEquals(14, bigger.bar(id)?.depthCells)
+    }
+
+    @Test
+    fun `a bar of buttons resizes in length only`() {
+        val (next, id) = empty.addFloating(ToolItem.STATS, here)
+        val longer = next.resizeFloating(id, 6, 9)
+        assertEquals(6, longer.bar(id)?.slots?.slotCount)
+        assertEquals(1, longer.bar(id)?.depthCells, "a button is a button however long the bar")
+    }
+
+    @Test
+    fun `a resize is clamped rather than refused, and an edge cannot be resized`() {
+        val (next, id) = empty.addFloating(ToolItem.STATS, here)
+        assertEquals(2, next.resizeFloating(id, -3, 1).bar(id)?.slots?.slotCount)
+        assertEquals(24, next.resizeFloating(id, 900, 1).bar(id)?.slots?.slotCount)
+        assertEquals(
+            Dock.LEFT.defaultSlots,
+            next.resizeFloating("left", 4, 4).edge(Dock.LEFT).slots.slotCount,
+        )
+    }
+
+    @Test
+    fun `a chosen size follows the control along a bar of the same direction`() {
+        val (next, id) = empty.addFloating(ToolItem.COLOUR_PANEL, here)
+        val sized = next.resizeFloating(id, 8, 9)
+        // Bottom runs the same way as a floating bar, so the size carries.
+        val moved = sized.place("bottom", ToolItem.COLOUR_PANEL, 0)
+        assertEquals(8, moved.locate(ToolItem.COLOUR_PANEL)?.placement?.span)
+        assertEquals(9, moved.locate(ToolItem.COLOUR_PANEL)?.placement?.depth)
+
+        // Turning it on its side has nothing sensible to carry, so it goes back
+        // to what the catalogue says.
+        val turned = sized.place("left", ToolItem.COLOUR_PANEL, 0)
+        assertEquals(11, turned.locate(ToolItem.COLOUR_PANEL)?.placement?.span)
+        assertEquals(6, turned.locate(ToolItem.COLOUR_PANEL)?.placement?.depth)
+    }
+
+    @Test
+    fun `docking a floating bar into an edge empties it and closes it`() {
+        val (next, id) = empty.addFloating(ToolItem.STATS, here)
+        val withTwo = next.place(id, ToolItem.CLEAR, 1)
+        val docked = assertNotNull(withTwo.dockInto(id, "top"))
+        assertNull(docked.bar(id), "the bar it came from is gone")
+        assertEquals("top", docked.locate(ToolItem.STATS)?.bar?.id)
+        assertEquals("top", docked.locate(ToolItem.CLEAR)?.bar?.id)
+    }
+
+    @Test
+    fun `docking is refused whole when the edge cannot take all of it`() {
+        // The panel takes eleven of the right edge's twelve slots, so one of the
+        // two controls fits and the other does not. Half a bar arriving is worse
+        // than none: the half left behind is on a bar that was about to close.
+        val full = empty.place("right", ToolItem.COLOUR_PANEL, 0)
+        val (one, id) = full.addFloating(ToolItem.STATS, here)
+        val two = one.place(id, ToolItem.CLEAR, 1)
+
+        assertNull(two.dockInto(id, "right"))
+        assertEquals(id, two.locate(ToolItem.STATS)?.bar?.id, "and nothing moved")
+        assertEquals(id, two.locate(ToolItem.CLEAR)?.bar?.id)
+
+        assertNotNull(two.dockInto(id, "top"), "somewhere with room takes both")
+        assertNull(two.dockInto("left", "top"), "an edge is not a bar you can dock")
+        assertNull(two.dockInto(id, id))
+    }
+
+    @Test
     fun `of keeps the first copy of a duplicated item and drops the rest`() {
         val layout = DockLayout.of(
             listOf(

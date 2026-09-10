@@ -60,7 +60,18 @@ object DockCodec {
             append('|').append(bar.id)
             bar.spot?.let { append('@').append(fmt(it.x)).append(',').append(fmt(it.y)) }
             append(':').append(bar.slots.slotCount)
-            append(':').append(bar.slots.placements.joinToString(",") { "${it.slot}=${it.item.id}" })
+            append(':').append(
+                bar.slots.placements.joinToString(",") { p ->
+                    // A panel carries the size the user gave it; nothing else
+                    // does, because nothing else can be resized and a number
+                    // that is always derivable is a number that can go stale.
+                    if (p.item.kind == ToolKind.PANEL) {
+                        "${p.slot}=${p.item.id}@${p.span}x${p.depth}"
+                    } else {
+                        "${p.slot}=${p.item.id}"
+                    }
+                }
+            )
         }
     }
 
@@ -134,9 +145,30 @@ object DockCodec {
             val eq = entry.indexOf('=')
             if (eq <= 0) return@mapNotNull null
             val slot = entry.substring(0, eq).toIntOrNull() ?: return@mapNotNull null
-            val item = ToolItem.byId(entry.substring(eq + 1)) ?: return@mapNotNull null
-            Placement(item, slot, item.slotsIn(axis))
+            val rest = entry.substring(eq + 1)
+            val at = rest.indexOf('@')
+            val item = ToolItem.byId(if (at < 0) rest else rest.substring(0, at))
+                ?: return@mapNotNull null
+            // A size that will not parse falls back to the catalogue's, which is
+            // a control at the wrong size rather than a control that is gone.
+            val size = if (at < 0) null else sizeOf(rest.substring(at + 1))
+            Placement(
+                item = item,
+                slot = slot,
+                span = size?.first ?: item.slotsIn(axis),
+                depth = size?.second ?: item.depthIn(axis),
+            )
         }
+
+    /** `6x11`, or null. */
+    private fun sizeOf(text: String): Pair<Int, Int>? {
+        val x = text.indexOf('x')
+        if (x <= 0) return null
+        val along = text.substring(0, x).toIntOrNull() ?: return null
+        val across = text.substring(x + 1).toIntOrNull() ?: return null
+        if (along !in 1..MAX_SLOTS || across !in 1..MAX_SLOTS) return null
+        return along to across
+    }
 
     /**
      * The five-dock format. Its `float` segment becomes the first floating bar,

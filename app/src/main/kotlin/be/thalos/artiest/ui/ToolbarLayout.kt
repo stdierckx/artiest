@@ -13,9 +13,23 @@ package be.thalos.artiest.ui
  * Only the leading edge is stored; the covered range is derived, which is why
  * there is no way to represent a placement whose two ends disagree.
  */
-data class Placement(val item: ToolItem, val slot: Int, val span: Int) {
+data class Placement(
+    val item: ToolItem,
+    val slot: Int,
+    val span: Int,
+    /**
+     * How far this sticks out across the bar, in cells.
+     *
+     * One for everything that lives inside a bar, and the reason it is carried
+     * rather than asked of the item is the same reason [span] is: a panel can be
+     * resized, and once the user has chosen a size it is a property of this
+     * placement and not of the catalogue.
+     */
+    val depth: Int = 1,
+) {
     init {
         require(span >= 1) { "${item.id} spans $span slots" }
+        require(depth >= 1) { "${item.id} is $depth cells deep" }
     }
 
     /** Exclusive. */

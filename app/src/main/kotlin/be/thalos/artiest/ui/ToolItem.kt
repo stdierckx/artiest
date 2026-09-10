@@ -224,6 +224,22 @@ enum class ToolItem(
         ToolKind.PANEL, cellsTall = 11,
     ),
 
+    /**
+     * The layers panel, kept. Seven cells by eleven, which is 308 by 484dp.
+     *
+     * Wider than the colour panel because a layer row is a thumbnail, a name
+     * and three buttons side by side, and taller for no reason except that the
+     * list is the part worth having more of — the docked card spends every
+     * extra cell on rows rather than on card.
+     *
+     * A separate entry from [LAYERS], for the reason [COLOUR_PANEL] is separate
+     * from [COLOUR]: fixate leaves the button where it was.
+     */
+    LAYERS_PANEL(
+        "layers_panel", "Layers panel", "Layers", 7, ToolGroup.CANVAS,
+        ToolKind.PANEL, cellsTall = 11,
+    ),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

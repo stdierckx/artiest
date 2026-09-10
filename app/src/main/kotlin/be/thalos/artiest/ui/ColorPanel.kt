@@ -109,7 +109,7 @@ fun ColourButton(
                     // is this button: the new bar appears beside it and the
                     // drag that moves it somewhere better is the one arrange
                     // mode has just been turned on for.
-                    onFixate(spotBeside(here, view.width, view.height))
+                    onFixate(BarSpot.beside(here, view.width, view.height))
                 },
             )
         }
@@ -306,23 +306,7 @@ fun ColourPanelCard(
     }
 }
 
-/**
- * A spot beside [anchor], as a fraction of a window [w] by [h].
- *
- * Beside and slightly below, so the new bar does not land exactly under the
- * finger that asked for it and cover the button it came from.
- */
-private fun spotBeside(anchor: Offset, w: Int, h: Int): BarSpot {
-    if (w <= 0 || h <= 0) return BarSpot(0.34f, 0.38f)
-    // Far enough to clear the bar the button is on. The button that opened the
-    // popup is usually on an edge, and a new bar landing on top of that edge is
-    // in the neighbourhood in the least useful sense.
-    return BarSpot.of((anchor.x + CLEAR_OF_THE_BAR) / w, (anchor.y + 40f) / h)
-        ?: BarSpot(0.34f, 0.38f)
-}
 
-/** One bar's thickness and then some, in pixels at a typical tablet density. */
-private const val CLEAR_OF_THE_BAR = 190f
 
 @Composable
 private fun SwatchRow(label: String, colours: List<Int>, ink: Int, onInk: (Int) -> Unit) {

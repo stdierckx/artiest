@@ -297,7 +297,39 @@ Sized against the docking work, which was one sitting and one build.
 | **P2** | `ToolItem` gains `cellsWide`, `cellsTall`, `turnsWithDock`; `Dock` becomes an attachment and `Bar` an identity, so floating bars can be made and closed; `DockCodec` → `v3`, reading `v2` and `v1`. | **done** |
 | **P3** | A bar takes the depth of its deepest item. Floating bars get a grip that spans them and an X. A drop on bare canvas makes a bar where it landed. | **done** |
 | **P4** | `COLOUR_PANEL`, 6 × 11. The popup grows a fixate button that makes a floating bar beside it and turns on arrange mode. | **done** |
-| **P5** | The tool-settings panel the UI plan's U6 wants, as a second panel, to prove the concept repeats. | U6 |
+| **P5** | The layers panel as a second panel, to prove the concept repeats: a catalogue entry, a glyph, a pin in its popup and a card. | **done** |
+| **P6** | Floating bars are resizable, dock into an edge when dragged onto one, and show their grip, resize and close only while arranging. | **done** |
+| **P7** | The tool-settings panel the UI plan's U6 wants, as a third panel. | U6 |
+
+### What P5 cost, which is the number that matters
+
+The layers panel was made pinnable in one catalogue entry, one line of glyph
+mapping, one `when` branch, a pin in its header and a card that calls the body
+the popup already called. No new concept, no new persistence, no new gesture.
+That is the claim this design was chosen on, and it is now a measurement rather
+than a prediction.
+
+### Three things asked for after the first build, and what they changed
+
+**Resizable.** A floating bar is dragged bigger by a corner handle, in cells
+rather than pixels — a bar is a whole number of slots long and a whole number of
+cells deep, and a handle reporting pixels would be asking the model to hold a
+size it cannot represent. A bar of buttons has only a length; a bar holding one
+panel is that panel's window, so both numbers are the panel's. The chosen size
+is the one thing about a placement that is *not* derivable, so it is the one
+thing the codec writes: `0=colour_panel@6x11`.
+
+**Dockable to the sides.** Dragging a floating bar's grip onto an edge moves
+everything on it there and closes it. Refused whole if it will not all fit —
+half a bar arriving is worse than none, because the half left behind is on a bar
+that is about to close. The hit test asks edges by name rather than going
+through the general one, because the bar being dragged is under the finger by
+definition and the general test would answer with the bar itself every time.
+
+**Handles only while arranging.** A grip, a resize corner and an X on every
+floating panel all the time is chrome the user pays for in screen with nothing
+to show for it. The panel is what they wanted on screen; the furniture belongs
+to the mode that exists for moving things.
 
 P1 and P2 are JVM-only and testable without a device, which is the same
 property that made the dock work go well and is worth protecting.

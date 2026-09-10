@@ -43,13 +43,26 @@ class DockCodecTest {
                 Bar("bottom", Dock.BOTTOM, null,
                     ToolbarLayout.of(24, listOf(Placement(ToolItem.SIZE, 4, 4)))),
                 Bar("f1", Dock.FLOATING, BarSpot(0.32f, 0.45f),
-                    ToolbarLayout.of(8, listOf(Placement(ToolItem.COLOUR_PANEL, 0, 6)))),
+                    ToolbarLayout.of(8, listOf(Placement(ToolItem.COLOUR_PANEL, 0, 6, 11)))),
             ),
         )
         assertEquals(
-            "v3|left:12:0=pen|top:24:|right:12:|bottom:24:4=size|f1@0.32,0.45:8:0=colour_panel",
+            "v3|left:12:0=pen|top:24:|right:12:|bottom:24:4=size|" +
+                "f1@0.32,0.45:8:0=colour_panel@6x11",
             DockCodec.encode(layout),
         )
+    }
+
+    @Test
+    fun `a size the user chose survives, and a bad one falls back to the catalogue`() {
+        val kept = assertNotNull(DockCodec.decode("v3|f1@0.2,0.2:12:0=colour_panel@9x4"))
+        assertEquals(9, kept.floating.single().slots.covering(0)?.span)
+        assertEquals(4, kept.floating.single().slots.covering(0)?.depth)
+
+        // A control at the wrong size is recoverable; one that is gone is not.
+        val fallback = assertNotNull(DockCodec.decode("v3|f1@0.2,0.2:12:0=colour_panel@nope"))
+        assertEquals(6, fallback.floating.single().slots.covering(0)?.span)
+        assertEquals(11, fallback.floating.single().slots.covering(0)?.depth)
     }
 
     @Test

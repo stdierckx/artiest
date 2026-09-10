@@ -56,6 +56,15 @@ import androidx.compose.ui.window.PopupProperties
 import be.thalos.artiest.doc.LayerInfo
 import be.thalos.artiest.doc.LayerOp
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 
 /**
  * The layers panel, as a button that opens it.
@@ -86,10 +95,16 @@ fun LayersButton(
     onAdd: () -> Unit,
     onDuplicate: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
+    onFixate: (BarSpot) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    var here by remember { mutableStateOf(Offset.Zero) }
+    val view = LocalView.current
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(38.dp)) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(38.dp).onGloballyPositioned { here = it.positionInRoot() },
+    ) {
         IconToolButton(
             icon = ToolIcons.layers,
             label = "Layers",
@@ -114,6 +129,10 @@ fun LayersButton(
                 onAdd = onAdd,
                 onDuplicate = onDuplicate,
                 onDismiss = { open = false },
+                onFixate = {
+                    open = false
+                    onFixate(BarSpot.beside(here, view.width, view.height))
+                },
             )
         }
     }
@@ -128,13 +147,9 @@ private fun LayersPanel(
     onAdd: () -> Unit,
     onDuplicate: () -> Unit,
     onDismiss: () -> Unit,
+    onFixate: () -> Unit,
 ) {
     val gap = with(LocalDensity.current) { 10.dp.roundToPx() }
-    // Which row is having its name typed into, by id. Kept here and not in the
-    // snapshot because it is a property of this panel being open, not of the
-    // document -- and because a `Popup` drops its `remember` state when it
-    // closes, which is exactly the right lifetime for it.
-    var editing by remember { mutableIntStateOf(0) }
 
     Popup(
         popupPositionProvider = remember(gap) { PanelPosition(gap) },
@@ -147,131 +162,241 @@ private fun LayersPanel(
             shadowElevation = 14.dp,
             modifier = Modifier.width(PANEL_WIDTH),
         ) {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            LayersBody(
+                layers = layers,
+                activeId = activeId,
+                maxLayers = maxLayers,
+                onOp = onOp,
+                onAdd = onAdd,
+                onDuplicate = onDuplicate,
+            ) {
+                // The whole of "fixate" for this panel, and it is the same one
+                // sentence the colour wheel's is: the panel becomes a control on
+                // a toolbar of its own. See docs/panels-plan.md.
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable(onClick = onFixate),
                 ) {
-                    Text(
-                        "Layers",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "${layers.size} of $maxLayers",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // Top of the drawing at the top of the list. The stack is
-                // published bottom-first because that is the order it is
-                // composited in, and every layers panel anyone has used shows
-                // it the other way up -- the sheet nearest the viewer nearest
-                // the top of the screen.
-                Column(
-                    Modifier
-                        .heightIn(max = LIST_MAX_HEIGHT)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    for (i in layers.indices.reversed()) {
-                        val info = layers[i]
-                        LayerRow(
-                            info = info,
-                            active = info.id == activeId,
-                            editing = editing == info.id,
-                            canMoveUp = i < layers.size - 1,
-                            canMoveDown = i > 0,
-                            onSelect = {
-                                editing = 0
-                                onOp(LayerOp.SetActive(info.id))
-                            },
-                            onRename = { editing = info.id },
-                            onRenamed = { name ->
-                                editing = 0
-                                val trimmed = name.trim()
-                                // An empty name is a row you cannot tell from
-                                // its neighbour, so it is declined rather than
-                                // stored -- the old name is still there and the
-                                // user can try again.
-                                if (trimmed.isNotEmpty() && trimmed != info.name) {
-                                    onOp(LayerOp.SetName(info.id, trimmed))
-                                }
-                            },
-                            onVisible = { onOp(LayerOp.SetVisible(info.id, !info.visible)) },
-                            onUp = { onOp(LayerOp.Move(info.id, i + 1)) },
-                            onDown = { onOp(LayerOp.Move(info.id, i - 1)) },
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                val active = layers.firstOrNull { it.id == activeId }
-                if (active != null) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
-                    ) {
-                        Text(
-                            "Opacity",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Slider(
-                            value = active.opacity,
-                            onValueChange = { onOp(LayerOp.SetOpacity(active.id, it)) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            percent(active.opacity),
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.width(34.dp),
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Add and Duplicate go out as bare intents rather than as
-                    // `LayerOp`s, because both of those carry a `Layer` and a
-                    // `Layer` is a 27.19 MiB bitmap that has to be allocated by
-                    // whoever knows the document's size. The panel knows how
-                    // many sheets there are and nothing else about them, which
-                    // is the right amount for a panel to know.
-                    PanelAction(
-                        ToolIcons.add,
-                        "New layer",
-                        enabled = layers.size < maxLayers,
-                        onClick = onAdd,
-                    )
-                    PanelAction(
-                        ToolIcons.duplicate,
-                        "Duplicate layer",
-                        enabled = layers.size < maxLayers,
-                        onClick = onDuplicate,
-                    )
-                    PanelAction(
-                        ToolIcons.trash,
-                        "Delete layer",
-                        // The last sheet is not deletable -- see `LayerStack`.
-                        // Dimmed rather than hidden, so the button does not
-                        // move around as sheets come and go.
-                        enabled = layers.size > 1,
-                        onClick = { onOp(LayerOp.Delete(activeId)) },
+                    Icon(
+                        ToolIcons.pin,
+                        "Keep this panel on screen",
+                        Modifier.size(15.dp),
+                        MaterialTheme.colorScheme.primary,
                     )
                 }
             }
         }
     }
 }
+
+
+/**
+ * The panel's contents, with nothing around them.
+ *
+ * Shared by the popup and by [LayersPanelCard], which is the point: fixating
+ * changes where the panel is drawn and nothing about what it is. A second copy
+ * would be two layer lists that drift apart, and the one you were not looking
+ * at would be the one that was wrong.
+ *
+ * [trailing] is what goes at the end of the header — the pin in the popup, and
+ * nothing at all in the docked card, which is already kept.
+ */
+@Composable
+private fun LayersBody(
+    layers: List<LayerInfo>,
+    activeId: Int,
+    maxLayers: Int,
+    onOp: (LayerOp) -> Unit,
+    onAdd: () -> Unit,
+    onDuplicate: () -> Unit,
+    modifier: Modifier = Modifier,
+    listMaxHeight: Dp = LIST_MAX_HEIGHT,
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    // Which row is having its name typed into, by id. Kept here and not in the
+    // snapshot because it is a property of this panel being open, not of the
+    // document.
+    var editing by remember { mutableIntStateOf(0) }
+
+        Column(modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            ) {
+                Text(
+                    "Layers",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${layers.size} of $maxLayers",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    trailing()
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Top of the drawing at the top of the list. The stack is
+            // published bottom-first because that is the order it is
+            // composited in, and every layers panel anyone has used shows
+            // it the other way up -- the sheet nearest the viewer nearest
+            // the top of the screen.
+            Column(
+                Modifier
+                    .heightIn(max = listMaxHeight)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (i in layers.indices.reversed()) {
+                    val info = layers[i]
+                    LayerRow(
+                        info = info,
+                        active = info.id == activeId,
+                        editing = editing == info.id,
+                        canMoveUp = i < layers.size - 1,
+                        canMoveDown = i > 0,
+                        onSelect = {
+                            editing = 0
+                            onOp(LayerOp.SetActive(info.id))
+                        },
+                        onRename = { editing = info.id },
+                        onRenamed = { name ->
+                            editing = 0
+                            val trimmed = name.trim()
+                            // An empty name is a row you cannot tell from
+                            // its neighbour, so it is declined rather than
+                            // stored -- the old name is still there and the
+                            // user can try again.
+                            if (trimmed.isNotEmpty() && trimmed != info.name) {
+                                onOp(LayerOp.SetName(info.id, trimmed))
+                            }
+                        },
+                        onVisible = { onOp(LayerOp.SetVisible(info.id, !info.visible)) },
+                        onUp = { onOp(LayerOp.Move(info.id, i + 1)) },
+                        onDown = { onOp(LayerOp.Move(info.id, i - 1)) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            val active = layers.firstOrNull { it.id == activeId }
+            if (active != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                ) {
+                    Text(
+                        "Opacity",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = active.opacity,
+                        onValueChange = { onOp(LayerOp.SetOpacity(active.id, it)) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        percent(active.opacity),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.width(34.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Add and Duplicate go out as bare intents rather than as
+                // `LayerOp`s, because both of those carry a `Layer` and a
+                // `Layer` is a 27.19 MiB bitmap that has to be allocated by
+                // whoever knows the document's size. The panel knows how
+                // many sheets there are and nothing else about them, which
+                // is the right amount for a panel to know.
+                PanelAction(
+                    ToolIcons.add,
+                    "New layer",
+                    enabled = layers.size < maxLayers,
+                    onClick = onAdd,
+                )
+                PanelAction(
+                    ToolIcons.duplicate,
+                    "Duplicate layer",
+                    enabled = layers.size < maxLayers,
+                    onClick = onDuplicate,
+                )
+                PanelAction(
+                    ToolIcons.trash,
+                    "Delete layer",
+                    // The last sheet is not deletable -- see `LayerStack`.
+                    // Dimmed rather than hidden, so the button does not
+                    // move around as sheets come and go.
+                    enabled = layers.size > 1,
+                    onClick = { onOp(LayerOp.Delete(activeId)) },
+                )
+            }
+        }
+}
+
+/**
+ * The same panel, as a control on a bar.
+ *
+ * It fills the cell the layout gave it rather than sizing itself, because a
+ * control that disagrees with its slot is a control that overlaps its
+ * neighbour — and the list takes whatever height is left after the header, the
+ * opacity slider and the actions, so a taller bar is a longer list rather than
+ * more empty card.
+ *
+ * The thumbnails are turned on for as long as this exists, which is the same
+ * bargain the popup makes: they cost a full-page read each and are only worth
+ * building while somebody is looking at them.
+ */
+@Composable
+fun LayersPanelCard(
+    layers: List<LayerInfo>,
+    activeId: Int,
+    maxLayers: Int,
+    onOp: (LayerOp) -> Unit,
+    onAdd: () -> Unit,
+    onDuplicate: () -> Unit,
+    onOpenChange: (Boolean) -> Unit,
+) {
+    DisposableEffect(Unit) {
+        onOpenChange(true)
+        onDispose { onOpenChange(false) }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        LayersBody(
+            layers = layers,
+            activeId = activeId,
+            maxLayers = maxLayers,
+            onOp = onOp,
+            onAdd = onAdd,
+            onDuplicate = onDuplicate,
+            modifier = Modifier.fillMaxSize(),
+            // Whatever is left once the fixed parts have had theirs. The number
+            // is the header, the opacity row, the actions and the paddings; it
+            // is a constant because those parts are, and a list that guesses
+            // its own height inside a scrollable is a list that measures wrong.
+            listMaxHeight = (maxHeight - CARD_FURNITURE).coerceAtLeast(80.dp),
+        )
+    }
+}
+
+/** How much of a docked layers card is not the list. See [LayersPanelCard]. */
+private val CARD_FURNITURE = 150.dp
 
 /**
  * One sheet: what it looks like, what it is called, and whether it is showing.

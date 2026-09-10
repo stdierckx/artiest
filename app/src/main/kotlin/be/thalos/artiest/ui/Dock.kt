@@ -1,5 +1,7 @@
 package be.thalos.artiest.ui
 
+import androidx.compose.ui.geometry.Offset
+
 /**
  * Which way a bar's slots run.
  *
@@ -72,6 +74,29 @@ data class BarSpot(val x: Float, val y: Float) {
             if (!x.isFinite() || !y.isFinite()) return null
             return BarSpot(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
         }
+
+        /**
+         * Beside a button at [anchor] in a window [w] by [h], in pixels.
+         *
+         * What "fixate puts it in the neighbourhood of where it was opened"
+         * comes to. Far enough across to clear the bar the button is on: the
+         * button is usually on an edge, and a new bar landing on top of that
+         * edge is in the neighbourhood in the least useful sense.
+         */
+        fun beside(anchor: Offset, w: Int, h: Int): BarSpot {
+            if (w <= 0 || h <= 0) return FALLBACK
+            // Towards the middle, not always to the right. A button on the
+            // right edge pushed further right lands off the screen and clamps
+            // back onto the bar it came from, which is the one place it must
+            // not be.
+            val inward = if (anchor.x > w / 2f) -CLEAR_OF_THE_BAR else CLEAR_OF_THE_BAR
+            return of((anchor.x + inward) / w, (anchor.y + 40f) / h) ?: FALLBACK
+        }
+
+        /** One bar's thickness and then some, in pixels at a tablet's density. */
+        private const val CLEAR_OF_THE_BAR = 190f
+
+        private val FALLBACK = BarSpot(0.34f, 0.38f)
     }
 }
 
@@ -100,6 +125,12 @@ class Bar(
 
     /** The slots [item] would take on this bar. The second dimension, applied. */
     fun spanOf(item: ToolItem): Int = item.slotsIn(axis)
+
+    /** How far [item] would stick out of this bar, in cells. */
+    fun depthOf(item: ToolItem): Int = item.depthIn(axis)
+
+    /** How thick this bar is across its axis, in cells. One, or its deepest item. */
+    val depthCells: Int get() = slots.placements.maxOfOrNull { it.depth } ?: 1
 
     override fun equals(other: Any?): Boolean =
         other is Bar && other.id == id && other.dock == dock &&
@@ -196,13 +227,74 @@ class DockLayout private constructor(val bars: List<Bar>) {
      */
     fun place(barId: String, item: ToolItem, slot: Int): DockLayout {
         val target = bar(barId) ?: return this
-        val cleared = locate(item)
+        val was = locate(item)
+        val cleared = was
             ?.let { withBar(it.bar.with(slots = it.bar.slots.remove(it.slot))) }
             ?: this
         val fresh = cleared.bar(barId) ?: target
+        // A size the user chose follows the control, so long as the bar it is
+        // going to runs the same way. Across the turn there is nothing sensible
+        // to carry -- a panel six wide and eleven tall does not become eleven
+        // wide by being moved -- so it goes back to what the catalogue says.
+        val kept = was?.placement?.takeIf { was.bar.axis == fresh.axis }
         return cleared.withBar(
-            fresh.with(slots = fresh.slots.place(Placement(item, slot, fresh.spanOf(item))))
+            fresh.with(
+                slots = fresh.slots.place(
+                    Placement(
+                        item = item,
+                        slot = slot,
+                        span = kept?.span ?: fresh.spanOf(item),
+                        depth = kept?.depth ?: fresh.depthOf(item),
+                    )
+                )
+            )
         )
+    }
+
+    /**
+     * Resize a floating bar, and the panel on it if there is exactly one.
+     *
+     * A bar of buttons only has a length; a bar holding a panel is that panel's
+     * window, so the two numbers are the panel's. Both are the user's choice and
+     * both are clamped rather than refused — a drag that asks for a bar of
+     * minus three slots is a hand, not an error.
+     */
+    fun resizeFloating(barId: String, along: Int, across: Int): DockLayout {
+        val bar = bar(barId) ?: return this
+        if (!bar.isFloating) return this
+        val cells = along.coerceIn(MIN_CELLS, MAX_CELLS)
+        val deep = across.coerceIn(MIN_CELLS, MAX_CELLS)
+        val only = bar.slots.placements.singleOrNull()?.takeIf { it.item.kind == ToolKind.PANEL }
+            ?: return withBar(bar.with(slots = bar.slots.resized(cells)))
+        return withBar(
+            bar.with(
+                slots = ToolbarLayout.of(
+                    cells,
+                    listOf(only.copy(slot = 0, span = cells, depth = deep)),
+                )
+            )
+        )
+    }
+
+    /**
+     * Empty a floating bar into another, and close it.
+     *
+     * What dragging a floating bar onto an edge does. Everything on it moves in
+     * order, each to the first slot that will take it; if any of them will not
+     * fit, nothing moves and the answer is null — half a bar arriving is worse
+     * than none, because the half left behind is on a bar that is about to be
+     * closed.
+     */
+    fun dockInto(from: String, to: String): DockLayout? {
+        val source = bar(from) ?: return null
+        if (!source.isFloating || from == to) return null
+        val target = bar(to) ?: return null
+        var next = this
+        for (placement in source.slots.placements) {
+            val slot = next.firstFit(target.id, placement.item) ?: return null
+            next = next.place(target.id, placement.item, slot)
+        }
+        return next.closeBar(from)
     }
 
     /** Empty the slot [slot] falls in on [barId]. A no-op on an empty slot. */
@@ -324,6 +416,10 @@ class DockLayout private constructor(val bars: List<Bar>) {
         /** Room to drop something else in beside a freshly fixated panel. */
         private const val SPARE_SLOTS = 2
 
+        /** A bar smaller than this is not a bar; larger than this is not a screen. */
+        private const val MIN_CELLS = 2
+        private const val MAX_CELLS = 24
+
         /**
          * Build a layout from whatever bars are supplied, filling in the rest.
          *
@@ -410,7 +506,9 @@ class DockLayout private constructor(val bars: List<Bar>) {
                 dock.id, dock, null,
                 ToolbarLayout.of(
                     dock.defaultSlots,
-                    at.map { (item, slot) -> Placement(item, slot, item.slotsIn(dock.axis)) },
+                    at.map { (item, slot) ->
+                        Placement(item, slot, item.slotsIn(dock.axis), item.depthIn(dock.axis))
+                    },
                 ),
             )
 
