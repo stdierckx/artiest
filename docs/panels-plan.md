@@ -345,3 +345,49 @@ property that made the dock work go well and is worth protecting.
 3. **Fixate needs a gesture that races the canvas.** Arrange mode is the settled
    answer to that class of problem and a second answer would make the first
    unreliable.
+
+### A third panel, and the defect it exposed
+
+**The selection panel is fixatable.** Written after the first hour with a pen,
+because that hour said it should be: a selection is the one thing in this app
+you keep *adjusting* — pick a shape, drag, change what a gesture does, drag
+again, lift, turn, drop — and every one of those adjustments cost a tap to
+reopen a panel that closes itself as soon as the pen touches the page. Of the
+three panels this is the one where fixating changes the work rather than the
+convenience, and it arrived last. The cost was the catalogue entry and the
+renderer branch the design promised, plus one behavioural difference worth
+naming: the popup closes itself when you lift pixels, because the transform box
+is on the canvas and the popup would be sitting over the pixels it moves. The
+fixated card does not, and that is the whole point of it — Move, Paste and
+Cancel stay under the hand for as long as the pixels are in the air.
+
+**The Select toggle and the Selection panel no longer share a face.** They did,
+and two buttons that look identical and do different things is the same defect
+as two buttons lit at once: there is nothing to read. The panel button now
+carries a dashed box with two sliders under it — the box says what it is about,
+the sliders say it is a way in rather than a tool. `ToolIconsTest` pins it,
+along with the rule underneath: no two catalogue items share a glyph unless the
+pair is written down as deliberate.
+
+**Resizing a panel resized the panel and not the bar.** The user's report was
+that the colour wheel did not shrink when the toolbar did, and it turned out to
+be two separate faults on the same complaint.
+
+The first is the wheel's. `ColourPanelCard` filled its cell and handed the disc
+the card's *width*; the disc is square, so the smaller of the two budgets is
+what decides how big it can be, and the height budget was never consulted. Drag
+the handle upwards and the wheel kept its size while the swatch rows went off
+the bottom. A control that ignores half of the space it was given is a resize
+handle that half works. The card now measures both, and scrolls if the estimate
+of the furniture around the disc is ever short.
+
+The second is the dock's, and it is the more interesting one. `Placement.depth`
+carries a resized panel's depth and says in its own KDoc why: *"a panel can be
+resized, and once the user has chosen a size it is a property of this placement
+and not of the catalogue"*. `BarRun` asked the catalogue anyway. So a shrunk
+colour panel drew at five cells inside a bar still eleven cells deep, and the
+wheel ended up floating in a grey rectangle twice its height — which reads as
+"the resize did nothing" even though the card had in fact resized. It now uses
+`Bar.thickness()`, which is the function that exists so that the run and the
+grip beside it cannot disagree, and `DockLayoutTest` pins the disagreement the
+renderer has to resolve.

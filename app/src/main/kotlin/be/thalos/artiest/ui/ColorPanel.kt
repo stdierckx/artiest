@@ -3,8 +3,10 @@ package be.thalos.artiest.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -259,9 +263,18 @@ private fun ColourBody(
     palette: List<Int>,
     recent: List<Int>,
     modifier: Modifier = Modifier,
+    wheelWidth: Dp? = null,
 ) {
-    Column(modifier) {
-        ColorWheel(argb = ink, onColorChange = onInk, modifier = Modifier.fillMaxWidth())
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        ColorWheel(
+            argb = ink,
+            onColorChange = onInk,
+            // The popup has one width and always will, so the wheel takes it.
+            // A docked card is whatever size the user dragged it to, and there
+            // the wheel is told a width that already has the height budget in
+            // it -- see [ColourPanelCard].
+            modifier = if (wheelWidth == null) Modifier.fillMaxWidth() else Modifier.width(wheelWidth),
+        )
         Spacer(Modifier.height(14.dp))
         SwatchRow("Palette", palette, ink, onInk)
         if (recent.isNotEmpty()) {
@@ -287,24 +300,58 @@ fun ColourPanelCard(
     palette: List<Int>,
     recent: List<Int>,
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // The disc is square, so it is the *smaller* of the two budgets that
+        // decides how big it can be. It used to be told only the width, which
+        // is why dragging the resize handle upwards did nothing visible: the
+        // wheel kept its size and the swatch rows went off the bottom of the
+        // card. A control that ignores half of the space it was given is a
+        // resize handle that half works.
+        val side = minOf(maxWidth - SIDE_PADDING * 2, maxHeight - CARD_FURNITURE)
+            .coerceAtLeast(MIN_WHEEL)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = SIDE_PADDING, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Colour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                hexOf(ink),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Colour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    hexOf(ink),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            ColourBody(ink, onInk, palette, recent, Modifier.fillMaxWidth(), wheelWidth = side)
         }
-        Spacer(Modifier.height(8.dp))
-        ColourBody(ink, onInk, palette, recent, Modifier.fillMaxWidth())
     }
 }
+
+/**
+ * How much of a docked colour card is not the disc: the two paddings, the
+ * header, the value bar, the two swatch rows and the gaps between them.
+ *
+ * A constant because those parts are constant, and it is counted rather than
+ * guessed: 20 of padding, 15 of header, 8 of gap, 40 for the value bar and the
+ * gap over it, 14 more, then 45 and 55 for the two swatch rows. It is still an
+ * estimate, and the scroll above is what makes an estimate safe — if the
+ * swatches wrap onto a second line on a very narrow card, the card scrolls
+ * instead of hiding them.
+ */
+private val CARD_FURNITURE = 200.dp
+
+/** Below this the disc is not something you can aim at, so the card scrolls instead. */
+private val MIN_WHEEL = 96.dp
+
+private val SIDE_PADDING = 12.dp
 
 
 

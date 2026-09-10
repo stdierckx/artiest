@@ -246,6 +246,26 @@ class DockLayoutTest {
     }
 
     @Test
+    fun `a resized panel is how deep the placement says, not how deep the catalogue says`() {
+        // The one thing the bar's own thickness must be read from. Asking the
+        // catalogue instead was a real defect with a visible face: shrinking a
+        // fixated colour panel made the card smaller and left the toolbar under
+        // it at eleven cells, so the wheel sat in a grey rectangle twice its
+        // height. This pins the disagreement the renderer has to resolve.
+        val (next, id) = empty.addFloating(ToolItem.COLOUR_PANEL, here)
+        val sized = next.resizeFloating(id, 6, 5)
+        val bar = assertNotNull(sized.bar(id))
+
+        assertEquals(5, bar.depthCells, "the bar is as deep as its deepest placement")
+        assertEquals(5, bar.slots.placements.single().depth)
+        assertEquals(
+            11,
+            ToolItem.COLOUR_PANEL.depthIn(Axis.HORIZONTAL),
+            "and the catalogue still says eleven, which is why the two must not be confused",
+        )
+    }
+
+    @Test
     fun `docking a floating bar into an edge empties it and closes it`() {
         val (next, id) = empty.addFloating(ToolItem.STATS, here)
         val withTwo = next.place(id, ToolItem.CLEAR, 1)

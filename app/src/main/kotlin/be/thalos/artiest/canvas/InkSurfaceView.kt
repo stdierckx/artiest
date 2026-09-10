@@ -1642,7 +1642,87 @@ class InkSurfaceView(
             (batches.issuedCount - batchesBefore).toInt(),
             (driver.totalDabs - dabsBefore).toInt(),
         )
+        // After the measured window closes, on purpose: this is chrome, and
+        // the number above is what the ink path costs.
+        notePen(event)
         return handled
+    }
+
+    /**
+     * Move the hover ring to where the pen actually is, and say whether a
+     * barrel button is down.
+     *
+     * **Called from the touch path as well as the hover path**, which is the
+     * fix for a defect found on the tablet: `onHoverEvent` stops firing the
+     * moment the pen touches the glass, so the ring stayed where the pen had
+     * last hovered and sat there while a stroke was drawn somewhere else. A
+     * ring that is right until you use it is worse than no ring, because it is
+     * a measurement of the wrong place.
+     *
+     * Only a stylus moves it. A finger dragging the canvas is a pan, and a ring
+     * following a pan would be showing what the eraser covers at a place the
+     * eraser is not.
+     */
+    private fun notePen(event: MotionEvent) {
+        val barrel = (event.buttonState and BARREL_BUTTONS) != 0
+        if (barrel != barrelHeld) {
+            barrelHeld = barrel
+            onBarrel?.invoke(barrel)
+        }
+        val index = stylusIndex(event)
+        if (index < 0) return
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN,
+            MotionEvent.ACTION_MOVE,
+            -> onHover?.invoke(true, event.getX(index), event.getY(index))
+            // Nothing on up: the pen lifts back into hover range and the very
+            // next hover sample says where it is. Clearing here would blink
+            // the ring off and on again at the end of every stroke.
+            else -> {}
+        }
+    }
+
+    /** The first stylus pointer in [event], or -1. See [notePen]. */
+    private fun stylusIndex(event: MotionEvent): Int {
+        for (i in 0 until event.pointerCount) {
+            val tool = event.getToolType(i)
+            if (tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Whether a barrel button is down **right now**.
+     *
+     * Distinct from `pen.erase`, which is the erase decision for the stroke in
+     * progress and is deliberately latched at the first sample — see
+     * [applyEraseFor]. This one tracks the button itself, so the chrome can
+     * light the eraser while the button is held and unlight it when it is
+     * released, including while the pen is only hovering.
+     */
+    @Volatile
+    var barrelHeld: Boolean = false
+        private set
+
+    /**
+     * Called when [barrelHeld] changes, so the toolbar can show which tool the
+     * pen would use if it came down now.
+     *
+     * A callback for the reason [onHover] is one: this class is the render path
+     * and holds no Compose state.
+     */
+    var onBarrel: ((Boolean) -> Unit)? = null
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        // ACTION_BUTTON_PRESS and ACTION_BUTTON_RELEASE arrive here while the
+        // pen is out of contact, and they are the only samples that carry a
+        // button change with no movement -- press the barrel while holding the
+        // pen still and there is no hover sample to notice it in.
+        notePen(event)
+        return super.onGenericMotionEvent(event)
     }
 
     /**
@@ -1669,6 +1749,7 @@ class InkSurfaceView(
         // which would leave a ring stranded at the edge of the screen.
         val inRange = event.actionMasked != MotionEvent.ACTION_HOVER_EXIT
         onHover?.invoke(inRange, event.x, event.y)
+        notePen(event)
         // The framework's own hover handling still runs: the router took a
         // presence reading, it did not consume the event.
         return super.onHoverEvent(event)
@@ -1684,7 +1765,20 @@ class InkSurfaceView(
      * that is exactly the rubbed-out area at a full press.
      */
     val cursorDiameterDocPx: Float
-        get() = if (pen.erase) pen.eraseSizeMax else pen.sizeMax
+        get() = if (erasingNow) pen.eraseSizeMax else pen.sizeMax
+
+    /**
+     * Whether the pen would take ink out if it came down now — or is doing so,
+     * if it is already down.
+     *
+     * Two answers and not one, because the barrel button is a momentary
+     * override and the stroke's own decision is latched: mid-stroke the honest
+     * answer is what [applyEraseFor] decided, and a barrel released halfway
+     * through must not shrink the ring to the pencil's width while the eraser
+     * is still erasing.
+     */
+    val erasingNow: Boolean
+        get() = if (strokeOpen) pen.erase else eraserTool || barrelHeld
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)

@@ -79,6 +79,7 @@ import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.ui.BarSpot
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.SelectionButton
+import be.thalos.artiest.ui.SelectionPanelCard
 import be.thalos.artiest.ui.SelectionOverlay
 import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
@@ -379,6 +380,17 @@ private fun CanvasScreen(
 
     /** W11. Whether that tool is currently taking ink out instead of putting it in. */
     var eraser by remember { mutableStateOf(false) }
+
+    /**
+     * Whether a barrel button is held down right now.
+     *
+     * The toolbar's copy of `InkSurfaceView.barrelHeld`, and unlike the hover
+     * ring's state this one *does* recompose — that is the point of it. Holding
+     * the barrel changes which tool the pen would use, and a bar that goes on
+     * showing the pencil while the pen erases is a bar that is lying. It moves
+     * twice per press, so the recomposition is free.
+     */
+    var barrel by remember { mutableStateOf(false) }
 
     /**
      * Where the pen is hovering, in view pixels, or `Unspecified` when it is
@@ -710,6 +722,7 @@ private fun CanvasScreen(
                     it.onHover = { inRange, x, y ->
                         cursorAt.value = if (inRange) Offset(x, y) else Offset.Unspecified
                     }
+                    it.onBarrel = { held -> barrel = held }
                     // Both bump a counter read inside a draw lambda rather than
                     // setting a value: a marquee at 200 Hz and a pan at 90 Hz
                     // must not recompose the chrome.
@@ -770,7 +783,16 @@ private fun CanvasScreen(
                 val v = surface
                 if (v == null) 0f else v.cursorDiameterDocPx * v.transform.scale
             },
-            erasing = { surface?.pen?.erase == true || eraser },
+            // `erasingNow` and not `pen.erase`: that field is the *last*
+            // stroke's decision once the pen has lifted, so a single barrel
+            // stroke left the ring on for the rest of the session.
+            //
+            // `barrel` is read as well, and it is not redundant: it is the only
+            // one of the two that is snapshot state, so it is what makes the
+            // ring appear the moment the side button goes down with the pen
+            // held still. `erasingNow` is a plain field and changing it
+            // invalidates nothing on its own.
+            erasing = { barrel || surface?.erasingNow == true },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1000,6 +1022,7 @@ private fun CanvasScreen(
                     grain = grain,
                     onGrain = { grain = it },
                     eraser = eraser,
+                    barrel = barrel,
                     onEraser = {
                         eraser = !eraser
                         surface?.eraserTool = eraser
@@ -1117,6 +1140,7 @@ private fun ToolSlot(
     preset: BrushPreset,
     onPreset: (BrushPreset) -> Unit,
     eraser: Boolean,
+    barrel: Boolean,
     onEraser: () -> Unit,
     exporting: Boolean,
     importing: Boolean,
@@ -1179,36 +1203,45 @@ private fun ToolSlot(
         // Lit rather than disabled. The tool in the hand is a state worth
         // seeing from across the room, and a greyed-out Pen says "broken" at a
         // glance where a lit Pencil says "this one".
-        // `&& !selecting` on all three: while the marquee is in hand the pen
+        //
+        // `&& !selecting` on all four: while the marquee is in hand the pen
         // does not draw, and a bar that lights the pencil *and* the Select
         // button says two things are current when only one is. Found on the
         // tablet, where the screenshot showed both lit at once.
+        //
+        // `&& !barrel` on the three brushes, and `|| barrel` on the eraser, is
+        // the same rule applied to the other momentary override: holding the
+        // pen's side button erases, so while it is held the eraser is the tool
+        // in the hand and the bar should say so. The toggle underneath does not
+        // move — releasing the button gives the brush back, which is what a
+        // pencil with a rubber on the end does — so this is the bar reporting
+        // the pen rather than the bar changing state.
         ToolItem.PEN -> IconToolButton(
             icon = ToolIcons.pen,
             label = item.label,
             onClick = { onPreset(BrushPreset.PEN) },
-            selected = preset == BrushPreset.PEN && !selecting,
+            selected = preset == BrushPreset.PEN && !selecting && !barrel,
         )
 
         ToolItem.PENCIL -> IconToolButton(
             icon = ToolIcons.pencil,
             label = item.label,
             onClick = { onPreset(BrushPreset.PENCIL) },
-            selected = preset == BrushPreset.PENCIL && !selecting,
+            selected = preset == BrushPreset.PENCIL && !selecting && !barrel,
         )
 
         ToolItem.MARKER -> IconToolButton(
             icon = ToolIcons.marker,
             label = item.label,
             onClick = { onPreset(BrushPreset.MARKER) },
-            selected = preset == BrushPreset.MARKER && !selecting,
+            selected = preset == BrushPreset.MARKER && !selecting && !barrel,
         )
 
         ToolItem.ERASER -> IconToolButton(
             icon = ToolIcons.eraser,
             label = item.label,
             onClick = onEraser,
-            selected = eraser && !selecting,
+            selected = (eraser || barrel) && !selecting,
         )
 
         ToolItem.ERASER_SIZE -> ToolSlider(
@@ -1238,6 +1271,20 @@ private fun ToolSlot(
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
             onSelecting = onSelecting,
+            onFixate = { onFixate(ToolItem.SELECTION_PANEL, it) },
+        )
+
+        /** The same panel, kept. See [ToolItem.SELECTION_PANEL]. */
+        ToolItem.SELECTION_PANEL -> SelectionPanelCard(
+            shape = marqueeShape,
+            mode = marqueeMode,
+            selecting = selecting,
+            hasSelection = hasSelection,
+            floating = floating,
+            onShape = { onMarqueeShape(it); onSelecting(true) },
+            onMode = onMarqueeMode,
+            onOp = onSelectOp,
+            onFloatOp = onFloatOp,
         )
         ToolItem.LAYERS -> LayersButton(
             layers = layerRows,

@@ -13,10 +13,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
  * **Why it exists.** An eraser has no mark to look at until after it has
  * removed something, so without an outline the only way to find out how much it
  * takes is to take it and undo. The user asked for exactly this — "a very thin
- * circle, so the user can predict himself what is going to be erased" — and the
- * same argument applies, more weakly, to the pencil: the size slider is a
- * number in document pixels, and the ring is what turns it into a width you can
- * see before you commit to it.
+ * circle, so the user can predict himself what is going to be erased".
+ *
+ * **The eraser only.** The same argument was made, more weakly, for the pencil
+ * — the size slider is a number in document pixels and the ring turns it into a
+ * width you can see — and it did not survive contact: the pen leaves a mark
+ * exactly where it is, so a ring drawn around the nib is a second thing to look
+ * at that says what the ink already said. It reads as clutter under the hand
+ * for every stroke of a drawing. The eraser is the one tool whose mark is an
+ * absence, so it is the one tool that needs the outline.
  *
  * **It is a Compose overlay and not something the view draws.** The canvas is a
  * `SurfaceView` with a front-buffered layer: anything drawn into it goes through
@@ -46,23 +51,30 @@ fun BrushCursor(
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier) {
+        // [at] is read **first**, before any early return, and that ordering is
+        // load-bearing rather than style. A draw lambda is re-invalidated by
+        // the snapshot state it read on its last pass; a pass that returned
+        // before touching `cursorAt` is a pass that unsubscribed from it, and
+        // the ring then never draws again however far the pen moves. Found on
+        // the tablet, where gating on the eraser first turned the ring off for
+        // the life of the process.
         val centre = at()
-        if (centre == Offset.Unspecified) return@Canvas
+        val erase = erasing()
+        if (!erase || centre == Offset.Unspecified) return@Canvas
         val d = diameterPx()
         // Below about four pixels across the two rings are a dot, and a dot
         // under the pen tip is indistinguishable from a speck of ink the user
         // is about to try to rub off.
         if (!(d > MIN_VISIBLE_PX)) return@Canvas
         val r = d / 2f
-        val erase = erasing()
         drawCircle(
-            color = if (erase) DARK_ERASE else DARK,
+            color = DARK,
             radius = r + HAIR,
             center = centre,
             style = Stroke(width = HAIR),
         )
         drawCircle(
-            color = if (erase) LIGHT_ERASE else LIGHT,
+            color = LIGHT,
             radius = r,
             center = centre,
             style = Stroke(width = HAIR),
@@ -80,13 +92,12 @@ private const val HAIR = 1f
 /** See [BrushCursor]. */
 private const val MIN_VISIBLE_PX = 4f
 
-private val DARK = Color(0x99000000)
-private val LIGHT = Color(0x99FFFFFF)
-
 /**
- * The eraser's ring is the same shape in a different colour, because the two
- * tools are the same nib and the only thing that distinguishes them at a glance
- * is that one is about to remove something.
+ * A warm pair rather than plain black and white, which is what the ring used to
+ * fall back to when the pencil had one too. Now that the only ring is the
+ * eraser's there is nothing to tell it apart from, so the colour is chosen for
+ * contrast alone: dark outside, light inside, and whichever of the two has
+ * contrast against what is underneath is the one you see.
  */
-private val DARK_ERASE = Color(0xAA202020)
-private val LIGHT_ERASE = Color(0xAAFFC08A)
+private val DARK = Color(0xAA202020)
+private val LIGHT = Color(0xAAFFC08A)

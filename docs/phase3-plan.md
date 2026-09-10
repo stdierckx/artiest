@@ -680,3 +680,63 @@ tablet, and some of it cannot be had any other way.
 5. **Which seven blend modes?** The proposal is Normal, Multiply, Screen,
    Overlay, Darken, Lighten, Difference. Multiply and Screen carry most of the
    value for drawing; the rest are cheap to add and easy to remove.
+
+## What the first hour with a pen said
+
+The phase shipped, the user drew with it, and seven things came back. Three were
+about the panels and are recorded in `docs/panels-plan.md`, where the panel
+design lives. The rest are here, because they are about the selection and the
+eraser.
+
+**The words were the code's words.** *Take*, *Lift*, *Drop* and *Both* are what
+this repository calls those operations, and none of them is what a person calls
+them. The user's own corrections were *subtract*, *move* and *paste*, and they
+are right in every case. The panel now draws the picture every editor draws —
+the marquee's dashed box with a badge in the corner for the four combine modes,
+four arrows for move, an arrow into a tray for paste — with the word underneath
+in nine point.
+
+The argument the old panel made for words was sound and is worth keeping: *"the
+difference between add and intersect is a sentence, and four boxes with corners
+shaded differently is a puzzle"*. What it got wrong was that the alternative to
+a puzzle is a picture **and** a word, not a word alone. Somebody who has met
+these icons in another editor recognises them; somebody who has not reads the
+caption; nobody has to work out what *Both* meant.
+
+**The hover ring stayed behind.** `onHoverEvent` stops firing the moment the pen
+touches the glass, so the eraser's outline sat where the pen had last hovered
+while a stroke was rubbed out somewhere else. A ring that is right until you use
+it is worse than no ring, because it is a measurement of the wrong place. The
+touch path now moves it too — stylus pointers only, since a finger dragging the
+canvas is a pan and a ring following a pan would be showing what the eraser
+covers at a place the eraser is not.
+
+**Only the eraser has one.** The ring's KDoc argued for the pencil as well: the
+size slider is a number in document pixels and the ring turns it into a width
+you can see. That did not survive contact. The pen leaves a mark exactly where
+it is, so a ring around the nib is a second thing to look at saying what the ink
+already said, on every stroke of a drawing. The eraser is the one tool whose
+mark is an absence.
+
+Gating on the eraser introduced a defect of its own, and it is worth writing
+down because it will happen again. A Compose draw lambda is re-invalidated by
+the snapshot state it read *on its last pass*; a pass that returns before
+reading the pen position is a pass that unsubscribed from it, and the ring then
+never draws again however far the pen moves. The gate has to come after the
+read, not before it. Found on the tablet, in the build that was meant to be the
+fix.
+
+**The bar did not say the barrel was down.** Holding the pen's side button
+erases, and nothing on screen moved — the pencil stayed lit and the eraser
+stayed dark, so the one control that could have explained what the pen was about
+to do said the opposite. The bar now reports the pen: the eraser lights while
+the button is held and the brush unlights, and the toggle underneath does not
+move, because releasing the button gives the brush back. That is the bar
+reporting rather than the bar changing state, and it is the same distinction
+`applyEraseFor` makes for the stroke itself — `barrelHeld` is the button, and
+`pen.erase` is the decision that stroke was opened with.
+
+This closes open question 1 of this plan for the *indicator* and not for the
+*gesture*: whether the barrel is the right way to subtract from a selection is
+still a question only a hand can answer, and injected events carry no button
+state, so it still has not been pressed once by this repository.

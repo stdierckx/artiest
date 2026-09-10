@@ -1,6 +1,7 @@
 package be.thalos.artiest.ui
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -54,7 +55,8 @@ object ToolIcons {
         ToolItem.ERASER_SIZE -> eraser
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
-        ToolItem.SELECTION -> marquee
+        ToolItem.SELECTION -> selectionPanel
+        ToolItem.SELECTION_PANEL -> selectionPanel
         ToolItem.LAYERS_PANEL -> layers
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
@@ -560,6 +562,171 @@ object ToolIcons {
         }
     }
 
+    /**
+     * The marquee's dashed box with two sliders under it: the selection
+     * *panel*, as opposed to the selection *tool*.
+     *
+     * A separate glyph and not the same one, which is a correction. The bar
+     * carried [marquee] twice — once on the toggle that makes the pen select,
+     * once on the button that opens this panel — and two buttons with the same
+     * face doing different things is the same defect as two buttons lit at
+     * once: there is nothing to read. The box says what it is about and the
+     * sliders say it is a way in rather than a tool.
+     */
+    val selectionPanel: ImageVector by lazy {
+        icon("selection-panel") {
+            // Smaller than [marquee]'s box and pushed up and left, to leave
+            // the bottom two rows for the sliders.
+            dashedBox(2.6f, 2.6f, 15.4f, 13.2f)
+            stroke {
+                moveTo(8.4f, 17.4f); lineTo(21.4f, 17.4f)
+                moveTo(8.4f, 21.0f); lineTo(21.4f, 21.0f)
+            }
+            fill {
+                circle(12.4f, 17.4f, 1.9f)
+                circle(17.4f, 21.0f, 1.9f)
+            }
+        }
+    }
+
+    /**
+     * The four combine modes, as one picture with four endings.
+     *
+     * Every one of them is the marquee's dashed box, so the row reads as four
+     * versions of the same thing rather than four unrelated symbols, and the
+     * badge in the corner is the whole of the difference. That is the shape
+     * these icons have in every editor that has them, and it is the reason a
+     * user who has met one before does not have to learn this one.
+     *
+     * They replace four words. The words were defensible — "the difference
+     * between add and intersect is a sentence" — and they were also *New /
+     * Add / Take / Both*, which is three sentences none of which was in the
+     * user's head. The caption under each glyph now says the word an editor
+     * would use, so the picture is the recognition and the word is the
+     * confirmation.
+     */
+    val selectNew: ImageVector by lazy { combineIcon("select-new") { } }
+
+    val selectAdd: ImageVector by lazy {
+        combineIcon("select-add") {
+            stroke {
+                moveTo(18.2f, 14.6f); lineTo(18.2f, 21.8f)
+                moveTo(14.6f, 18.2f); lineTo(21.8f, 18.2f)
+            }
+        }
+    }
+
+    val selectSubtract: ImageVector by lazy {
+        combineIcon("select-subtract") {
+            // Clear of the box on the left, where the plus's own crossbar does
+            // not have to be: a bare dash that starts under the corner reads as
+            // part of the frame rather than as a minus sign.
+            stroke(2.2f) {
+                moveTo(16.6f, 18.4f); lineTo(21.8f, 18.4f)
+            }
+        }
+    }
+
+    /**
+     * Intersect, and the one of the four that is not a badge on a box: it is
+     * the two boxes themselves with only what they share filled in, because
+     * "what both cover" is a picture and no badge says it.
+     */
+    val selectIntersect: ImageVector by lazy {
+        icon("select-intersect") {
+            stroke(1.7f) {
+                rect(2.8f, 2.8f, 14.4f, 14.4f)
+                rect(9.6f, 9.6f, 21.2f, 21.2f)
+            }
+            fill { rect(9.6f, 9.6f, 14.4f, 14.4f) }
+        }
+    }
+
+    /** Everything: the dashed box with the page inside it filled. */
+    val selectAll: ImageVector by lazy {
+        icon("select-all") {
+            dashedBox(2.6f, 2.6f, 21.4f, 21.4f)
+            fill { rect(6.6f, 6.6f, 17.4f, 17.4f) }
+        }
+    }
+
+    /** Nothing: the same box, struck through. */
+    val selectNone: ImageVector by lazy {
+        icon("select-none") {
+            dashedBox(2.6f, 2.6f, 21.4f, 21.4f)
+            stroke {
+                moveTo(6.2f, 17.8f)
+                lineTo(17.8f, 6.2f)
+            }
+        }
+    }
+
+    /**
+     * Invert: the page filled with a hole where the selection was.
+     *
+     * An even-odd fill and not two paths, because the hole has to be a hole —
+     * a second shape painted in the background colour would be a white square
+     * on a toolbar whose background the icon does not know.
+     */
+    val selectInvert: ImageVector by lazy {
+        icon("select-invert") {
+            fill(evenOdd = true) {
+                rect(2.6f, 2.6f, 21.4f, 21.4f)
+                rect(8.4f, 8.4f, 15.6f, 15.6f)
+            }
+        }
+    }
+
+    /**
+     * Four arrows from a centre: pick these pixels up and move them.
+     *
+     * It was the word "Lift", which is what the code calls the operation and
+     * not what a person calls it. What the button does to the drawing is move
+     * something, so the glyph is the move glyph every application has.
+     */
+    val moveFloat: ImageVector by lazy {
+        icon("move-float") {
+            stroke {
+                moveTo(12f, 3.2f); lineTo(12f, 20.8f)
+                moveTo(3.2f, 12f); lineTo(20.8f, 12f)
+                moveTo(8.8f, 6.4f); lineTo(12f, 3.2f); lineTo(15.2f, 6.4f)
+                moveTo(8.8f, 17.6f); lineTo(12f, 20.8f); lineTo(15.2f, 17.6f)
+                moveTo(6.4f, 8.8f); lineTo(3.2f, 12f); lineTo(6.4f, 15.2f)
+                moveTo(17.6f, 8.8f); lineTo(20.8f, 12f); lineTo(17.6f, 15.2f)
+            }
+        }
+    }
+
+    /** The same act on the whole sheet: a stack of pages with the arrows on it. */
+    val moveSheet: ImageVector by lazy {
+        icon("move-sheet") {
+            stroke {
+                rect(3.0f, 3.0f, 14.2f, 14.2f)
+                moveTo(17.6f, 6.6f); lineTo(21.0f, 6.6f); lineTo(21.0f, 21.0f)
+                lineTo(6.6f, 21.0f); lineTo(6.6f, 17.6f)
+            }
+            fill { circle(8.6f, 8.6f, 1.8f) }
+        }
+    }
+
+    /**
+     * Down into a tray: put the pixels back on the sheet.
+     *
+     * It was "Drop", and the user's own word for it is paste. The arrow going
+     * into a container is what paste looks like everywhere, and it is also
+     * literally what the operation does — the floating pixels stop floating
+     * and land on the layer.
+     */
+    val dropFloat: ImageVector by lazy {
+        icon("drop-float") {
+            stroke {
+                moveTo(12f, 2.8f); lineTo(12f, 14.4f)
+                moveTo(7.6f, 10.0f); lineTo(12f, 14.4f); lineTo(16.4f, 10.0f)
+                moveTo(3.4f, 14.6f); lineTo(3.4f, 20.6f); lineTo(20.6f, 20.6f); lineTo(20.6f, 14.6f)
+            }
+        }
+    }
+
     /** An eye. Shown on a sheet that is visible; [hidden] is its other face. */
     val visible: ImageVector by lazy {
         icon("visible") {
@@ -703,6 +870,16 @@ object ToolIcons {
             viewportHeight = 24f,
         ).also { IconScope(it).block() }.build()
 
+    /**
+     * One of the four combine modes: the marquee's dashed box with [badge]
+     * drawn into the corner it leaves free. See [selectNew].
+     */
+    private fun combineIcon(name: String, badge: IconScope.() -> Unit): ImageVector =
+        icon(name) {
+            dashedBox(2.6f, 2.6f, 15.8f, 15.8f)
+            badge()
+        }
+
     private class IconScope(private val builder: ImageVector.Builder) {
         fun stroke(width: Float = STROKE, path: PathBuilder.() -> Unit) {
             builder.addPath(
@@ -714,8 +891,44 @@ object ToolIcons {
             )
         }
 
-        fun fill(path: PathBuilder.() -> Unit) {
-            builder.addPath(pathData = PathData(path), fill = SolidColor(Color.Black))
+        /**
+         * [evenOdd] is what makes a hole a hole. A second shape painted in the
+         * background colour would be a white square on a toolbar whose colour
+         * the icon does not know — see [selectInvert].
+         */
+        fun fill(evenOdd: Boolean = false, path: PathBuilder.() -> Unit) {
+            builder.addPath(
+                pathData = PathData(path),
+                pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero,
+                fill = SolidColor(Color.Black),
+            )
+        }
+
+        /**
+         * A box drawn as marching ants: three segments a side, thinner than
+         * [STROKE] so that twelve short lines do not read as a solid frame.
+         *
+         * The same eight-lines-and-no-dash-effect trick [marquee] uses, made
+         * shared once a second icon wanted it — `ImageVector` has no dash, and
+         * a box is a box wherever it is drawn.
+         */
+        fun dashedBox(l: Float, t: Float, r: Float, b: Float) {
+            val w = (r - l) / 6f
+            val h = (b - t) / 6f
+            stroke(1.7f) {
+                moveTo(l, t); lineTo(l + 2 * w, t)
+                moveTo(l + 3 * w, t); lineTo(l + 5 * w, t)
+                moveTo(l + 5.6f * w, t); lineTo(r, t)
+                moveTo(r, t); lineTo(r, t + 2 * h)
+                moveTo(r, t + 3 * h); lineTo(r, t + 5 * h)
+                moveTo(r, t + 5.6f * h); lineTo(r, b)
+                moveTo(r, b); lineTo(l + 4 * w, b)
+                moveTo(l + 3 * w, b); lineTo(l + w, b)
+                moveTo(l + 0.4f * w, b); lineTo(l, b)
+                moveTo(l, b); lineTo(l, t + 4 * h)
+                moveTo(l, t + 3 * h); lineTo(l, t + h)
+                moveTo(l, t + 0.4f * h); lineTo(l, t)
+            }
         }
     }
 

@@ -274,11 +274,16 @@ private fun BarRun(
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val vertical = bar.axis == Axis.VERTICAL
-    val deepest = bar.slots.placements.maxOfOrNull { it.item.depthIn(bar.axis) } ?: 1
-    val thickness = maxOf(
-        Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2,
-        Chrome.SLOT * deepest,
-    )
+    // `bar.thickness()`, which asks the *placements* how deep they are, and not
+    // the catalogue. Asking the catalogue was a defect with a visible face:
+    // shrinking a fixated colour panel made the panel smaller and left the
+    // toolbar it sits on at its original size, so the wheel ended up floating
+    // in a grey rectangle twice its height. `Placement.depth` says in its own
+    // KDoc why it is carried rather than derived — a resized panel's size is a
+    // property of the placement — and this was the one reader that did not
+    // believe it. Sharing `thickness()` with the grip beside it is also what
+    // that function exists for.
+    val thickness = bar.thickness()
     val scroll = rememberScrollState()
 
     // Only as far as the last item, unless arranging. See the file KDoc.

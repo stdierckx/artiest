@@ -226,6 +226,21 @@ enum class ToolItem(
     SELECTION("selection", "Selection", "Select", 1, ToolGroup.CANVAS),
 
     /**
+     * The same panel, kept. Six cells by eight, which is 264 by 352dp.
+     *
+     * A separate entry from [SELECTION] for the reason [COLOUR_PANEL] is
+     * separate from [COLOUR]: fixate leaves the button where it was. It is here
+     * because a selection is the one thing in this app you keep *adjusting* —
+     * pick a shape, drag, change the combine mode, drag again, lift, turn,
+     * drop — and every one of those was a tap to reopen a panel that closes
+     * itself the moment the pen touches the page.
+     */
+    SELECTION_PANEL(
+        "selection_panel", "Selection panel", "Select", 6, ToolGroup.CANVAS,
+        ToolKind.PANEL, cellsTall = 8,
+    ),
+
+    /**
      * The colour wheel as a control you can keep, rather than a popup you
      * re-open. Six cells by eleven, which is 264 by 484dp.
      *
