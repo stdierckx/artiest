@@ -450,16 +450,16 @@ which is what a painter means by drawing on a multiply layer.
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | **S0** | **DONE.** The before-picture, on the tablet: the canvas is hardware, recording eight sheets costs 0.16 ms, the round trip is 3–4 ms whatever the stack holds, and a thumbnail costs 20. See **S0**. | `:app`, device | Low | — | 0.5 |
-| **S1** | **`StackCompositor`.** One loop, used by the screen and the export. Paper to the bottom of the stack in both. No visible change; a test that the two agree pixel for pixel. | `:app` | Low | — | 0.5 |
-| **S2** | **`Selection`** — path, mask, bounds — and `SelectOp` through `CommitQueue`. Model and tests only, no UI, no ink changes. The published `Path` is a copy. | `:app` | Low | — | 1 |
-| **S3** | **Confining the ink.** A selection forces the indirect path; the scratch is masked in place; clear and the eraser are confined; undo patches narrow. Pixel tests that ink outside the selection changes nothing and that the wet and dry edges are identical. | `:app` | **High** | S2 | 1.5 |
-| **S4** | **The marquee tools.** `SelectDriver` beside `StrokeDriver`, chosen once per stroke; rectangle, ellipse and lasso; add/subtract/intersect; select all, none, invert. Lasso simplification. | `:app` | Med | S2 | 1.5 |
-| **S5** | **Marching ants** in the overlay: view-space stroking, two passes, frame-clocked phase. | `:app` | Med | S2 | 1 |
-| **S6** | **The float.** `FloatingPixels`, the punch-out in the compositor, the transform box in the overlay, drop as one patch, halving below 0.5 scale, cancel. The box tracks the pen; the pixels refresh on a 120 ms floor. | `:app` | **High** | S1, S3 | 2 |
-| **S7** | **Layer transform**, as the same float over a whole sheet. Should be small if S6 is right; if it is not small, S6 is wrong. | `:app` | Low | S6 | 0.5 |
-| **S8** | **Blend modes** in `StackCompositor` and a control on the layer row. | `:app` | Med | S1, S0 | 1 |
+| **S1** | **DONE.** `StackCompositor`. One loop, used by the screen and the export. Paper to the bottom of the stack in both. No visible change; a test that the two agree pixel for pixel. | `:app` | Low | — | 0.5 |
+| **S2** | **DONE.** `Selection` — path, mask, bounds — and `SelectOp` through `CommitQueue`. Model and tests only, no UI, no ink changes. The published `Path` is a copy. | `:app` | Low | — | 1 |
+| **S3** | **DONE.** Confining the ink. A selection forces the indirect path; the scratch is masked in place; clear and the eraser are confined; undo patches narrow. Pixel tests that ink outside the selection changes nothing and that the wet and dry edges are identical. | `:app` | **High** | S2 | 1.5 |
+| **S4** | **DONE.** The marquee tools. `SelectDriver` beside `StrokeDriver`, chosen once per stroke; rectangle, ellipse and lasso; add/subtract/intersect; select all, none, invert. Lasso simplification. | `:app` | Med | S2 | 1.5 |
+| **S5** | **DONE.** Marching ants in the overlay: view-space stroking, two passes, frame-clocked phase. | `:app` | Med | S2 | 1 |
+| **S6** | **DONE.** The float. `FloatingPixels`, the punch-out in the compositor, the transform box in the overlay, drop as one patch, halving below 0.5 scale, cancel. The box tracks the pen; the pixels refresh on a 120 ms floor. | `:app` | **High** | S1, S3 | 2 |
+| **S7** | **DONE**, and it was a button. Layer transform, as the same float over a whole sheet. Should be small if S6 is right; if it is not small, S6 is wrong. | `:app` | Low | S6 | 0.5 |
+| **S8** | **DONE.** Blend modes in `StackCompositor` and a control on the layer row. | `:app` | Med | S1, S0 | 1 |
 | **S1b** | ~~GATED. The cached compositor.~~ **DID NOT FIRE.** S0 measured the round trip at 4.05 ms with one sheet and 3.0 with eight — the stack is not a cost on this device. See **S0**. | `:app` | — | S0 | 0 |
-| **S9** | **Feel pass** on the tablet, by the person holding the pen. Reconcile this document against what was measured. | device, docs | Low | S7, S8 | 0.5 |
+| **S9** | **Reconciled below**; the feel pass is the user's. Feel pass on the tablet, by the person holding the pen. Reconcile this document against what was measured. | device, docs | Low | S7, S8 | 0.5 |
 
 **≈10 days.** S1b did not fire, so the 2 it would have cost is not spent. Same caveat every estimate
 in this repo has earned: the work happens in sittings, not days, and the items
@@ -476,6 +476,122 @@ compositor and two that drift.
 
 **S0 and S1 are independent of everything else and can be done first, in one
 sitting.**
+
+## What was built, and where it departed from the plan
+
+Written after S8 landed, against the code rather than against the plan.
+**Everything in the work plan is done** and S1b did not fire. What follows is
+only the departures, because the parts that went as written are not worth a
+paragraph each.
+
+### The four things the plan got wrong
+
+**1. An empty selection deselects.** The plan drew a distinction between "no
+selection", where the whole page is drawable, and "an active selection with no
+area", where nothing is, and warned that conflating them "makes the eraser stop
+working after an unlucky boolean op with no way to tell why". Right about the
+danger, backwards about which way it runs: an active-but-empty selection *is*
+the state where nothing works and nothing explains it, because with no region
+there are no marching ants and the screen looks exactly like a document with
+nothing selected while the pen silently does nothing. So an operation that
+leaves no area deselects. Photoshop lands in the same place from the other
+direction. It also gives a tap with the marquee in hand a meaning — deselect —
+which every editor has and this plan had not thought to ask for.
+
+**2. `Path.op` cannot be tested on a plain JVM.** Stop condition 2 expected the
+path, the boolean ops and the bounds to be decidable without Robolectric, with
+only the mask needing it. They cannot be: `Path.op` is Skia, and the only way to
+have it otherwise is to write a polygon clipper — a far worse trade than
+depending on the same Robolectric-with-native-graphics setup `ScratchLayerTest`
+already uses. What the stop condition was protecting is intact: no device, and
+no renderer imported.
+
+**3. The float's matrix had to be document-space, not the one `drawBitmap`
+takes.** The plan's `FloatingPixels` sketch carried a `Matrix` and said nothing
+about whose coordinates it was in, and the obvious reading — hand it straight to
+`drawBitmap` — is wrong: a bitmap's origin is its own top left, so identity
+would have dropped the pixels in the corner of the page and a rotation about the
+middle of the selection landed somewhere else entirely. Caught by a test, not by
+the tablet. `placement` composes the source offset in, and the UI gets to work
+in the coordinates it can see.
+
+**4. The stencil follows the pixels.** Not in the plan at all. Leaving the ants
+around the hole is not where the user is looking and is not what any editor
+does — the outline *is* the selection and the selection is now over there.
+
+### The three things the plan did not know
+
+**A mask is not a bitmap.** The plan said the ink would be confined by a
+`DST_IN` of the selection mask into the scratch buffer. That does not work, and
+it fails in the direction that looks like success: Skia draws an `ALPHA_8`
+bitmap as a *mask*, colouring the paint through it, and a mask blit never visits
+the pixels the mask misses. So `drawBitmap(mask, …, DST_IN)` leaves everything
+outside the selection exactly where it was — every pixel inside correct, every
+pixel outside untouched, which reads as "the selection is not doing anything"
+rather than as a blend bug. A `BitmapShader` makes it an ordinary blit of a real
+source. `SelectionInkTest` carries the broken version longhand and asserts that
+it stays broken.
+
+`TileMode.DECAL` would have made the off-page tail of a stroke clear itself with
+no arithmetic. It is API 31 against a floor of 29, so the shader is `CLAMP` and
+the masked draw is confined to the part of the buffer that is on the page.
+
+**Two of S0's three clocks do not measure drawing.** Recorded in **S0** above.
+It is repeated here because it is the single most useful thing this phase
+learned: a `RenderNode`'s canvas *records*, and a timer around the recording
+says nothing about the GPU pass that follows it.
+
+**Wet ink has to join its sheet before the sheet blends.** The plan said blend
+modes were "`Paint.blendMode` in one compositor" and it is, but the sheet the
+pen is on cannot be blended and then have the stroke painted over the result:
+that puts the ink on the frame at normal, which is not what "drawing on a
+multiply layer" means, and it would be visible only while the pen was down — so
+the stroke would change as it lifted. Wet ink and floating pixels now go inside
+the same offscreen layer the sheet does, and the group is composited out through
+the blend mode.
+
+### One thing the tablet found that no test would have
+
+**The bar said two things were current.** With the marquee on, the pencil button
+and the Select button were both lit, and the pen was selecting. Two mutually
+exclusive states both reading as current is worse than either being wrong,
+because there is nothing to correct — the bar simply does not mean anything.
+Picking a brush now turns the marquee off, the mirror of picking a shape turning
+it on, and the brush toggles draw as unselected while the marquee is in hand.
+
+### Smaller departures, for the record
+
+- **The marquee is a fork inside `StrokeDriver`, not a second `InkInputSink`.**
+  Every rule about who may draw is about pointers and applies to a marquee word
+  for word; a second sink would have had to inherit all of it or lose it, and the
+  tap recogniser and the gesture controller both keep state that would then have
+  needed a home.
+- **The ants are a solid light line under a moving dark dash**, not two dashed
+  passes offset by half a period. Same picture, one `DashPathEffect` per frame
+  instead of two.
+- **The transform box's cancel is called "Cancel" and not "Undo"**, because
+  there is a real Undo on the top bar and this is not it: nothing has been
+  written, so there is nothing in the history to walk back.
+- **Blend modes are an enum of seven and not a `BlendMode` field.** `id` is the
+  name Phase 4's `.ora` will have to write, and a format storing an ordinal is a
+  format that breaks when the platform inserts a mode.
+
+### What has not been verified
+
+Everything below was built and unit-tested; what is missing is a hand on the
+tablet, and some of it cannot be had any other way.
+
+- **The barrel button as a momentary "take away".** Open question 1's proposal,
+  and it has never been pressed — injected events carry no button state. It is a
+  guess about the hand and it needs one.
+- **A real lasso.** The one on the tablet was seven injected points. What a
+  three-second free-hand loop feels like, and whether two document pixels
+  between kept points is the right simplification, is a judgement.
+- **Intersect ("Both").** Covered by `SelectionTest`; never driven through the
+  panel by hand.
+- **The 120 ms preview, as a feel.** It holds. Whether eight refreshes a second
+  reads as responsive or as laggy while dragging a large selection is the one
+  number in this phase that only the person holding the pen can settle.
 
 ## Deliberately not in Phase 3
 
@@ -521,16 +637,21 @@ sitting.**
 
 ## Stop conditions
 
-1. **S3 cannot make the wet stroke and the committed stroke agree at the
-   selection edge.** Stop. "Only being able to draw in the selection" is the
+1. ~~**S3 cannot make the wet stroke and the committed stroke agree at the
+   selection edge.**~~ **Did not trip.** Both passes read the same buffer, and
+   `SelectionInkTest` asserts the two are pixel-identical across an oval's soft
+   rim. Stop. "Only being able to draw in the selection" is the
    line of the request that matters most, and a selection whose edge moves at
    pen-up is not a selection, it is a hint.
-2. **S2's `Selection` cannot be tested without a device.** Then the model has
+2. ~~**S2's `Selection` cannot be tested without a device.**~~ **Did not trip,
+   with a correction to its wording — see What was built.** Then the model has
    picked up a rendering dependency it should not have. The mask needs
    Robolectric with native graphics — that is expected and `ScratchLayerTest`
    already does it — but the path, the boolean ops and the bounds must be
    decidable on the JVM, or the design has put policy in the renderer again.
-3. **S6 needs the two-finger gesture.** Stop. The canvas owns two fingers, and
+3. ~~**S6 needs the two-finger gesture.**~~ **Did not trip.** The transform box
+   is a Compose `pointerInput` that owns the pen while a float is live, and the
+   canvas keeps its two fingers. Stop. The canvas owns two fingers, and
    Phase 1 paid for `StrokeExclusivity` precisely so that ownership is not
    re-argued per feature.
 4. ~~**S0 says the dry canvas is *software*.**~~ **Answered: it is hardware.** The
