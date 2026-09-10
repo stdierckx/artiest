@@ -437,6 +437,19 @@ class InkSurfaceView(
         override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
             if (document.layers.apply(op)) document.layers.touchAll()
         }
+
+        /**
+         * A change to the stencil, in its place in the queue. See
+         * `CommitQueue.Commit.Select`.
+         *
+         * Nothing is marked stale: a selection does not change a pixel of any
+         * sheet, so the thumbnails are still pictures of the drawing. What it
+         * changes is where the *next* stroke may land, and the marching ants,
+         * which are the chrome's and read the published snapshot.
+         */
+        override fun onSelect(op: be.thalos.artiest.doc.SelectOp) {
+            document.selection.apply(op)
+        }
     }
 
     /**

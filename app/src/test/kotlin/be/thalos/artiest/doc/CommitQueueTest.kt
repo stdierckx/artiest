@@ -61,6 +61,13 @@ class CommitQueueTest {
         override fun onLayers(op: LayerOp) {
             log.append('L')
         }
+
+        override fun onSelect(op: SelectOp) {
+            // 'M' for marquee: 'S' is already the stroke, and a log that
+            // spelled both the same would make an ordering assertion pass
+            // against the wrong order.
+            log.append('M')
+        }
     }
 
     @Test
@@ -77,6 +84,23 @@ class CommitQueueTest {
         assertEquals("SCS", r.log.toString())
         assertSame(a, r.strokes[0])
         assertSame(b, r.strokes[1])
+    }
+
+    @Test
+    fun `a selection cannot overtake the stroke it follows`() {
+        // The same property Clear has, and the reason `Commit.Select` is in
+        // this queue rather than a method on `Selection`. A selection applied
+        // straight from the UI thread would land in front of a stroke the
+        // render thread has not stamped yet, and that stroke would then be
+        // confined by a stencil that did not exist when it was drawn.
+        val q = CommitQueue()
+        q.commit(stroke(1f))
+        q.select(SelectOp.All)
+        q.commit(stroke(2f))
+
+        val r = Recorder()
+        assertEquals(3, q.drain(r))
+        assertEquals("SMS", r.log.toString())
     }
 
     @Test
@@ -187,6 +211,7 @@ class CommitQueueTest {
             override fun onUndo() = Unit
             override fun onRedo() = Unit
             override fun onLayers(op: LayerOp) = Unit
+            override fun onSelect(op: SelectOp) = Unit
         }
         val sent = ArrayList<Stroke>(total)
         repeat(total) { sent.add(stroke(it.toFloat())) }

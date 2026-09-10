@@ -80,6 +80,20 @@ class CommitQueue {
          * lets `LayerStack` be an ordinary unsynchronized object.
          */
         class Layers(val op: LayerOp) : Commit
+
+        /**
+         * Change what is selected.
+         *
+         * Here for the third time for the same reason [Clear] and [Layers] are:
+         * "select this region" means *after everything I have drawn*. A
+         * selection applied straight from the UI thread would land in front of
+         * a stroke the render thread has not stamped yet, and that stroke would
+         * then be confined by a stencil that did not exist when it was drawn.
+         *
+         * It also keeps every write to `Selection` on one thread, which is what
+         * lets that class be an ordinary unsynchronized object.
+         */
+        class Select(val op: SelectOp) : Commit
     }
 
     /**
@@ -96,6 +110,7 @@ class CommitQueue {
         fun onUndo()
         fun onRedo()
         fun onLayers(op: LayerOp)
+        fun onSelect(op: SelectOp)
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
@@ -136,6 +151,11 @@ class CommitQueue {
         queue.add(Commit.Layers(op))
     }
 
+    /** UI thread, from a marquee gesture or the selection panel. See [Commit.Select]. */
+    fun select(op: SelectOp) {
+        queue.add(Commit.Select(op))
+    }
+
     /**
      * Render thread. Applies every commit queued so far, in order, and returns
      * how many.
@@ -155,6 +175,7 @@ class CommitQueue {
                 Commit.Undo -> sink.onUndo()
                 Commit.Redo -> sink.onRedo()
                 is Commit.Layers -> sink.onLayers(commit.op)
+                is Commit.Select -> sink.onSelect(commit.op)
             }
             applied++
         }

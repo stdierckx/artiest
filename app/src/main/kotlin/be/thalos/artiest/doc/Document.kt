@@ -85,6 +85,15 @@ class Document(
     val layers: LayerStack = LayerStack(widthPx, heightPx, enforceOffMainThread)
 
     /**
+     * The stencil: where the pen is allowed to put ink.
+     *
+     * On the document and not on a sheet, and the reason is in [Selection]'s
+     * header: a selection is something you hold over the drawing while you work
+     * through several layers.
+     */
+    val selection: Selection = Selection(widthPx, heightPx)
+
+    /**
      * The sheet the pen is on.
      *
      * A property over [layers] rather than a field, so that "the active layer"
@@ -355,6 +364,18 @@ class Document(
         commits.layers(op)
     }
 
+    /**
+     * Queue a change to what is selected. UI thread, from a marquee gesture or
+     * the selection panel.
+     *
+     * Queued, and for the third time in this class for the same reason: order
+     * against the strokes is the thing that has to survive. See
+     * [CommitQueue.Commit.Select].
+     */
+    fun requestSelect(op: SelectOp) {
+        commits.select(op)
+    }
+
     /** A fresh empty sheet, allocated by the UI thread. See [LayerStack]. */
     fun newLayer(): Layer = layers.newLayer()
 
@@ -396,6 +417,7 @@ class Document(
         history.clear()
         publishHistory()
         layers.close()
+        selection.close()
     }
 
     companion object {

@@ -555,6 +555,10 @@ class PngExporterTest {
                 document.layers.apply(op)
             }
 
+            override fun onSelect(op: be.thalos.artiest.doc.SelectOp) {
+                document.selection.apply(op)
+            }
+
             override fun onUndo() {
                 document.applyUndo()
             }
