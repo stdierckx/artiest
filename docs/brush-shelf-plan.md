@@ -243,7 +243,31 @@ from the left column:
   and reverted: at 12x8 cells it reaches the bottom bar, and
   `the starter layout does not overlap itself on any screen worth having`
   caught it.
-- **The stop condition about thirty rows is not yet answered.** Three rows is
-  not a scroll test. It is the same test as before — fill the shelf with thirty
-  copies of the pencil and scroll it with the pen in hand — and it is now one
-  loop to run, because a brush is a file.
+### The stop condition, answered
+
+*"If a shelf of thirty rows cannot be scrolled comfortably on this tablet with
+the pen in hand, importing brushes has nowhere to land."*
+
+Thirty brush files were written into `files/brushes` — pencils at sizes 11 to
+98, so that every row is a genuinely different mark and not thirty copies of one
+picture — making a shelf of 33 with the shipped three. Scrolled six times, end
+to end, reading `dumpsys gfxinfo`:
+
+| | |
+|---|---|
+| Frames | 121 |
+| Janky | **1 (0.83%)** |
+| p50 / p90 / p99 | 10 / 12 / **13 ms** |
+
+Under one frame at 60 Hz at the 99th percentile, and one janky frame in a
+hundred and twenty-one. **The shelf scrolls, so the import work has somewhere to
+land.**
+
+What makes that true is the swatch cache and where the renders run. A row
+appears with its picture missing for a moment on the very first open — visible
+in the first screenshot, where the pencil's strip is still blank — and never
+again, because `BrushSwatches` is keyed by what a brush draws rather than by a
+row being on screen. The renders themselves are on `Dispatchers.Default`, which
+is the plan's own stop condition about not touching the pen's thread.
+
+The thirty test files were removed from the tablet afterwards.
