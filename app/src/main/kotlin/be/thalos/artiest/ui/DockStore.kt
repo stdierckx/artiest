@@ -144,6 +144,7 @@ class DockStore(context: Context) {
             ToolItem.MARQUEE,
             ToolItem.SELECTION,
             ToolItem.PROJECTS,
+            ToolItem.BRUSHES,
         )
 
     }

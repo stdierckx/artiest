@@ -33,6 +33,7 @@ class ToolIconsTest {
         setOf("layers", "layers_panel"),
         setOf("selection", "selection_panel"),
         setOf("eraser", "eraser_size"),
+        setOf("brushes", "brush_shelf"),
     )
 
     @Test

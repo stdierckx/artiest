@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 3,
+  "version": 4,
   "cell_dp": 44,
   "groups": [
     {
@@ -28,6 +28,26 @@
   "flows": ["right_down", "left_down", "right_up", "left_up", "down_right", "down_left", "up_right", "up_left"],
   "anchors": ["left", "top", "right", "bottom"],
   "tools": [
+    {
+      "id": "brush_shelf",
+      "label": "Brush shelf",
+      "short": "Brush",
+      "group": "draw",
+      "kind": "panel",
+      "cells_wide": 6,
+      "cells_tall": 11,
+      "turns": false
+    },
+    {
+      "id": "brushes",
+      "label": "Brushes",
+      "short": "Brush",
+      "group": "draw",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
     {
       "id": "clear",
       "label": "Clear canvas",

@@ -57,7 +57,7 @@ object ToolCatalogue {
      * 3: `projects`, which opens the gallery. The first entry that is about the
      * drawing rather than about the marks on it. See `docs/projects-plan.md`.
      */
-    const val VERSION = 3
+    const val VERSION = 4
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

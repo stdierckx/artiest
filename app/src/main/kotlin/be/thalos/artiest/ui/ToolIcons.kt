@@ -78,6 +78,8 @@ object ToolIcons {
         ToolItem.CLEAR -> trash
         ToolItem.EXPORT -> export
         ToolItem.PROJECTS -> gallery
+        ToolItem.BRUSHES -> brushes
+        ToolItem.BRUSH_SHELF -> brushes
         ToolItem.IMPORT -> import_
         ToolItem.STATS -> stats
     }
@@ -446,6 +448,32 @@ object ToolIcons {
                 rect(3.2f, 13.0f, 11.0f, 20.8f)
             }
             stroke(1.7f) { rect(13.0f, 13.0f, 20.8f, 20.8f) }
+        }
+    }
+
+    /**
+     * Three marks of different weights: a shelf of brushes.
+     *
+     * Not a brush. Every other glyph in the DRAW group is already a tool —
+     * [pen] is a nib, [pencil] is a barrel and a cone, [marker] is a wedge —
+     * so a fourth picture of a brush would be a fourth tool rather than the
+     * list of them. What a shelf is, is *marks you can choose between*, and
+     * three strokes at three weights say that in a way no single object does.
+     */
+    val brushes: ImageVector by lazy {
+        icon("brushes") {
+            stroke(1.4f) {
+                moveTo(4.4f, 6.4f)
+                lineTo(19.6f, 6.4f)
+            }
+            stroke(2.7f) {
+                moveTo(4.4f, 12.0f)
+                lineTo(19.6f, 12.0f)
+            }
+            stroke(4.4f) {
+                moveTo(4.6f, 18.2f)
+                lineTo(19.4f, 18.2f)
+            }
         }
     }
 

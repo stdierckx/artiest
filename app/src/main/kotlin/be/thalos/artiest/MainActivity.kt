@@ -88,6 +88,8 @@ import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushFiles
+import be.thalos.artiest.ui.BrushShelfCard
+import be.thalos.artiest.ui.BrushesButton
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
@@ -1052,6 +1054,84 @@ private fun CanvasScreen(
         }
     }
 
+    /**
+     * Put [entry] in the hand, and pull the sliders back from it.
+     *
+     * Both halves, always. Without the second the `LaunchedEffect` that pushes
+     * the sliders into the pen would push the *old* values straight back over
+     * the brush that was just picked, and switching tools would half work.
+     */
+    val adopt: (BrushEntry) -> Unit = { entry ->
+        surface?.let { v ->
+            entry.applyTo(v.pen)
+            brushId = entry.id
+            sizeMax = v.pen.sizeMax
+            eraserSize = v.pen.eraseSizeMax
+            smoothing = v.pen.stabilization
+            opacity = v.pen.opacity
+            flow = v.pen.flow
+            grain = v.pen.grain.strength
+            brushModified = false
+            generation++
+        }
+    }
+
+    /**
+     * Write what is in the hand as a brush of its own.
+     *
+     * `erase` is cleared on the way out. It is a *mode* the pen is in, not a
+     * property of the brush — saving while rubbing something out would make a
+     * brush that starts by erasing, which is a trap rather than a tool.
+     */
+    val saveBrushAs: (String) -> Unit = { typed ->
+        val v = surface
+        val name = typed.trim().take(BrushEntry.MAX_LABEL)
+        if (v != null && name.isNotEmpty()) {
+            val copy = BrushCodec.decode(BrushCodec.encode(v.pen))
+            if (copy != null) {
+                copy.erase = false
+                val id = brushFiles.freeId(name)
+                val entry = BrushEntry.fromText(id, name, BrushCodec.encode(copy))
+                if (brushFiles.save(entry)) {
+                    library = brushFiles.library()
+                    brushId = id
+                    brushModified = false
+                    brushStore.save(v.pen, library.entryFor(id))
+                    generation++
+                }
+            }
+        }
+    }
+
+    val renameBrush: (BrushEntry, String) -> Unit = { entry, typed ->
+        val name = typed.trim().take(BrushEntry.MAX_LABEL)
+        // The id is untouched, so the brush in the hand stays the brush in the
+        // hand and every swatch cached under it stays valid. A rename is a
+        // label, and `BrushEntry.id` exists precisely so that it can be.
+        if (name.isNotEmpty() && entry.removable && entry.text != null) {
+            if (brushFiles.save(BrushEntry.fromText(entry.id, name, entry.text!!, entry.origin))) {
+                library = brushFiles.library()
+                generation++
+            }
+        }
+    }
+
+    /**
+     * Delete a saved brush, falling back to the pen if it was in the hand.
+     *
+     * The fallback is not arranged here: `brushId` is left pointing at an id
+     * that no longer exists and `BrushLibrary.entryFor` hands back the pen for
+     * it. What is arranged is the *brush* — the pen has to actually be applied,
+     * or the drawing would go on being made with a tool the shelf says is gone.
+     */
+    val deleteBrush: (BrushEntry) -> Unit = { entry ->
+        if (entry.removable && brushFiles.delete(entry.id)) {
+            library = brushFiles.library()
+            if (brushId == entry.id) adopt(library.entryFor(null))
+            generation++
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
@@ -1435,6 +1515,11 @@ private fun CanvasScreen(
                     },
                     library = library,
                     brushId = brushId,
+                    brushModified = brushModified,
+                    onSaveBrush = saveBrushAs,
+                    onRevertBrush = { adopt(brush) },
+                    onRenameBrush = renameBrush,
+                    onDeleteBrush = deleteBrush,
                     onBrush = { p ->
                         // The preset writes the whole brush, then the sliders
                         // are pulled back from it. Without that second half the
@@ -1593,6 +1678,11 @@ private fun ToolSlot(
     onGrain: (Float) -> Unit,
     library: BrushLibrary,
     brushId: String,
+    brushModified: Boolean,
+    onSaveBrush: (String) -> Unit,
+    onRevertBrush: () -> Unit,
+    onRenameBrush: (BrushEntry, String) -> Unit,
+    onDeleteBrush: (BrushEntry) -> Unit,
     onBrush: (BrushEntry) -> Unit,
     eraser: Boolean,
     barrel: Boolean,
@@ -1762,6 +1852,39 @@ private fun ToolSlot(
             onAdd = onLayerAdd,
             onDuplicate = onLayerDuplicate,
             onOpenChange = onLayersOpen,
+        )
+
+        /**
+         * The shelf. The three toggles above it stay: see [ToolItem.BRUSHES].
+         *
+         * `ink` is passed through so a swatch is drawn in the colour that is
+         * loaded — a shelf of black strokes while the pen is red is a shelf
+         * showing a brush nobody is holding.
+         */
+        ToolItem.BRUSHES -> BrushesButton(
+            entries = library.entries,
+            currentId = brushId,
+            modified = brushModified,
+            ink = ink,
+            onPick = onBrush,
+            onSaveAs = onSaveBrush,
+            onRevert = onRevertBrush,
+            onRename = onRenameBrush,
+            onDelete = onDeleteBrush,
+            onFixate = { onFixate(ToolItem.BRUSH_SHELF, it) },
+        )
+
+        /** The same shelf, kept. See [ToolItem.BRUSH_SHELF]. */
+        ToolItem.BRUSH_SHELF -> BrushShelfCard(
+            entries = library.entries,
+            currentId = brushId,
+            modified = brushModified,
+            ink = ink,
+            onPick = onBrush,
+            onSaveAs = onSaveBrush,
+            onRevert = onRevertBrush,
+            onRename = onRenameBrush,
+            onDelete = onDeleteBrush,
         )
 
         ToolItem.ZOOM_IN ->

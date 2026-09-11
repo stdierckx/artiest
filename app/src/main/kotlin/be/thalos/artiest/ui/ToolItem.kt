@@ -175,6 +175,37 @@ enum class ToolItem(
     MARKER("marker", "Marker", "Marker", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
+     * The shelf, as a button that opens it.
+     *
+     * **The three toggles above stay**, and that is the design rather than an
+     * oversight. A tool you reach for fifty times an hour should be one tap on
+     * the bar and not two taps through a panel, so [PEN], [PENCIL] and [MARKER]
+     * remain one-slot toggles: the shelf is the full list and the buttons are
+     * the favourites. That also keeps rule 3 above true — an item lives in
+     * exactly one place — by making the shelf its own entry rather than a
+     * bigger version of a button.
+     *
+     * See `docs/brush-shelf-plan.md`.
+     */
+    BRUSHES("brushes", "Brushes", "Brush", 1, ToolGroup.DRAW),
+
+    /**
+     * The same shelf, kept. Six cells by eleven, which is 264 by 484dp.
+     *
+     * One narrower than [LAYERS_PANEL] because a row here is a swatch, a name
+     * and a small mark, where a layer row is a thumbnail and three buttons.
+     * Eleven tall for the reason that one is: the list is the part worth having
+     * more of, so every extra cell goes to rows rather than to card.
+     *
+     * A separate entry from [BRUSHES], for the reason [COLOUR_PANEL] is
+     * separate from [COLOUR]: fixate leaves the button where it was.
+     */
+    BRUSH_SHELF(
+        "brush_shelf", "Brush shelf", "Brush", 6, ToolGroup.DRAW,
+        ToolKind.PANEL, cellsTall = 11,
+    ),
+
+    /**
      * W11. A toggle, not a third tool: it changes how the brush in the hand
      * composites, so the pencil erases with the pencil's shape and the pen with
      * the pen's. The barrel button does the same thing momentarily and does not
