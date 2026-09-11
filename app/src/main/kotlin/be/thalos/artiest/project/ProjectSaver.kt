@@ -7,6 +7,7 @@ import android.graphics.PaintFlagsDrawFilter
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.Layer
 import be.thalos.artiest.doc.StackCompositor
+import be.thalos.artiest.doc.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -161,7 +162,7 @@ class ProjectSaver(private val files: ProjectFiles) {
             files.pruneSheets(project.id, keep = count)
             written = nowWritten
 
-            thumbnail(project, document, transient)
+            thumbnail(project, document)
 
             return SaveResult.Saved(
                 project = saved,
@@ -217,34 +218,40 @@ class ProjectSaver(private val files: ProjectFiles) {
      * header records what happened the last time this app had two of those, and
      * they disagreed about the paper.
      *
+     * **It is composited at exactly half size and then halved again**, never
+     * scaled down in one step. `Thumbnails` carries the reason at length and it
+     * was paid for on the tablet: a single big reduction samples a 2x2
+     * neighbourhood however far apart the taps are, so a drawing made of pencil
+     * lines comes back as an empty card. A half-size composite is itself a
+     * 2:1 reduction, which is the one ratio that cannot drop a line — and it
+     * costs 6.8 MiB rather than the 27.19 a full-size one would.
+     *
      * **The filter is set on the canvas rather than on a `Paint`**, because the
      * paints belong to `StackCompositor` and are none of this class's business.
      * `setDrawFilter` puts `FILTER_BITMAP` on every one of them for the extent
      * of the draw, which is exactly the scope wanted, and a software canvas
-     * honours it. Without it, a seven-megapixel sheet point-sampled down to
-     * four hundred pixels is a thumbnail made of whichever pixels happened to
-     * land on the grid.
+     * honours it.
      *
      * A failure here is not a failure of the save. The drawing is on disk; the
      * picture of it is a convenience, and a project with no thumbnail draws a
      * card with its name on it.
      */
-    private fun thumbnail(project: Project, document: Document, transient: Bitmap?) {
-        val long = max(document.widthPx, document.heightPx).toFloat()
-        if (long <= 0f) return
-        val scale = (THUMB_LONG_SIDE / long).coerceAtMost(1f)
-        val w = (document.widthPx * scale).roundToInt().coerceAtLeast(1)
-        val h = (document.heightPx * scale).roundToInt().coerceAtLeast(1)
-        val out = try {
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    private fun thumbnail(project: Project, document: Document) {
+        val long = max(document.widthPx, document.heightPx)
+        if (long <= 0) return
+        val halfW = (document.widthPx / 2).coerceAtLeast(1)
+        val halfH = (document.heightPx / 2).coerceAtLeast(1)
+        val scale = halfW.toFloat() / document.widthPx
+        val half = try {
+            Bitmap.createBitmap(halfW, halfH, Bitmap.Config.ARGB_8888)
         } catch (e: OutOfMemoryError) {
             return
         }
-        try {
-            val canvas = Canvas(out)
+        val composed = try {
+            val canvas = Canvas(half)
             canvas.drawFilter = PaintFlagsDrawFilter(0, Paint.FILTER_BITMAP_FLAG)
             canvas.scale(scale, scale)
-            val read = StackCompositor().compose(
+            StackCompositor().compose(
                 canvas = canvas,
                 stack = document.layers,
                 paperColor = document.paperColor,
@@ -256,7 +263,26 @@ class ProjectSaver(private val files: ProjectFiles) {
                 right = document.widthPx.toFloat(),
                 bottom = document.heightPx.toFloat(),
             )
-            if (read) write(files.thumbnailOf(project.id), out)
+        } catch (e: OutOfMemoryError) {
+            half.recycle()
+            return
+        }
+        if (!composed) {
+            half.recycle()
+            return
+        }
+
+        val shrink = (THUMB_LONG_SIDE / long.toFloat()).coerceAtMost(1f)
+        val w = (document.widthPx * shrink).roundToInt().coerceAtLeast(1)
+        val h = (document.heightPx * shrink).roundToInt().coerceAtLeast(1)
+        // Consumes `half`, and every intermediate with it.
+        val out = try {
+            Thumbnails.reduce(half, w, h)
+        } catch (e: OutOfMemoryError) {
+            return
+        }
+        try {
+            write(files.thumbnailOf(project.id), out)
         } finally {
             out.recycle()
         }

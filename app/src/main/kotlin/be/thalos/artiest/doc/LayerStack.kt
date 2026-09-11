@@ -202,7 +202,7 @@ class LayerStack(
      */
     fun apply(op: LayerOp): Boolean {
         val ok = applyInner(op)
-        if (!ok && op is LayerOp.Carrying) op.layer.close()
+        if (!ok && op is LayerOp.Carrying) for (layer in op.carried) layer.close()
         if (ok) publish()
         return ok
     }
@@ -247,6 +247,43 @@ class LayerStack(
                     patch?.recycle()
                     entries.add(at, entry)
                     activeIndex = at
+                    true
+                }
+            }
+        }
+
+        is LayerOp.Open -> {
+            when {
+                // An open with nothing in it is a bug in the caller, not a
+                // drawing with no sheets: the one thing this must never do is
+                // leave the document with nowhere to put the next stroke.
+                op.sheets.isEmpty() -> false
+                op.sheets.size > MAX_LAYERS -> false
+                else -> {
+                    // The old sheets go first and they go here, on the render
+                    // thread, which is the only thread allowed to release them.
+                    // Their ids are not reused -- nextId only ever goes up --
+                    // so an undo patch that survives this names nothing rather
+                    // than naming somebody else's pixels. `Document.resetHistory`
+                    // is what makes sure none of them does survive.
+                    for (e in entries) {
+                        e.layer.close()
+                        e.thumbnail = null
+                    }
+                    entries.clear()
+                    for (sheet in op.sheets) {
+                        entries.add(
+                            Entry(
+                                id = nextId++,
+                                layer = sheet.layer,
+                                name = sheet.name,
+                                opacity = sheet.opacity.coerceIn(0f, 1f),
+                                visible = sheet.visible,
+                                blend = sheet.blend,
+                            )
+                        )
+                    }
+                    activeIndex = op.active.coerceIn(0, entries.size - 1)
                     true
                 }
             }
@@ -455,13 +492,7 @@ class LayerStack(
     }
 
     /** Half the width and half the height, never below one pixel. */
-    private fun halve(src: Bitmap): Bitmap {
-        val w = (src.width / 2).coerceAtLeast(1)
-        val h = (src.height / 2).coerceAtLeast(1)
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(out).drawBitmap(src, Rect(0, 0, src.width, src.height), Rect(0, 0, w, h), thumbPaint)
-        return out
-    }
+    private fun halve(src: Bitmap): Bitmap = Thumbnails.halve(src)
 
     /**
      * Filtered, because unfiltered is point sampling: a pencil line one
@@ -471,10 +502,7 @@ class LayerStack(
      * Filtering alone is not enough — see [buildThumbnail] for why the
      * reduction is done in halves.
      */
-    private val thumbPaint = Paint().apply {
-        isFilterBitmap = true
-        isAntiAlias = false
-    }
+    private val thumbPaint = Thumbnails.paint
 
     companion object {
 
@@ -527,14 +555,55 @@ sealed interface LayerOp {
      * written once and cannot be forgotten for a third case added later.
      */
     sealed interface Carrying : LayerOp {
-        val layer: Layer
+        /**
+         * Every sheet this operation is holding.
+         *
+         * A list and not one sheet, because [Open] carries a whole drawing.
+         * Built on demand rather than stored: an operation is constructed once
+         * and refused at most once, so the allocation is beside a 27.19 MiB one
+         * and the alternative is a field that has to be kept in step with the
+         * sheets it describes.
+         */
+        val carried: List<Layer>
     }
 
     /** A new empty sheet above the active one. */
-    class Add(override val layer: Layer, val name: String) : Carrying
+    class Add(val layer: Layer, val name: String) : Carrying {
+        override val carried: List<Layer> get() = listOf(layer)
+    }
 
     /** A copy of [id], above it. [layer] is the empty sheet to copy into. */
-    class Duplicate(val id: Int, override val layer: Layer, val name: String) : Carrying
+    class Duplicate(val id: Int, val layer: Layer, val name: String) : Carrying {
+        override val carried: List<Layer> get() = listOf(layer)
+    }
+
+    /**
+     * Replace the whole stack: a project being opened.
+     *
+     * **One operation and not a sequence of Add and Delete**, and the reasons
+     * are three. It would be visible — a stack emptying and refilling is a
+     * flicker in the layers panel and, for the moment between, a drawing with
+     * one blank sheet in it. It would have to guess: an Add's new id is
+     * assigned here, on the render thread, so a UI thread building "add this,
+     * then make it active" has no id to name. And it could stop halfway, which
+     * would leave half of one drawing under half of another with nothing able
+     * to say which was which.
+     *
+     * Opening a drawing is one thing that happens, so it is one thing in the
+     * queue. See `docs/projects-plan.md`.
+     */
+    class Open(val sheets: List<Sheet>, val active: Int) : Carrying {
+        override val carried: List<Layer> get() = sheets.map { it.layer }
+
+        /** One sheet on its way in: pixels the caller has already filled. */
+        class Sheet(
+            val layer: Layer,
+            val name: String,
+            val opacity: Float = 1f,
+            val visible: Boolean = true,
+            val blend: LayerBlend = LayerBlend.NORMAL,
+        )
+    }
 
     /** Remove [id]. Refused for the last remaining sheet. */
     class Delete(val id: Int) : LayerOp

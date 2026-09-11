@@ -453,6 +453,21 @@ class Document(
     }
 
     /**
+     * Forget every undo step. **Render thread**, as a project is opened.
+     *
+     * It has to happen, and it has to happen here rather than being left to the
+     * caller: a patch holds pixels belonging to a sheet that has just been
+     * closed, keyed by an id the new stack will never hand out again. Replaying
+     * one would restore nothing at best. The pixels themselves are the other
+     * half of the reason — up to 48 MiB of them, describing a drawing that is
+     * no longer open.
+     */
+    fun resetHistory() {
+        history.clear()
+        publishHistory()
+    }
+
+    /**
      * Queue a change to what is selected. UI thread, from a marquee gesture or
      * the selection panel.
      *

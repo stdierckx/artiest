@@ -464,7 +464,11 @@ class InkSurfaceView(
          * looked at.
          */
         override fun onLayers(op: be.thalos.artiest.doc.LayerOp) {
-            if (document.layers.apply(op)) document.layers.touchAll()
+            if (!document.layers.apply(op)) return
+            document.layers.touchAll()
+            // A project has just replaced the stack. Every undo step describes
+            // sheets that were closed a line ago. See `Document.resetHistory`.
+            if (op is be.thalos.artiest.doc.LayerOp.Open) document.resetHistory()
         }
 
         /**

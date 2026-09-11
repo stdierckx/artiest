@@ -215,7 +215,7 @@ class CommitQueue {
         while (true) {
             val commit = queue.poll() ?: return
             if (commit is Commit.Layers) {
-                (commit.op as? LayerOp.Carrying)?.layer?.close()
+                (commit.op as? LayerOp.Carrying)?.carried?.forEach { it.close() }
             }
         }
     }
