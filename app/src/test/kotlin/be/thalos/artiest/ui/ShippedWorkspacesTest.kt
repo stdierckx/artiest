@@ -71,10 +71,29 @@ class ShippedWorkspacesTest {
     }
 
     @Test
+    fun `no shipped shape has a cell with nothing standing on it`() {
+        // A bar trims itself to its last item; a shape does not, because a
+        // shape is what you drew. So a shipped shape with a spare cell is a
+        // stub of grey hanging off it, which is what Clean looked like on the
+        // tablet before its L was drawn to fit.
+        for (ws in ShippedWorkspaces.all()) {
+            for (surface in ws.layout.surfaces) {
+                if (surface.region.isStrip || surface.isEmpty) continue
+                assertEquals(
+                    surface.region.cellCount,
+                    surface.slots.usedCells,
+                    "${ws.id}/${surface.id} has ground nothing stands on",
+                )
+            }
+        }
+    }
+
+    @Test
     fun `Clean is clean, and is the one that demonstrates the shape`() {
         val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.CLEAN))
         assertEquals(4, ws.layout.all().size, "four controls, no more")
         assertFalse(ws.layout.edge(Dock.LEFT).region.isStrip, "and it is an L")
+        assertEquals(4, ws.layout.edge(Dock.LEFT).region.cellCount, "drawn to fit them")
         for (dock in listOf(Dock.TOP, Dock.RIGHT, Dock.BOTTOM)) {
             assertTrue(ws.layout.edge(dock).isEmpty, "${dock.id} is paper")
         }

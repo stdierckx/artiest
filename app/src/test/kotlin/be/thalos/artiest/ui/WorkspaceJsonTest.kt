@@ -145,6 +145,83 @@ class WorkspaceJsonTest {
         )
     }
 
+    // ---- the examples ------------------------------------------------------
+
+    @Test
+    fun `every example in docs opens with nothing dropped`() {
+        // `docs/examples/` is what somebody copies from, and an example that
+        // half-works teaches the half that does not. Each one has to open with
+        // an empty complaint list — no unknown tool, no rectangle off the grid,
+        // nothing with nowhere to go.
+        val dir = generateSequence(File(".").absoluteFile) { it.parentFile }
+            .map { File(it, "docs/examples") }
+            .firstOrNull { it.isDirectory }
+        val files = assertNotNull(dir, "docs/examples is missing").listFiles().orEmpty().sorted()
+        assertTrue(files.size >= 4, "the examples are thinner than they were")
+
+        for (file in files) {
+            val decoded = WorkspaceJson.decode(file.readText())
+            val ws = assertNotNull(decoded.workspace, file.name)
+            assertEquals(emptyList(), decoded.dropped, file.name)
+            assertEquals(file.name.removeSuffix(".json"), ws.id, "the id is the file name")
+            assertTrue(ws.description.isNotEmpty(), "${file.name} says nothing about itself")
+            assertTrue(ws.layout.all().isNotEmpty(), "${file.name} has no controls on it")
+
+            // An example that does not fit the screen it is shown on is not an
+            // example. Twenty-four by twelve cells is a small tablet.
+            for (surface in ws.layout.surfaces) {
+                val b = surface.region.bounds
+                assertTrue(b.w <= 24 && b.h <= 12, "${file.name}/${surface.id} is ${b.w}x${b.h}")
+            }
+
+            // And every control it places is one it offers, or the chooser
+            // would insist a visible button does not exist.
+            for (docked in ws.layout.all()) {
+                assertTrue(docked.item in ws.filter, "${file.name} hides its own ${docked.item.id}")
+            }
+        }
+    }
+
+    @Test
+    fun `the example written without positions packs the way it reads`() {
+        // The property that makes the format writable by hand: a list of names,
+        // in order, is a toolbar. If this ever stops being true, the reference
+        // is telling people something that is not.
+        val text = generateSequence(File(".").absoluteFile) { it.parentFile }
+            .map { File(it, "docs/examples/minimal.json") }
+            .first { it.isFile }
+            .readText()
+        val ws = assertNotNull(WorkspaceJson.decode(text).workspace)
+
+        assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.PEN)?.cell)
+        assertEquals(Cell(0, 1), ws.layout.locate(ToolItem.PENCIL)?.cell)
+        assertEquals(Cell(0, 4), ws.layout.locate(ToolItem.COLOUR)?.cell)
+        assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.UNDO)?.cell)
+        assertEquals(Cell(1, 0), ws.layout.locate(ToolItem.REDO)?.cell)
+        // Sliders are four cells long, so they land four apart along the bottom.
+        assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.SIZE)?.cell)
+        assertEquals(Cell(4, 0), ws.layout.locate(ToolItem.SMOOTHING)?.cell)
+        assertEquals(Cell(8, 0), ws.layout.locate(ToolItem.ERASER_SIZE)?.cell)
+    }
+
+    @Test
+    fun `the L example stands its buttons up and lays its sliders flat`() {
+        val text = generateSequence(File(".").absoluteFile) { it.parentFile }
+            .map { File(it, "docs/examples/corner.json") }
+            .first { it.isFile }
+            .readText()
+        val ws = assertNotNull(WorkspaceJson.decode(text).workspace)
+        val left = ws.layout.edge(Dock.LEFT)
+
+        assertFalse(left.region.isStrip, "it is an L")
+        assertEquals(Axis.VERTICAL, left.region.localAxis(0, 2), "up the arm")
+        assertEquals(Axis.HORIZONTAL, left.region.localAxis(5, 9), "along the foot")
+
+        val size = assertNotNull(ws.layout.locate(ToolItem.SIZE)?.placement)
+        assertEquals(4, size.w, "the slider in the foot is four cells wide")
+        assertEquals(1, size.h)
+    }
+
     // ---- the corpus --------------------------------------------------------
 
     @Test

@@ -12,7 +12,7 @@
     {
       "id": "left",
       "dock": "left",
-      "rects": [[0, 0, 1, 2], [0, 2, 3, 1]],
+      "rects": [[0, 0, 1, 2], [0, 2, 2, 1]],
       "flow": "down_right",
       "tools": [
         {"id": "pen", "at": [0, 0]},

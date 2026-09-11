@@ -1,0 +1,37 @@
+{
+  "artiest_workspace": 1,
+  "id": "minimal",
+  "name": "Minimal",
+  "description": "Written without a single position. The packer decides, and it decides the same way every time.",
+  "author": "artiest examples",
+  "revision": 1,
+  "filter": {"groups": ["draw", "edit"], "hide": ["grain", "opacity", "flow"], "show": []},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": null},
+  "surfaces": [
+    {
+      "dock": "left",
+      "tools": [
+        {"id": "pen"},
+        {"id": "pencil"},
+        {"id": "marker"},
+        {"id": "eraser"},
+        {"id": "colour"}
+      ]
+    },
+    {
+      "dock": "top",
+      "tools": [
+        {"id": "undo"},
+        {"id": "redo"}
+      ]
+    },
+    {
+      "dock": "bottom",
+      "tools": [
+        {"id": "size"},
+        {"id": "smoothing"},
+        {"id": "eraser_size"}
+      ]
+    }
+  ]
+}

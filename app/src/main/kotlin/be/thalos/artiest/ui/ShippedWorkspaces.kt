@@ -87,6 +87,12 @@ object ShippedWorkspaces {
      * something to undo with, and a colour. An L rather than a bar because the
      * corner is the part of a tablet a thumb reaches without moving the hand
      * that is drawing.
+     *
+     * **The shape is exactly four cells, because it holds exactly four
+     * controls.** It was a three-by-three L, which is five cells, and on the
+     * tablet the spare one read as a stub of grey hanging off the foot. A bar
+     * trims itself to its last item and a shape does not — a shape is what you
+     * drew — so the shipped one has to be drawn to fit.
      */
     private fun clean(): Workspace = Workspace(
         id = CLEAN,
@@ -94,7 +100,7 @@ object ShippedWorkspaces {
         description = "The paper, and four controls in the corner.",
         author = "artiest",
         layout = DockLayout.EMPTY
-            .reshape("left", CellRegion.l(arm = 3, foot = 3))
+            .reshape("left", CellRegion.l(arm = 3, foot = 2))
             .reflow("left", FlowOrder.DOWN_THEN_RIGHT)
             .place("left", ToolItem.PEN, Cell(0, 0))
             .place("left", ToolItem.ERASER, Cell(0, 1))

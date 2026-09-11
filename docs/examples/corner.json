@@ -1,0 +1,29 @@
+{
+  "artiest_workspace": 1,
+  "id": "corner",
+  "name": "Corner",
+  "description": "An L down the left and along the bottom. Buttons stand up, sliders lie flat.",
+  "author": "artiest examples",
+  "revision": 1,
+  "filter": {"groups": ["draw", "edit"], "hide": [], "show": ["fit"]},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": null},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 9], [0, 9, 10, 1]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil", "at": [0, 1]},
+        {"id": "marker", "at": [0, 2]},
+        {"id": "eraser", "at": [0, 3]},
+        {"id": "colour", "at": [0, 5]},
+        {"id": "undo", "at": [0, 7]},
+        {"id": "redo", "at": [0, 8]},
+        {"id": "size", "at": [1, 9]},
+        {"id": "smoothing", "at": [6, 9]}
+      ]
+    }
+  ]
+}
