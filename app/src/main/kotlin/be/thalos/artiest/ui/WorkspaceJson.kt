@@ -277,7 +277,7 @@ object WorkspaceJson {
         return WorkspaceDefaults(
             brush = obj.text("brush", MAX_NAME),
             shelf = obj.arr("shelf")
-                ?.mapNotNull { (it as? JsonValue.Str)?.value?.let(::clean)?.take(MAX_NAME) }
+                ?.mapNotNull { (it as? JsonValue.Str)?.value?.let(Json::clean)?.take(MAX_NAME) }
                 ?.take(MAX_ITEMS)
                 ?: emptyList(),
             stabilisation = obj.float("stabilisation")?.coerceIn(0f, 1f),
@@ -306,7 +306,7 @@ object WorkspaceJson {
             // and usually carried no "id" at all, so the dock is the fallback
             // before a made-up name is: an id is what a later edit keys on, and
             // one that changes every time the file is read is not an id.
-            val id = obj.str("id")?.let(::clean)?.take(Workspace.MAX_SLUG)?.takeIf { it.isNotEmpty() }
+            val id = obj.str("id")?.let(Json::clean)?.take(Workspace.MAX_SLUG)?.takeIf { it.isNotEmpty() }
                 ?: obj.str("dock")?.takeIf { Side.byId(it) != null }
                 ?: "${DockLayout.ID_PREFIX}${++made}"
             if (!seen.add(id)) {
@@ -523,42 +523,8 @@ object WorkspaceJson {
     // the small print
     // -----------------------------------------------------------------------
 
-    private fun JsonValue.Obj.text(name: String, max: Int): String? =
-        str(name)?.let(::clean)?.take(max)?.takeIf { it.isNotEmpty() }
-
-    /**
-     * A string on its way to a `Text`, with the characters that do not belong
-     * on a label taken out.
-     *
-     * Control characters, and the bidirectional overrides — those are how a
-     * name that reads *"Sketcher"* on screen is something else in the file, and
-     * a workspace list is exactly the sort of place that trick is aimed at.
-     */
-    private fun clean(text: String): String = buildString {
-        for (c in text) {
-            if (c < ' ' || c == '\u007F') continue
-            // The bidirectional overrides and isolates: how a name that
-            // reads "Sketcher" on screen is something else in the file.
-            if (c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069') continue
-            append(c)
-        }
-    }.trim()
-
-    private fun quote(text: String): String = buildString {
-        append('"')
-        for (c in text) {
-            when {
-                c == '"' -> append("\\\"")
-                c == '\\' -> append("\\\\")
-                c == '\n' -> append("\\n")
-                c == '\r' -> append("\\r")
-                c == '\t' -> append("\\t")
-                c < ' ' -> append("\\u%04x".format(c.code))
-                else -> append(c)
-            }
-        }
-        append('"')
-    }
+    /** Both readers clean a name the same way. See [Json.clean] and [text]. */
+    private fun quote(text: String): String = Json.quote(text)
 
     private fun strings(values: Collection<String>): String =
         values.joinToString(", ", "[", "]") { quote(it) }

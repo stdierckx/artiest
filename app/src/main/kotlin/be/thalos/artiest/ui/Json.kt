@@ -70,6 +70,47 @@ internal sealed interface JsonValue {
 internal object Json {
 
     /**
+     * A string as a JSON string literal, escaped.
+     *
+     * Here rather than in [WorkspaceJson] because there are two writers now and
+     * an escaper that is nearly the same in two files is an escaper that is
+     * wrong in one of them.
+     */
+    fun quote(text: String): String = buildString {
+        append('"')
+        for (c in text) {
+            when {
+                c == '"' -> append("\\\"")
+                c == '\\' -> append("\\\\")
+                c == '\n' -> append("\\n")
+                c == '\r' -> append("\\r")
+                c == '\t' -> append("\\t")
+                c < ' ' -> append("\\u%04x".format(c.code))
+                else -> append(c)
+            }
+        }
+        append('"')
+    }
+
+    /**
+     * A string on its way to a `Text`, with the characters that do not belong
+     * on a label taken out.
+     *
+     * Control characters, and the bidirectional overrides — those are how a
+     * name that reads *"Sketcher"* on screen is something else in the file, and
+     * a list of names is exactly the sort of place that trick is aimed at.
+     */
+    fun clean(text: String): String = buildString {
+        for (c in text) {
+            if (c < ' ' || c == '\u007F') continue
+            // The bidirectional overrides and isolates: how a name that
+            // reads "Sketcher" on screen is something else in the file.
+            if (c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069') continue
+            append(c)
+        }
+    }.trim()
+
+    /**
      * A workspace is a few hundred numbers. Anything larger is not a mistake.
      *
      * Measured in characters rather than bytes, which is stricter than the
@@ -226,3 +267,14 @@ internal object Json {
         }
     }
 }
+
+/**
+ * A field read as a label: cleaned, cut to [max], and null when there is
+ * nothing left of it.
+ *
+ * An extension here rather than a private helper in each reader, because both
+ * of them are reading a name somebody else typed and the rules for that are one
+ * set of rules. See [Json.clean].
+ */
+internal fun JsonValue.Obj.text(name: String, max: Int): String? =
+    str(name)?.let(Json::clean)?.take(max)?.takeIf { it.isNotEmpty() }
