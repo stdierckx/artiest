@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 2,
+  "version": 3,
   "cell_dp": 44,
   "groups": [
     {
@@ -194,6 +194,16 @@
       "short": "Pencil",
       "group": "draw",
       "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "projects",
+      "label": "Drawings",
+      "short": "Files",
+      "group": "file",
+      "kind": "button",
       "cells_wide": 1,
       "cells_tall": 1,
       "turns": false

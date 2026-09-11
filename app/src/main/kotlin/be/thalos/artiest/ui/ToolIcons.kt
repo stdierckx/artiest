@@ -77,6 +77,7 @@ object ToolIcons {
         ToolItem.FIT -> fit
         ToolItem.CLEAR -> trash
         ToolItem.EXPORT -> export
+        ToolItem.PROJECTS -> gallery
         ToolItem.IMPORT -> import_
         ToolItem.STATS -> stats
     }
@@ -425,6 +426,26 @@ object ToolIcons {
                 circle(9.2f, 17.6f, 1.7f)
                 circle(14.8f, 17.6f, 1.7f)
             }
+        }
+    }
+
+    /**
+     * Four squares in a grid: the drawings you have, seen as pictures rather
+     * than as names.
+     *
+     * Deliberately not a folder. A folder is a place files are kept and this is
+     * a wall they are hung on — and the app has no folders, no paths and no
+     * file names anybody types, so a folder would be promising a thing that
+     * does not exist.
+     */
+    val gallery: ImageVector by lazy {
+        icon("gallery") {
+            fill {
+                rect(3.2f, 3.2f, 11.0f, 11.0f)
+                rect(13.0f, 3.2f, 20.8f, 11.0f)
+                rect(3.2f, 13.0f, 11.0f, 20.8f)
+            }
+            stroke(1.7f) { rect(13.0f, 13.0f, 20.8f, 20.8f) }
         }
     }
 

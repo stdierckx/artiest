@@ -143,6 +143,7 @@ class DockStore(context: Context) {
             ToolItem.ERASER_SIZE,
             ToolItem.MARQUEE,
             ToolItem.SELECTION,
+            ToolItem.PROJECTS,
         )
 
     }

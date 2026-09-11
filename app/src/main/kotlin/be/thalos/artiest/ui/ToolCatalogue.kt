@@ -53,8 +53,11 @@ object ToolCatalogue {
      * 2: the same tools. The vocabulary around them changed — there are no
      * docks and no shape presets, and a surface names a side only as a
      * starting position. See `docs/ui-grid-plan.md`.
+     *
+     * 3: `projects`, which opens the gallery. The first entry that is about the
+     * drawing rather than about the marks on it. See `docs/projects-plan.md`.
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

@@ -93,6 +93,7 @@ import be.thalos.artiest.ui.DockLayout
 import be.thalos.artiest.ui.ChromeCounters
 import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
+import be.thalos.artiest.ui.ProjectGallery
 import be.thalos.artiest.ui.WorkspaceMenu
 import be.thalos.artiest.ui.WorkspaceStore
 import be.thalos.artiest.ui.IconToolButton
@@ -108,6 +109,7 @@ import be.thalos.artiest.io.PictureImporter
 import androidx.lifecycle.lifecycleScope
 import be.thalos.artiest.io.PngExporter
 import be.thalos.artiest.project.OpenResult
+import be.thalos.artiest.project.Project
 import be.thalos.artiest.project.ProjectLoader
 import be.thalos.artiest.project.ProjectSaver
 import be.thalos.artiest.project.ProjectStore
@@ -580,6 +582,10 @@ private fun CanvasScreen(
         }
     }
 
+    /** Which drawings there are, and whether the gallery is over the paper. */
+    var projectEntries by remember { mutableStateOf(projects.list()) }
+    var gallery by remember { mutableStateOf(false) }
+
     /**
      * Whether the drawing on screen is the whole of what is in the file.
      *
@@ -592,26 +598,74 @@ private fun CanvasScreen(
      */
     var attached by remember { mutableStateOf(false) }
 
-    // The project the app was last in, back into the document that was
-    // allocated in onCreate -- and then a frame, which is the half that was
-    // missing. A queued operation sits there until something renders: a stroke
-    // asks for its own frame and an open has nothing that would, exactly as
-    // `onLayerOp` says about a layer operation. So this waits for the surface
-    // rather than running on the first composition, because the thing that has
-    // to be asked does not exist yet then.
-    LaunchedEffect(surface) {
-        val v = surface ?: return@LaunchedEffect
-        if (attached) return@LaunchedEffect
-        when (val opened = ProjectLoader.open(projects.files, project, document, saver)) {
+    /**
+     * Put [p] on the paper, and ask for the frame that shows it.
+     *
+     * The frame is not optional and it is the thing that was missing the first
+     * time this ran on the tablet: a queued operation sits in the queue until
+     * something renders, a stroke asks for its own render, and an open has
+     * nothing that would -- exactly what `onLayerOp` says about a layer
+     * operation, one level up.
+     */
+    suspend fun attach(p: Project) {
+        attached = false
+        when (val opened = ProjectLoader.open(projects.files, p, document, saver)) {
             is OpenResult.Opened -> {
                 attached = opened.whole
                 projectNote = if (opened.whole) "" else
                     opened.notes.first() + " — it is not being saved over"
             }
 
-            is OpenResult.Failed -> projectNote = "could not open ${project.name}: ${opened.reason}"
+            is OpenResult.Failed -> projectNote = "could not open ${p.name}: ${opened.reason}"
         }
-        v.redrawDry()
+        surface?.redrawDry()
+    }
+
+    /** Leave what is on the paper safely, whatever is about to replace it. */
+    suspend fun leave() {
+        if (attached && saver.dirty(document)) saveNow()
+    }
+
+    // The project the app was last in. Waits for the surface rather than
+    // running on the first composition, because the thing that has to be asked
+    // for a frame does not exist yet then.
+    LaunchedEffect(surface) {
+        if (surface == null || attached) return@LaunchedEffect
+        attach(project)
+    }
+
+    /**
+     * Go and draw in another one.
+     *
+     * Leave first, always: the drawing being left is written before anything
+     * else happens, because the alternative is the one thing this feature must
+     * never do. Then the switch is recorded, so that the next launch comes back
+     * here rather than to where the user was yesterday.
+     */
+    fun switchProject(id: String) {
+        scope.launch {
+            leave()
+            val next = projects.load(id) ?: return@launch
+            projects.switchTo(id)
+            project = next
+            attach(next)
+            projectEntries = projects.list()
+            gallery = false
+        }
+    }
+
+    /** A new drawing, named, and you are in it. */
+    fun newProject(name: String) {
+        scope.launch {
+            leave()
+            val made = projects.make(name, document.widthPx, document.heightPx)
+            project = made
+            // Nothing on disk belongs to what is about to be in the document.
+            saver.forget()
+            attach(made)
+            projectEntries = projects.list()
+            gallery = false
+        }
     }
 
     // The autosave. A poll and not a hook on every path that changes something
@@ -1307,6 +1361,9 @@ private fun CanvasScreen(
                     onRedo = { surface?.redo(); generation++ },
                     stats = stats,
                     onStats = { stats = !stats; generation++ },
+                    // Listed on the way in, not held: a thumbnail written
+                    // three seconds ago is the point of the picture.
+                    onProjects = { projectEntries = projects.list(); gallery = true },
                     onClear = { surface?.clear(); generation++ },
                     onFit = { surface?.fitToView(); generation++ },
                     onZoom = { factor ->
@@ -1323,6 +1380,51 @@ private fun CanvasScreen(
                     },
                     onExport = doExport,
                 )
+        }
+
+        // Over everything, including the chrome: it is the whole screen while
+        // it is up, and the toolbars underneath it are toolbars for a drawing
+        // you are in the middle of leaving. It is drawn last for the same
+        // reason it is opaque -- see ProjectGallery.
+        if (gallery) {
+            ProjectGallery(
+                entries = projectEntries,
+                currentId = project.id,
+                onOpen = { id -> if (id == project.id) gallery = false else switchProject(id) },
+                onNew = { newProject(projects.suggestName()) },
+                onRename = { id, name ->
+                    val target = projects.load(id) ?: return@ProjectGallery
+                    val renamed = projects.rename(target, name)
+                    if (renamed.id == project.id) project = renamed
+                    projectEntries = projects.list()
+                },
+                onDuplicate = { id, name ->
+                    scope.launch {
+                        // The copy is taken from the files, so what is on the
+                        // paper has to be in them first.
+                        leave()
+                        projects.duplicate(id, name)
+                        projectEntries = projects.list()
+                    }
+                },
+                onDelete = { id ->
+                    projects.delete(id)
+                    projectEntries = projects.list()
+                    // Deleting the drawing you are in leaves you somewhere: the
+                    // store knows how to choose, and a new one is made if there
+                    // is nothing left to choose from.
+                    if (id == project.id) {
+                        scope.launch {
+                            val next = projects.current(document.widthPx, document.heightPx)
+                            project = next
+                            saver.forget()
+                            attach(next)
+                            projectEntries = projects.list()
+                        }
+                    }
+                },
+                onDismiss = { gallery = false },
+            )
         }
     }
 }
@@ -1391,6 +1493,7 @@ private fun ToolSlot(
     onRedo: () -> Unit,
     stats: Boolean,
     onStats: () -> Unit,
+    onProjects: () -> Unit,
     onClear: () -> Unit,
     onFit: () -> Unit,
     onZoom: (Float) -> Unit,
@@ -1560,6 +1663,8 @@ private fun ToolSlot(
             IconToolButton(ToolIcons.import_, item.label, onImport, enabled = !importing)
         ToolItem.STATS ->
             IconToolButton(ToolIcons.stats, item.label, onStats, selected = stats)
+        ToolItem.PROJECTS ->
+            IconToolButton(ToolIcons.gallery, item.label, onProjects)
     }
 }
 
@@ -1730,7 +1835,7 @@ private fun readout(
     exporting: Boolean,
     generation: Int,
     strokeTimes: String,
-    project: be.thalos.artiest.project.Project,
+    project: Project,
     lastSave: SaveResult.Saved?,
 ): String {
     if (surface == null) return "surface  -"

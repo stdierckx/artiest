@@ -75,7 +75,16 @@ class StartupTest {
             listOf("undo", "redo", "import", "export", "stats"),
             docks.surface("top")!!.slots.placements.map { it.item.id },
         )
-        assertEquals(6, docks.surface("right")!!.slots.placements.size)
+        // Seven, not six: this build's DockStore has a control the install has
+        // never been offered -- the gallery -- and `introduce` puts it in the
+        // first cell that will hold it. That is the other half of "the bars you
+        // had are the bars you get": nothing moves, and what is new appears.
+        assertEquals(7, docks.surface("right")!!.slots.placements.size)
+        assertEquals(
+            listOf("zoom_in", "zoom_out", "fit", "layers", "selection", "projects", "clear"),
+            docks.surface("right")!!.slots.placements.map { it.item.id },
+            "and it lands in the gap that was there, moving nothing",
+        )
         assertEquals(6, docks.surface("bottom")!!.slots.placements.size)
         assertNotNull(docks.surface("f4"), "and the panel they fixated")
     }

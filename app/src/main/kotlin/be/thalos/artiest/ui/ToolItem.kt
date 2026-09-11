@@ -286,6 +286,17 @@ enum class ToolItem(
     EXPORT("export", "Export PNG", "Export", 1, ToolGroup.FILE),
 
     /**
+     * The drawings you have, as pictures of themselves.
+     *
+     * A button and not a panel, and that is not laziness: a gallery is the one
+     * piece of chrome that wants the *whole* screen — a list of drawings you
+     * cannot recognise at a glance is a list you have to read, and reading file
+     * names is what this replaces. It opens over everything and closes again.
+     * See `docs/projects-plan.md`.
+     */
+    PROJECTS("projects", "Drawings", "Files", 1, ToolGroup.FILE),
+
+    /**
      * A picture from the tablet, brought in as a layer of its own.
      *
      * In [ToolGroup.FILE] beside Export and not in DRAW, because it is the same
@@ -330,6 +341,22 @@ enum class ToolItem(
      * could place, and a button that did would cover the drawing.
      */
     val hangs: Boolean get() = kind == ToolKind.PANEL
+
+    /**
+     * Whether a workspace is allowed to take this away.
+     *
+     * **One entry, and the list should stay that short.** [PROJECTS] is not a
+     * tool, it is the way back to your drawings, and a workspace that filtered
+     * it out would be a workspace you cannot leave — the same shape of mistake
+     * as hiding Undo, with the work of a month behind it instead of a stroke.
+     * `CatalogueFilter` offers it whatever its groups say, which also means a
+     * release that adds it finds room for it on an install that has been
+     * arranged for months.
+     *
+     * It is *offered* everywhere, not pinned anywhere: it can still be taken
+     * off a bar like anything else, and the chooser will still have it.
+     */
+    val essential: Boolean get() = this == PROJECTS
 
     companion object {
         /** The catalogue keyed by [id], for the codec. Unknown ids decode to null. */

@@ -676,12 +676,13 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
                         ToolItem.MARQUEE to Cell(0, 6),
                     ),
                     anchored(
-                        "s2", Side.TOP, 6, 1,
+                        "s2", Side.TOP, 7, 1,
                         ToolItem.UNDO to Cell(0, 0),
                         ToolItem.REDO to Cell(1, 0),
-                        ToolItem.IMPORT to Cell(3, 0),
-                        ToolItem.EXPORT to Cell(4, 0),
-                        ToolItem.STATS to Cell(5, 0),
+                        ToolItem.PROJECTS to Cell(3, 0),
+                        ToolItem.IMPORT to Cell(4, 0),
+                        ToolItem.EXPORT to Cell(5, 0),
+                        ToolItem.STATS to Cell(6, 0),
                     ),
                     anchored(
                         "s3", Side.RIGHT, 1, 5,

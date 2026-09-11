@@ -141,6 +141,10 @@ data class CatalogueFilter(
 ) {
 
     operator fun contains(item: ToolItem): Boolean {
+        // Before everything, including `hide`. See ToolItem.essential: a
+        // workspace may arrange the way back to your drawings, and may not
+        // remove it.
+        if (item.essential) return true
         if (item.id in show) return true
         if (item.id in hide) return false
         return groups == null || item.group in groups
@@ -149,7 +153,7 @@ data class CatalogueFilter(
     /** Everything this filter offers, in catalogue order. */
     fun offered(): List<ToolItem> = ToolItem.entries.filter { it in this }
 
-    /** True when nothing is filtered out at all. */
+    /** True when nothing a workspace may filter is filtered out. */
     val isEverything: Boolean
         get() = groups == null && hide.isEmpty()
 

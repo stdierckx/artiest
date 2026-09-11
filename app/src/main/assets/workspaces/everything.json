@@ -1,6 +1,6 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 2,
+  "catalogue": 3,
   "id": "everything",
   "name": "Everything",
   "description": "Every control there is, arranged the way it starts.",
@@ -26,14 +26,15 @@
     {
       "id": "s2",
       "anchor": "top",
-      "rects": [[0, 0, 6, 1]],
+      "rects": [[0, 0, 7, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "undo", "at": [0, 0]},
         {"id": "redo", "at": [1, 0]},
-        {"id": "import", "at": [3, 0]},
-        {"id": "export", "at": [4, 0]},
-        {"id": "stats", "at": [5, 0]}
+        {"id": "projects", "at": [3, 0]},
+        {"id": "import", "at": [4, 0]},
+        {"id": "export", "at": [5, 0]},
+        {"id": "stats", "at": [6, 0]}
       ]
     },
     {

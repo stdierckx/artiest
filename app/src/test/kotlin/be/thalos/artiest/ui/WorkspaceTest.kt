@@ -68,10 +68,23 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `the way back to your drawings is offered whatever the workspace says`() {
+        // See ToolItem.essential. A workspace that could filter this out would
+        // be a workspace you cannot leave.
+        val narrow = CatalogueFilter.of(ToolGroup.DRAW)
+        assertTrue(ToolItem.PROJECTS in narrow, "a workspace that does not want FILE tools")
+        assertTrue(
+            ToolItem.PROJECTS in narrow.hiding(ToolItem.PROJECTS),
+            "and one that asked for it by name",
+        )
+        assertTrue(ToolItem.PROJECTS in narrow.offered())
+    }
+
+    @Test
     fun `the offered list is in catalogue order`() {
         val filter = CatalogueFilter.of(ToolGroup.EDIT, ToolGroup.FILE)
         assertEquals(
-            listOf(ToolItem.UNDO, ToolItem.REDO, ToolItem.EXPORT, ToolItem.IMPORT),
+            listOf(ToolItem.UNDO, ToolItem.REDO, ToolItem.EXPORT, ToolItem.PROJECTS, ToolItem.IMPORT),
             filter.offered(),
         )
     }
@@ -85,7 +98,7 @@ class WorkspaceTest {
         val narrow = CatalogueFilter.of(ToolGroup.DRAW)
         assertFalse(ToolItem.UNDO in narrow)
         assertTrue(ToolItem.UNDO in layout, "still on the top edge, still working")
-        assertEquals(20, layout.all().size)
+        assertEquals(21, layout.all().size)
     }
 
     // ---- the workspace itself ----------------------------------------------
@@ -138,7 +151,7 @@ class WorkspaceTest {
             filter = CatalogueFilter.of(ToolGroup.DRAW, ToolGroup.EDIT),
             defaults = WorkspaceDefaults(stabilisation = 0.4f),
         )
-        assertEquals(20, ws.layout.all().size)
+        assertEquals(21, ws.layout.all().size)
         assertTrue(ToolItem.PEN in ws.filter)
         assertFalse(ToolItem.STATS in ws.filter)
         assertFalse(ws.defaults.isEmpty)
