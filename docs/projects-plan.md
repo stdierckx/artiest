@@ -281,6 +281,42 @@ gate, in the same sense U10 is a gate for the workspace system.
   than the cap loads what fits and says so; it does not fail and it does not
   silently drop the top of somebody's drawing.
 
+## What the tablet changed, and what is done
+
+Pj1–Pj6 are built. Two things in this document were wrong in a way only a
+device could show, and both are now the shape of the code:
+
+**A queued open sits in the queue until something renders.** The plan said the
+swap was one queued operation and left it there. It is, and nothing asks for the
+frame that applies it — a stroke asks for its own, an open has nothing that
+would, exactly as `onLayerOp` already said one level up. The open now waits for
+the surface to exist and asks for a frame when it lands.
+
+**Nothing may be written until the drawing on screen is the whole of what is in
+the file.** The first run on the tablet opened nothing, left the document empty,
+and three seconds later the autosave encoded that emptiness over a sketch: one
+27 KB PNG of a blank sheet over 203 KB of somebody's drawing, with nothing to
+undo. `OpenResult.Opened.whole` is the permission the saver now waits for, and
+it is false for both ways an open can be partial — a sheet whose PNG would not
+decode, and a page too small to hold what the file has. Such a project is
+opened, shown, and not saved over, with the reason where the user can read it.
+
+**One control a workspace may not filter away.** The gallery is a catalogue
+entry like any other, but the workspace in front of the tablet was a *Sketcher*
+copy, *Sketcher* offers `draw` and `edit`, and the gallery is a `FILE` tool — so
+the button never appeared. `ToolItem.essential` makes `CatalogueFilter` offer it
+whatever a workspace's groups say. It is offered everywhere and pinned nowhere.
+
+| # | State |
+|---|---|
+| Pj1 `Project`, `ProjectJson`, `ProjectFiles` | **done** |
+| Pj2 `Layer.revision`, `ProjectSaver` | **done** |
+| Pj3 `LayerOp.Open`, `ProjectLoader` | **done** |
+| Pj4 `ProjectStore`, autosave, save on pause | **done**, and verified by killing the app |
+| Pj5 The gallery | **done** |
+| Pj6 `.ora` out and in | **done**, round-tripped on the tablet through the system picker |
+| Pj7 Measure it | **not taken.** The four numbers above are still owed. |
+
 ## What this unlocks
 
 ```

@@ -109,6 +109,8 @@ import be.thalos.artiest.io.PictureImporter
 import androidx.lifecycle.lifecycleScope
 import be.thalos.artiest.io.PngExporter
 import be.thalos.artiest.project.OpenResult
+import be.thalos.artiest.project.OraResult
+import be.thalos.artiest.project.OraShare
 import be.thalos.artiest.project.Project
 import be.thalos.artiest.project.ProjectLoader
 import be.thalos.artiest.project.ProjectSaver
@@ -642,14 +644,18 @@ private fun CanvasScreen(
      * never do. Then the switch is recorded, so that the next launch comes back
      * here rather than to where the user was yesterday.
      */
+    suspend fun goTo(id: String) {
+        leave()
+        val next = projects.load(id) ?: return
+        projects.switchTo(id)
+        project = next
+        attach(next)
+        projectEntries = projects.list()
+    }
+
     fun switchProject(id: String) {
         scope.launch {
-            leave()
-            val next = projects.load(id) ?: return@launch
-            projects.switchTo(id)
-            project = next
-            attach(next)
-            projectEntries = projects.list()
+            goTo(id)
             gallery = false
         }
     }
@@ -665,6 +671,31 @@ private fun CanvasScreen(
             attach(made)
             projectEntries = projects.list()
             gallery = false
+        }
+    }
+
+    /** What the last export or import said. Shown in the gallery, where it happened. */
+    var oraNote by remember { mutableStateOf("") }
+
+    /**
+     * Write a drawing out as an `.ora`.
+     *
+     * It opens the drawing first if it is not the one on the paper, because the
+     * merged image the format requires is a picture of the live document and
+     * there is only one of those. The sheets come from the files, so the
+     * drawing is written to disk before the zip is built.
+     */
+    fun exportOra(id: String) {
+        scope.launch {
+            if (id != project.id) goTo(id)
+            leave()
+            oraNote = "writing ${project.name}.ora…"
+            oraNote = when (val r = OraShare.export(context, projects.files, project, document)) {
+                is OraResult.Written -> "${r.sheets} sheet(s) to ${OraShare.FOLDER}"
+                is OraResult.Failed -> "could not export: ${r.reason}"
+                else -> ""
+            }
+            projectEntries = projects.list()
         }
     }
 
@@ -872,6 +903,42 @@ private fun CanvasScreen(
      * that asks for the whole gallery in order to open one reference photo is
      * an app that has asked for more than it needs.
      */
+    /**
+     * The document picker, for a drawing somebody sent.
+     *
+     * `OpenDocument` and not `PickVisualMedia`: an `.ora` is not a picture as
+     * far as the system is concerned, so the photo picker would not list one.
+     * The mime type is left open for the same reason — a tablet that has never
+     * seen an `.ora` does not know what to call it, and a filter it does not
+     * recognise is a picker showing an empty folder.
+     */
+    val oraPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            oraNote = ""
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            oraNote = "opening…"
+            val name = projects.suggestName()
+            oraNote = when (
+                val r = OraShare.import(
+                    context, projects.files, uri, name, System.currentTimeMillis(),
+                )
+            ) {
+                is OraResult.Read -> {
+                    projectEntries = projects.list()
+                    goTo(r.project.id)
+                    (r.notes.firstOrNull() ?: "opened as ${r.project.name}")
+                }
+
+                is OraResult.Failed -> "could not open it: ${r.reason}"
+                else -> ""
+            }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -1423,6 +1490,9 @@ private fun CanvasScreen(
                         }
                     }
                 },
+                onExport = { id -> exportOra(id) },
+                onImport = { oraPicker.launch(arrayOf("*/*")) },
+                note = oraNote,
                 onDismiss = { gallery = false },
             )
         }

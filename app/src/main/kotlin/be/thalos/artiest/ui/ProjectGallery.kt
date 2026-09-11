@@ -90,6 +90,12 @@ internal fun ProjectGallery(
     onRename: (String, String) -> Unit,
     onDuplicate: (String, String) -> Unit,
     onDelete: (String) -> Unit,
+    /** Write this drawing out as an `.ora` that Krita and GIMP can open. */
+    onExport: (String) -> Unit,
+    /** Take one in. The picker is the caller's; this only asks for it. */
+    onImport: () -> Unit,
+    /** What the last export or import said, or empty. */
+    note: String,
     onDismiss: () -> Unit,
 ) {
     var renaming by remember { mutableStateOf<ProjectFiles.Entry?>(null) }
@@ -121,7 +127,16 @@ internal fun ProjectGallery(
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (note.isNotEmpty()) {
+                    Text(
+                        "   $note",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Box(Modifier.weight(1f))
+                GalleryButton(ToolIcons.import_, "Open an .ora", onImport)
+                Box(Modifier.size(10.dp))
                 GalleryButton(ToolIcons.plus, "New drawing", onNew)
                 Box(Modifier.size(10.dp))
                 GalleryButton(ToolIcons.close, "Back to the drawing", onDismiss)
@@ -151,6 +166,7 @@ internal fun ProjectGallery(
                         onRename = { renaming = entry },
                         onDuplicate = { copying = entry },
                         onDelete = { deleting = entry },
+                        onExport = { onExport(entry.id) },
                     )
                 }
             }
@@ -208,6 +224,7 @@ private fun ProjectCard(
     onRename: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
+    onExport: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
@@ -268,6 +285,14 @@ private fun ProjectCard(
                         DropdownMenuItem(
                             text = { Text("Copy…", fontSize = 13.sp) },
                             onClick = { menu = false; onDuplicate() },
+                        )
+                        DropdownMenuItem(
+                            // It is the drawing that is exported, not the card,
+                            // so this opens it first if it is not already open.
+                            // See MainActivity: the merged image the format
+                            // requires is a picture of the live document.
+                            text = { Text("Export as .ora…", fontSize = 13.sp) },
+                            onClick = { menu = false; onExport() },
                         )
                         DropdownMenuItem(
                             text = { Text("Delete…", fontSize = 13.sp) },
