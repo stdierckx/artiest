@@ -1,0 +1,324 @@
+{
+  "artiest_catalogue": 1,
+  "version": 1,
+  "cell_dp": 44,
+  "groups": [
+    {
+      "id": "edit",
+      "label": "Edit"
+    },
+    {
+      "id": "draw",
+      "label": "Draw"
+    },
+    {
+      "id": "canvas",
+      "label": "Canvas"
+    },
+    {
+      "id": "file",
+      "label": "File"
+    },
+    {
+      "id": "debug",
+      "label": "Instruments"
+    }
+  ],
+  "kinds": ["button", "toggle", "slider", "swatch", "panel"],
+  "flows": ["right_down", "left_down", "right_up", "left_up", "down_right", "down_left", "up_right", "up_left"],
+  "shapes": ["bar", "l", "t", "u", "block"],
+  "docks": [
+    {
+      "id": "left",
+      "label": "Left edge",
+      "axis": "vertical",
+      "default_cells": 12
+    },
+    {
+      "id": "top",
+      "label": "Top edge",
+      "axis": "horizontal",
+      "default_cells": 24
+    },
+    {
+      "id": "right",
+      "label": "Right edge",
+      "axis": "vertical",
+      "default_cells": 12
+    },
+    {
+      "id": "bottom",
+      "label": "Bottom edge",
+      "axis": "horizontal",
+      "default_cells": 24
+    },
+    {
+      "id": "float",
+      "label": "Floating",
+      "axis": "horizontal",
+      "default_cells": 8
+    }
+  ],
+  "tools": [
+    {
+      "id": "clear",
+      "label": "Clear canvas",
+      "short": "Clear",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "colour",
+      "label": "Colour",
+      "short": "Colour",
+      "group": "draw",
+      "kind": "swatch",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "colour_panel",
+      "label": "Colour panel",
+      "short": "Colour",
+      "group": "draw",
+      "kind": "panel",
+      "cells_wide": 6,
+      "cells_tall": 11,
+      "turns": false
+    },
+    {
+      "id": "eraser",
+      "label": "Eraser",
+      "short": "Erase",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "eraser_size",
+      "label": "Eraser size",
+      "short": "Erase",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "export",
+      "label": "Export PNG",
+      "short": "Export",
+      "group": "file",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "fit",
+      "label": "Fit to screen",
+      "short": "Fit",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "flow",
+      "label": "Flow",
+      "short": "Flow",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "grain",
+      "label": "Grain",
+      "short": "Grain",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "import",
+      "label": "Import picture",
+      "short": "Import",
+      "group": "file",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "layers",
+      "label": "Layers",
+      "short": "Layers",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "layers_panel",
+      "label": "Layers panel",
+      "short": "Layers",
+      "group": "canvas",
+      "kind": "panel",
+      "cells_wide": 7,
+      "cells_tall": 11,
+      "turns": false
+    },
+    {
+      "id": "marker",
+      "label": "Marker",
+      "short": "Marker",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "marquee",
+      "label": "Select",
+      "short": "Select",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "opacity",
+      "label": "Opacity",
+      "short": "Opac",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "pen",
+      "label": "Pen",
+      "short": "Pen",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "pencil",
+      "label": "Pencil",
+      "short": "Pencil",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "redo",
+      "label": "Redo",
+      "short": "Redo",
+      "group": "edit",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "selection",
+      "label": "Selection",
+      "short": "Select",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "selection_panel",
+      "label": "Selection panel",
+      "short": "Select",
+      "group": "canvas",
+      "kind": "panel",
+      "cells_wide": 6,
+      "cells_tall": 8,
+      "turns": false
+    },
+    {
+      "id": "size",
+      "label": "Size",
+      "short": "Size",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "smoothing",
+      "label": "Stabilisation",
+      "short": "Smooth",
+      "group": "draw",
+      "kind": "slider",
+      "cells_wide": 4,
+      "cells_tall": 1,
+      "turns": true
+    },
+    {
+      "id": "stats",
+      "label": "Instruments",
+      "short": "Stats",
+      "group": "debug",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "undo",
+      "label": "Undo",
+      "short": "Undo",
+      "group": "edit",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "zoom_in",
+      "label": "Zoom in",
+      "short": "Zoom+",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "zoom_out",
+      "label": "Zoom out",
+      "short": "Zoom-",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    }
+  ]
+}

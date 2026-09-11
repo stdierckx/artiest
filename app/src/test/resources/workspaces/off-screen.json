@@ -1,0 +1,8 @@
+{
+  "artiest_workspace": 1,
+  "name": "Elsewhere",
+  "surfaces": [
+    {"id": "left", "dock": "left", "rects": [[900, 900, 4, 4]],
+     "tools": [{"id": "pen"}]}
+  ]
+}

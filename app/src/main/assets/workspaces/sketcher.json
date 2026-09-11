@@ -1,0 +1,57 @@
+{
+  "artiest_workspace": 1,
+  "catalogue": 1,
+  "id": "sketcher",
+  "name": "Sketcher",
+  "description": "Pencil, paper, and nothing in the way.",
+  "author": "artiest",
+  "revision": 1,
+  "filter": {"groups": ["edit", "draw"], "hide": [], "show": ["fit", "layers", "layers_panel"]},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": null},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil", "at": [0, 1]},
+        {"id": "marker", "at": [0, 2]},
+        {"id": "eraser", "at": [0, 4]},
+        {"id": "colour", "at": [0, 6]}
+      ]
+    },
+    {
+      "id": "top",
+      "dock": "top",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "undo", "at": [0, 0]},
+        {"id": "redo", "at": [1, 0]}
+      ]
+    },
+    {
+      "id": "right",
+      "dock": "right",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "layers", "at": [0, 0]},
+        {"id": "fit", "at": [0, 2]}
+      ]
+    },
+    {
+      "id": "bottom",
+      "dock": "bottom",
+      "rects": [[0, 0, 24, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "size", "at": [0, 0]},
+        {"id": "smoothing", "at": [5, 0]},
+        {"id": "eraser_size", "at": [10, 0]}
+      ]
+    }
+  ]
+}

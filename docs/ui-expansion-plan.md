@@ -9,6 +9,41 @@
 > work items, **45–62 days**, each one landable on its own and each one leaving
 > the app working.
 
+## What was built
+
+| # | Item | State |
+|---|---|---|
+| U1 | `CellRegion` + `RegionLayout` | **done** |
+| U2 | `SurfaceLayout`, `Surface`, the migration | **done** |
+| U3 | The renderer | **done**, one claim unverified — see below |
+| U4 | Shaping: presets, draw-it, Tidy | **done**, with two stated departures |
+| U5 | `catalogue.json` | **done** |
+| U6 | `Workspace` + filter | **done** |
+| U7 | JSON, import, validation | **done** |
+| U8 | Three shipped workspaces + search | **done** |
+| U9 | Overflow, clamping, rotation | **done** |
+| U10 | Measure it | **instrument built, reading not taken** |
+
+Three things are owed, and they are written here rather than left to be found:
+
+1. **U10 is a gate and it is open.** The counter ships and the procedure is
+   `docs/ui-measurement.md`; the sixty seconds with a pen have not been spent.
+   Until they are, the workspace system is not finished.
+2. **The pen through the notch is asserted, not proved.** `ChromeSurface.kt`
+   argues why a stroke started in the hollow of an L reaches the canvas — no
+   pointer modifier on the container, no child in the notch — and a pointer path
+   is not something to be sure of from reading. Same document, last section.
+3. **Two surfaces may still overlap.** U4 wanted that refused at shape time. The
+   shape board is anchored and capped at half the screen, which keeps the
+   ordinary cases apart, but a real check needs every surface's position in
+   screen cells, and nothing computes that yet.
+
+Two deliberate departures from what is written below, both argued in their
+commits: the compact string went to `v4` in U2 rather than U7, because U4 lets
+the user draw a shape and a `v3` string has nowhere to put one; and U4b is
+"drag the ends" only for a surface that has ends — a shape is sized by the
+preset you pick or the cells you paint.
+
 ## Ground truth — what exists today
 
 Seventeen files, 6 631 lines, in `app/src/main/kotlin/be/thalos/artiest/ui/`.

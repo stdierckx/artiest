@@ -444,6 +444,148 @@ object ToolIcons {
         }
     }
 
+    // ---- the shapes a toolbar can be ---------------------------------------
+
+    /**
+     * The five presets, each drawn as the thing itself inside a screen.
+     *
+     * A frame with the shape picked out in it, the same idea as [dockLeft] and
+     * for the same reason: what the menu is choosing is *where on the glass*
+     * the toolbar goes, and a picture of the glass is the only way to say that
+     * without a sentence. The frame is thin and the shape is solid, so the
+     * shape is what the eye lands on.
+     */
+    val shapeBar: ImageVector by lazy { shapeIcon("shape-bar") { fill { rect(4.4f, 4.4f, 7.6f, 19.6f) } } }
+
+    val shapeL: ImageVector by lazy {
+        shapeIcon("shape-l") {
+            fill {
+                moveTo(4.4f, 4.4f)
+                lineTo(7.6f, 4.4f)
+                lineTo(7.6f, 16.4f)
+                lineTo(17.6f, 16.4f)
+                lineTo(17.6f, 19.6f)
+                lineTo(4.4f, 19.6f)
+                close()
+            }
+        }
+    }
+
+    val shapeT: ImageVector by lazy {
+        shapeIcon("shape-t") {
+            fill {
+                moveTo(4.4f, 4.4f)
+                lineTo(19.6f, 4.4f)
+                lineTo(19.6f, 7.6f)
+                lineTo(13.6f, 7.6f)
+                lineTo(13.6f, 19.6f)
+                lineTo(10.4f, 19.6f)
+                lineTo(10.4f, 7.6f)
+                lineTo(4.4f, 7.6f)
+                close()
+            }
+        }
+    }
+
+    val shapeU: ImageVector by lazy {
+        shapeIcon("shape-u") {
+            fill {
+                moveTo(4.4f, 4.4f)
+                lineTo(7.6f, 4.4f)
+                lineTo(7.6f, 16.4f)
+                lineTo(16.4f, 16.4f)
+                lineTo(16.4f, 4.4f)
+                lineTo(19.6f, 4.4f)
+                lineTo(19.6f, 19.6f)
+                lineTo(4.4f, 19.6f)
+                close()
+            }
+        }
+    }
+
+    val shapeBlock: ImageVector by lazy {
+        shapeIcon("shape-block") { fill { rect(4.4f, 4.4f, 12.6f, 15.6f) } }
+    }
+
+    /**
+     * A nib over a grid: draw the shape yourself.
+     *
+     * The one interaction in this app that nobody else has, so it gets a glyph
+     * that says *pen* rather than a generic edit pencil — it is the same nib as
+     * [pen], shrunk, over the cells it is painting.
+     */
+    val shapeDraw: ImageVector by lazy {
+        icon("shape-draw") {
+            stroke(1.4f) {
+                moveTo(3.2f, 8.4f); lineTo(15.6f, 8.4f)
+                moveTo(3.2f, 14.0f); lineTo(11.2f, 14.0f)
+                moveTo(3.2f, 19.6f); lineTo(11.2f, 19.6f)
+                moveTo(8.8f, 3.4f); lineTo(8.8f, 19.6f)
+                moveTo(14.4f, 3.4f); lineTo(14.4f, 8.4f)
+                moveTo(3.2f, 3.4f); lineTo(3.2f, 19.6f)
+            }
+            fill {
+                moveTo(12.6f, 17.4f)
+                lineTo(19.4f, 10.6f)
+                lineTo(21.8f, 13.0f)
+                lineTo(15.0f, 19.8f)
+                lineTo(11.8f, 21.0f)
+                close()
+            }
+        }
+    }
+
+    /**
+     * A screen with a bar down one side: a workspace, seen from far enough away
+     * to be a shape rather than a set of buttons.
+     *
+     * The same frame the shape presets and the dock targets use, because it is
+     * the same idea at a different scale — this is which *whole arrangement* you
+     * are in, and the arrangement is what the frame shows.
+     */
+    val workspace: ImageVector by lazy {
+        icon("workspace") {
+            stroke(1.5f) { rect(2.8f, 3.6f, 21.2f, 20.4f) }
+            fill { rect(5.0f, 5.8f, 8.2f, 18.2f) }
+            fill { rect(10.2f, 5.8f, 19.0f, 8.0f) }
+        }
+    }
+
+    /**
+     * A lens with a handle. What finds a control the workspace does not offer.
+     *
+     * It is the one glyph in this file that is deliberately the conventional
+     * one: the search box is an escape hatch, and an escape hatch has to be
+     * recognised without being learned.
+     */
+    val search: ImageVector by lazy {
+        icon("search") {
+            stroke {
+                circle(10.4f, 10.4f, 6.4f)
+                moveTo(15.1f, 15.1f)
+                lineTo(20.6f, 20.6f)
+            }
+        }
+    }
+
+    /** Three lines pushed up against a rule: everything, closed up. */
+    val tidy: ImageVector by lazy {
+        icon("tidy") {
+            stroke {
+                moveTo(3.6f, 4.2f)
+                lineTo(20.4f, 4.2f)
+                moveTo(6.0f, 9.0f)
+                lineTo(18.0f, 9.0f)
+                moveTo(6.0f, 13.2f)
+                lineTo(15.0f, 13.2f)
+                moveTo(6.0f, 17.4f)
+                lineTo(11.4f, 17.4f)
+                moveTo(12f, 21.6f)
+                lineTo(12f, 20.0f)
+            }
+        }
+    }
+
     /** A pushpin. What keeps a popup on the screen. */
     val pin: ImageVector by lazy {
         icon("pin") {
@@ -878,6 +1020,13 @@ object ToolIcons {
         icon(name) {
             dashedBox(2.6f, 2.6f, 15.8f, 15.8f)
             badge()
+        }
+
+    /** A thin screen with the shape solid inside it. See [shapeBar]. */
+    private fun shapeIcon(name: String, shape: IconScope.() -> Unit): ImageVector =
+        icon(name) {
+            stroke(1.3f) { rect(2.6f, 2.6f, 21.4f, 21.4f) }
+            shape()
         }
 
     private class IconScope(private val builder: ImageVector.Builder) {

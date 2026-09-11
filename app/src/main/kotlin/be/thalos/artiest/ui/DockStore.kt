@@ -34,24 +34,34 @@ class DockStore(context: Context) {
      * absolute, so every existing item keeps the position the user's hand
      * already knows and the new room appears at the end.
      */
-    fun load(): DockLayout {
+    fun load(filter: CatalogueFilter = CatalogueFilter.EVERYTHING): DockLayout {
         val stored = DockCodec.decode(prefs.getString(KEY_LAYOUT, null))
-            ?: return introduce(DockLayout.DEFAULT)
-        // Edges are widened to the current defaults; a floating bar keeps the
-        // length it was made, because it was made to fit what is on it and
-        // stretching it would put empty slots over the drawing.
-        val widened = stored.resized { bar ->
-            if (bar.isFloating) bar.slots.slotCount
-            else maxOf(bar.slots.slotCount, bar.dock.defaultSlots)
+            ?: return introduce(DockLayout.DEFAULT, filter)
+        // Edges are widened to the current defaults; a floating surface keeps
+        // the length it was made, because it was made to fit what is on it and
+        // stretching it would put empty cells over the drawing.
+        //
+        // **A shape is never widened.** Widening a bar adds room at the end,
+        // which is what this rule is for; widening a shape somebody drew would
+        // change the drawing, and there is no end of an L to add room to.
+        val widened = stored.reshaped { surface ->
+            if (surface.isFloating || !surface.region.isStrip) surface.region
+            else CellRegion.strip(
+                maxOf(surface.slotCount, surface.dock.defaultSlots),
+                surface.axis,
+            )
         }
         // A v2 string carried the one floating dock's position in its own two
         // keys. Seeding it here is the last thing those keys are for.
         val seeded = widened.floating.firstOrNull()?.takeIf { it.spot == null }
         val placed = if (seeded == null) widened else {
             val (x, y) = loadFloatingAt()
-            widened.moveBar(seeded.id, BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y))
+            widened.moveSurface(
+                seeded.id,
+                BarSpot.of(x, y) ?: BarSpot(DEFAULT_FLOAT_X, DEFAULT_FLOAT_Y),
+            )
         }
-        return introduce(placed)
+        return introduce(placed, filter)
     }
 
     /**
@@ -72,8 +82,21 @@ class DockStore(context: Context) {
      * The preferred dock is a suggestion. If it is full the item goes wherever
      * it fits, and if nothing fits it is simply not placed — the chooser still
      * has it, and bars arranged to be full were meant to be full.
+     *
+     * **The filter decides where a tool is put, not whether it is recorded as
+     * offered.** A control the current workspace hides is marked offered and
+     * simply not placed, and switching to *Everything* later does not resurrect
+     * it. That looks harsh until you see what the alternative costs: the offered
+     * set is what protects a deliberate removal, and it cannot tell
+     * offered-then-deleted from offered-then-kept. If a hidden tool were left
+     * unoffered, every workspace switch would rain new buttons onto bars the
+     * user had already arranged — which is the bug this whole mechanism exists
+     * to prevent, arriving through the door marked *helpful*.
+     *
+     * The tool is not lost either way: it is one search away in the chooser,
+     * which is the escape hatch the filter is only safe because of.
      */
-    private fun introduce(layout: DockLayout): DockLayout {
+    private fun introduce(layout: DockLayout, filter: CatalogueFilter): DockLayout {
         val offered = prefs.getString(KEY_OFFERED, null)
             ?.split(',')?.filter { it.isNotEmpty() }?.toMutableSet()
             ?: mutableSetOf()
@@ -83,9 +106,10 @@ class DockStore(context: Context) {
             if (!offered.add(item.id)) continue
             changed = true
             if (item in out) continue
+            if (item !in filter) continue
             for (dock in listOf(preferred) + Dock.EDGES.filter { it != preferred }) {
-                val slot = out.firstFit(dock.id, item) ?: continue
-                out = out.place(dock.id, item, slot)
+                val cell = out.firstFit(dock.id, item) ?: continue
+                out = out.place(dock.id, item, cell)
                 break
             }
         }

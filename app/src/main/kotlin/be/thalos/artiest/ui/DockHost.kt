@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
@@ -52,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,6 +62,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -114,12 +117,34 @@ fun DockHost(
     arranging: Boolean,
     onArranging: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * What the chooser offers. **Only the chooser** — see [CatalogueFilter].
+     *
+     * A tool already on a bar but outside the filter keeps working and keeps
+     * its cell, which is what makes switching workspace safe rather than
+     * destructive.
+     */
+    filter: CatalogueFilter = CatalogueFilter.EVERYTHING,
+    onFilter: (CatalogueFilter) -> Unit = {},
+    /**
+     * Anything else that belongs in arrange mode, drawn above the hint.
+     *
+     * A slot rather than a parameter, so that this file keeps knowing where a
+     * control goes and nothing about what a control is. The workspace switcher
+     * lives here, and this file has never heard of a workspace.
+     */
+    arrangeExtras: @Composable () -> Unit = {},
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val density = LocalDensity.current
     val drag = remember { DockDrag() }
     val slotPx = with(density) { Chrome.SLOT.toPx() }
     SideEffect { drag.slotPx = slotPx }
+
+    // Which surface is being redrawn, if any. One at a time, because the board
+    // covers the screen and two boards would be two answers to "what is under
+    // the pen".
+    var shaping by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier
@@ -135,13 +160,42 @@ fun DockHost(
             val hostHeight = with(density) { maxHeight.toPx() }
             SideEffect { drag.hostSize = Offset(hostWidth, hostHeight) }
 
-            for (bar in layout.edges) {
+            // The chrome's own grid: how many whole cells fit on this glass.
+            // Everything a shape can be is measured against it.
+            val gridW = (hostWidth / slotPx).toInt().coerceAtLeast(1)
+            val gridH = (hostHeight / slotPx).toInt().coerceAtLeast(1)
+
+            // Clamp, overflow, say so — and **clamp for the screen, not for the
+            // file**. A workspace made on a tablet and opened on a phone has to
+            // come back whole when it goes home again, so what is cut here is
+            // cut on the way to the glass and `layout` is untouched. When
+            // nothing has to be cut, `fitted.layout` is the same instance that
+            // came in, which is what makes "a layout that fits both ways round
+            // does not move" true rather than merely likely.
+            val fitted = remember(layout, gridW, gridH) { layout.fittedTo(gridW, gridH) }
+            val shown = fitted.layout
+
+            // What the instruments overlay reports. Written here rather than
+            // counted there, because only this scope knows what is on screen
+            // after the clamp -- see ChromeCounters for the number that decides
+            // whether the workspace system may ship.
+            SideEffect {
+                ChromeCounters.surfaces =
+                    shown.surfaces.count { !it.isEmpty || (arranging && it.dock.isEdge) }
+                ChromeCounters.cells = shown.all().size
+            }
+
+            for (bar in shown.edges) {
                 BarView(
                     bar = bar,
-                    layout = layout,
+                    layout = shown,
                     onLayout = onLayout,
                     arranging = arranging,
+                    onDraw = { shaping = bar.id },
                     drag = drag,
+                    filter = filter,
+                    onFilter = onFilter,
+                    overflow = fitted.overflow[bar.id].orEmpty(),
                     modifier = Modifier
                         .align(bar.dock.alignment())
                         .padding(Chrome.EDGE_INSET)
@@ -165,13 +219,17 @@ fun DockHost(
 
             // After the edges, so a bar the user placed himself wins the
             // overlap. He put it there; the edge was always going to be there.
-            for (bar in layout.floating) {
+            for (bar in shown.floating) {
                 FloatingBarView(
                     bar = bar,
-                    layout = layout,
+                    layout = shown,
                     onLayout = onLayout,
                     arranging = arranging,
+                    onDraw = { shaping = bar.id },
                     drag = drag,
+                    filter = filter,
+                    onFilter = onFilter,
+                    overflow = fitted.overflow[bar.id].orEmpty(),
                     hostWidth = hostWidth,
                     hostHeight = hostHeight,
                     slotContent = slotContent,
@@ -190,7 +248,11 @@ fun DockHost(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = Chrome.BAR_THICKNESS + Chrome.EDGE_INSET * 3),
             ) {
-                ArrangeHint(onReset = { onLayout(DockLayout.STARTER) })
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    arrangeExtras()
+                    Spacer(Modifier.height(8.dp))
+                    ArrangeHint(onReset = { onLayout(DockLayout.STARTER) })
+                }
             }
 
             ArrangeButton(
@@ -200,6 +262,26 @@ fun DockHost(
             )
 
             DragGhost(drag)
+
+            // Last, and over everything: while a shape is being drawn it is the
+            // only thing on the screen that answers a pointer.
+            shaping?.let { id ->
+                val surface = shown.surface(id)
+                if (surface == null) {
+                    shaping = null
+                } else {
+                    ShapeEditor(
+                        surface = surface,
+                        gridW = gridW,
+                        gridH = gridH,
+                        onCancel = { shaping = null },
+                        onApply = { region ->
+                            shaping = null
+                            onLayout(layout.reshape(id, region))
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -217,25 +299,63 @@ private fun Dock.alignment(): Alignment = when (this) {
 // ---------------------------------------------------------------------------
 
 /**
- * One bar, drawn.
+ * One surface on an edge, drawn.
  *
  * Absent entirely when it is empty and nobody is arranging: an edge with no
  * controls on it should look like an edge, not like a bar someone forgot to
  * fill. In arrange mode it appears whatever is on it, because an invisible bar
  * cannot be dropped into and *the user can decide where they attach* is the
  * whole feature.
+ *
+ * **There are two renderers here on purpose, and it is not a hedge.** A bar is
+ * a line and has things a shape does not: it scrolls when it is longer than the
+ * screen, it stops at its last item so an unfilled cell reads as a group
+ * separator, and it grows across itself to hold a panel. A shape scrolls
+ * nowhere, is exactly as big as it was drawn, and has a notch the pen goes
+ * through. Making one renderer do both would mean the strip growing a shape's
+ * special cases and the shape growing a bar's, and the first casualty would be
+ * the day-one behaviour every existing user already has. So a strip is rendered
+ * by exactly the code that rendered it before shapes existed, and anything else
+ * goes to [ChromeSurface].
  */
 @Composable
 private fun BarView(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
+    onDraw: () -> Unit,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
+    overflow: List<ToolItem>,
     modifier: Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
-    if (bar.isEmpty && !arranging) return
+    if (bar.isEmpty && !arranging && overflow.isEmpty()) return
+
+    // The gate. While a stroke is being drawn this must not fire at all: a
+    // toolbar that recomposes with the pen down is work on the UI thread in the
+    // frames that matter most. See ChromeCounters.
+    SideEffect { ChromeCounters.composed() }
+
+    // The furniture that sits beside the run rather than on it: a button
+    // covering a cell is a cell nothing can be dropped into. The shape button
+    // is arrange-only; the chevron is never optional, because it is the
+    // promise that no control silently disappears.
+    val leading: @Composable () -> Unit = { if (arranging) ShapeButton(bar, layout, onLayout, onDraw) }
+    val trailing: @Composable () -> Unit = { OverflowChevron(overflow, bar.axis, Modifier, slotContent) }
+
+    if (!bar.region.isStrip) {
+        Row(verticalAlignment = Alignment.Top, modifier = modifier) {
+            leading()
+            ChromeSurface(
+                bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
+            )
+            trailing()
+        }
+        return
+    }
 
     Box(
         modifier
@@ -243,7 +363,19 @@ private fun BarView(
             .onGloballyPositioned { drag.bounds[bar.id] = it.boundsInRoot() }
             .padding(Chrome.BAR_PADDING),
     ) {
-        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        if (bar.axis == Axis.VERTICAL) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                leading()
+                BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
+                trailing()
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                leading()
+                BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
+                trailing()
+            }
+        }
     }
 }
 
@@ -266,11 +398,13 @@ private fun BarView(
  */
 @Composable
 private fun BarRun(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val vertical = bar.axis == Axis.VERTICAL
@@ -278,7 +412,7 @@ private fun BarRun(
     // the catalogue. Asking the catalogue was a defect with a visible face:
     // shrinking a fixated colour panel made the panel smaller and left the
     // toolbar it sits on at its original size, so the wheel ended up floating
-    // in a grey rectangle twice its height. `Placement.depth` says in its own
+    // in a grey rectangle twice its height. `CellPlacement` says in its own
     // KDoc why it is carried rather than derived — a resized panel's size is a
     // property of the placement — and this was the one reader that did not
     // believe it. Sharing `thickness()` with the grip beside it is also what
@@ -288,28 +422,30 @@ private fun BarRun(
 
     // Only as far as the last item, unless arranging. See the file KDoc.
     val extent = if (arranging) {
-        bar.slots.slotCount
+        bar.slotCount
     } else {
-        bar.slots.placements.maxOfOrNull { it.endSlot } ?: 0
+        bar.slots.placements.maxOfOrNull { bar.slotOf(it.cell) + bar.spanOf(it) } ?: 0
     }
 
     val cells: @Composable () -> Unit = {
         var slot = 0
         while (slot < extent) {
-            val here = slot
+            val here = bar.cellAt(slot)
             val placed = bar.slots.covering(here)
             SlotCell(
                 bar = bar,
-                slot = here,
+                cell = here,
                 placed = placed,
                 thickness = thickness,
                 layout = layout,
                 onLayout = onLayout,
                 arranging = arranging,
                 drag = drag,
+                filter = filter,
+                onFilter = onFilter,
                 slotContent = slotContent,
             )
-            slot += placed?.span ?: 1
+            slot += placed?.let { bar.spanOf(it) } ?: 1
         }
     }
 
@@ -345,26 +481,28 @@ private fun BarRun(
  * One cell: a control, a chip standing in for it, or an empty target.
  *
  * The size is decided here and in one place, because it is the number the drop
- * arithmetic in [DockDrag.slotAt] inverts. If a cell were ever a different width
- * from `slots × SLOT`, a drop would land in the wrong slot and nothing would say
- * why.
+ * arithmetic in [DockDrag.cellAt] inverts. If a cell were ever a different width
+ * from `cells × SLOT`, a drop would land in the wrong place and nothing would
+ * say why.
  */
 @Composable
 private fun SlotCell(
-    bar: Bar,
-    slot: Int,
-    placed: Placement?,
+    bar: Surface,
+    cell: Cell,
+    placed: CellPlacement?,
     thickness: Dp,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     val vertical = bar.axis == Axis.VERTICAL
     var chooser by remember { mutableStateOf(false) }
 
-    val span = placed?.span ?: 1
+    val span = placed?.let { bar.spanOf(it) } ?: 1
     // An unfilled slot out of arrange mode is a group separator, not a hole.
     val cells = if (placed == null && !arranging) 0.28f else span.toFloat()
     val length = Chrome.SLOT * cells
@@ -375,7 +513,7 @@ private fun SlotCell(
     // the bar's depth turns the two spare slots beside a fixated panel into two
     // 440dp columns of dashed outline, which reads as three panels rather than
     // one panel and some room.
-    val across = minOf(Chrome.SLOT * (placed?.depth ?: 1), thickness)
+    val across = minOf(Chrome.SLOT * (placed?.let { bar.depthOf(it) } ?: 1), thickness)
 
     Box(
         modifier = if (vertical) {
@@ -404,7 +542,7 @@ private fun SlotCell(
                     ArrangeChip(
                         item = placed.item,
                         barId = bar.id,
-                        slot = slot,
+                        cell = cell,
                         drag = drag,
                         layout = layout,
                         onLayout = onLayout,
@@ -421,7 +559,9 @@ private fun SlotCell(
             ToolChooser(
                 layout = layout,
                 bar = bar,
-                slot = slot,
+                cell = cell,
+                filter = filter,
+                onFilter = onFilter,
                 onDismiss = { chooser = false },
                 onLayout = { chooser = false; onLayout(it) },
             )
@@ -456,7 +596,7 @@ private fun Dock.crossAlignment(): Alignment = when (this) {
  * the slot grid.
  */
 @Composable
-private fun SlotSurface(content: @Composable () -> Unit) {
+internal fun SlotSurface(content: @Composable () -> Unit) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -469,10 +609,10 @@ private fun SlotSurface(content: @Composable () -> Unit) {
 
 /** A filled slot in arrange mode: the control stands aside so it can be moved. */
 @Composable
-private fun ArrangeChip(
+internal fun ArrangeChip(
     item: ToolItem,
     barId: String,
-    slot: Int,
+    cell: Cell,
     drag: DockDrag,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
@@ -482,7 +622,7 @@ private fun ArrangeChip(
     // Stands in for the ripple that went with Modifier.clickable. See
     // carryGesture for why the clickable had to go.
     var pressed by remember { mutableStateOf(false) }
-    val lifted = drag.carrying?.bar?.id == barId && drag.carrying?.slot == slot
+    val lifted = drag.carrying?.surface?.id == barId && drag.carrying?.cell == cell
 
     Box(
         contentAlignment = Alignment.Center,
@@ -504,13 +644,13 @@ private fun ArrangeChip(
             )
             .alpha(if (lifted) 0.25f else 1f)
             .onGloballyPositioned { coords = it }
-            .pointerInput(item, barId, slot) {
+            .pointerInput(item, barId, cell) {
                 carryGesture(
                     coords = { coords },
                     onPressed = { pressed = it },
                     onPick = {
-                        val bar = layout.bar(barId)
-                        val here = bar?.slots?.covering(slot)
+                        val bar = layout.surface(barId)
+                        val here = bar?.slots?.covering(cell)
                         drag.carrying = if (bar != null && here != null) {
                             DockedItem(bar, here)
                         } else {
@@ -519,7 +659,7 @@ private fun ArrangeChip(
                     },
                     onMove = { root ->
                         drag.pointer = root
-                        drag.hover = drag.barAt(root)
+                        drag.hover = drag.surfaceAt(root)
                     },
                     onDrop = { onLayout(drag.drop(layout) ?: layout) },
                     onCancel = { drag.clear() },
@@ -543,7 +683,7 @@ private fun ArrangeChip(
 
 /** An unfilled slot in arrange mode: faint, but not invisible, because it is the way in. */
 @Composable
-private fun EmptyTarget(onClick: () -> Unit) {
+internal fun EmptyTarget(onClick: () -> Unit) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -664,11 +804,15 @@ private suspend fun PointerInputScope.carryGesture(
  */
 @Composable
 private fun FloatingBarView(
-    bar: Bar,
+    bar: Surface,
     layout: DockLayout,
     onLayout: (DockLayout) -> Unit,
     arranging: Boolean,
+    onDraw: () -> Unit,
     drag: DockDrag,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
+    overflow: List<ToolItem>,
     hostWidth: Float,
     hostHeight: Float,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
@@ -685,11 +829,18 @@ private fun FloatingBarView(
     var overEdge by remember { mutableStateOf<String?>(null) }
     var gripCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
+    // A shape paints its own ground, so the row around it must not paint one
+    // too -- a rounded rectangle behind an L is the picture the shape exists to
+    // stop being. In arrange mode the row keeps it: the grip and the X have to
+    // be findable over a drawing, and arrange mode is where furniture belongs.
+    val shaped = !bar.region.isStrip
+    val thickness = if (shaped) Chrome.SLOT * bar.region.bounds.h else bar.thickness()
+
     Row(
         verticalAlignment = Alignment.Top,
         modifier = Modifier
             .offset { IntOffset((at.x * free.x).roundToInt(), (at.y * free.y).roundToInt()) }
-            .barSkin(drag.hover == bar.id)
+            .then(if (!shaped || arranging) Modifier.barSkin(drag.hover == bar.id) else Modifier)
             .onGloballyPositioned {
                 drag.bounds[bar.id] = it.boundsInRoot()
                 sizePx = Offset(it.size.width.toFloat(), it.size.height.toFloat())
@@ -704,7 +855,7 @@ private fun FloatingBarView(
             Grip(
                 at = at,
                 free = free,
-                height = bar.thickness(),
+                height = thickness,
                 coords = { gripCoords },
                 onPointer = { root ->
                     // Edges only, and asked for by name rather than through the
@@ -725,16 +876,30 @@ private fun FloatingBarView(
                     if (edge != null) layout.dockInto(bar.id, edge)?.let(onLayout)
                 },
                 modifier = Modifier.onGloballyPositioned { gripCoords = it },
-            ) { spot -> onLayout(layout.moveBar(bar.id, spot)) }
+            ) { spot -> onLayout(layout.moveSurface(bar.id, spot)) }
+            ShapeButton(bar, layout, onLayout, onDraw)
         }
 
-        BarRun(bar, layout, onLayout, arranging, drag, slotContent)
+        if (shaped) {
+            ChromeSurface(
+                bar, layout, onLayout, arranging, drag, filter, onFilter, Modifier, slotContent,
+            )
+        } else {
+            BarRun(bar, layout, onLayout, arranging, drag, filter, onFilter, slotContent)
+        }
+
+        OverflowChevron(overflow, bar.axis, Modifier, slotContent)
 
         if (arranging) {
-            ResizeHandle(bar) { along, across ->
-                onLayout(layout.resizeFloating(bar.id, along, across))
+            // A bar has a length and a depth, so it can be dragged bigger. A
+            // shape has neither -- it is reshaped rather than resized, which is
+            // its own gesture and its own menu.
+            if (!shaped) {
+                ResizeHandle(bar) { along, across ->
+                    onLayout(layout.resizeFloating(bar.id, along, across))
+                }
             }
-            CloseBar { onLayout(layout.closeBar(bar.id)) }
+            CloseBar { onLayout(layout.closeSurface(bar.id)) }
         }
     }
 }
@@ -749,11 +914,11 @@ private fun FloatingBarView(
  * reads as deliberate rather than as lag once you know the grid is there.
  */
 @Composable
-private fun ResizeHandle(bar: Bar, onResize: (Int, Int) -> Unit) {
+private fun ResizeHandle(bar: Surface, onResize: (Int, Int) -> Unit) {
     val density = LocalDensity.current
     val slotPx = with(density) { Chrome.SLOT.toPx() }
     val resize by rememberUpdatedState(onResize)
-    val along by rememberUpdatedState(bar.slots.slotCount)
+    val along by rememberUpdatedState(bar.slotCount)
     val across by rememberUpdatedState(bar.depthCells)
 
     Box(
@@ -828,7 +993,7 @@ private fun CloseBar(onClose: () -> Unit) {
  * on a bar eleven cells tall is a grip nobody can find — and getting it from one
  * place is what stops the two disagreeing by a padding.
  */
-private fun Bar.thickness(): Dp =
+private fun Surface.thickness(): Dp =
     maxOf(Chrome.BAR_THICKNESS - Chrome.BAR_PADDING * 2, Chrome.SLOT * depthCells)
 
 /**
@@ -1059,16 +1224,38 @@ private fun DragGhost(drag: DockDrag) {
  * menu says so by greying the frame.
  */
 @Composable
-private fun ToolChooser(
+internal fun ToolChooser(
     layout: DockLayout,
-    bar: Bar,
-    slot: Int,
+    bar: Surface,
+    cell: Cell,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
     onDismiss: () -> Unit,
     onLayout: (DockLayout) -> Unit,
 ) {
-    val occupant = bar.slots.covering(slot)
+    val occupant = bar.slots.covering(cell)
+    var query by remember { mutableStateOf("") }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        // The escape hatch, and it is not optional.
+        //
+        // A filter is a promise that what it hid was not needed, and the whole
+        // feature turns on that promise being recoverable in one tap. So this
+        // searches the **entire catalogue**, filter or no filter, and offering
+        // something adds it to filter.show — a decision the user made, recorded
+        // as one, rather than a hole punched in the rules. See CatalogueFilter.
+        ToolSearch(
+            query = query,
+            onQuery = { query = it },
+            layout = layout,
+            bar = bar,
+            cell = cell,
+            filter = filter,
+            onFilter = onFilter,
+            onLayout = onLayout,
+        )
+        if (query.isNotBlank()) return@DropdownMenu
+
         if (occupant != null) {
             Text(
                 "Move ${occupant.item.label} to",
@@ -1078,7 +1265,7 @@ private fun ToolChooser(
             )
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                 for (target in Dock.EDGES) {
-                    val moved = layout.move(bar.id, slot, target.id)
+                    val moved = layout.move(bar.id, cell, target.id)
                     DockTarget(
                         dock = target,
                         enabled = target.id != bar.id && moved != null,
@@ -1099,13 +1286,17 @@ private fun ToolChooser(
             DropdownMenuItem(
                 text = { Text("Remove ${occupant.item.label}", fontSize = 13.sp) },
                 leadingIcon = { Icon(ToolIcons.close, null, Modifier.size(17.dp)) },
-                onClick = { onLayout(layout.remove(bar.id, slot)) },
+                onClick = { onLayout(layout.remove(bar.id, cell)) },
             )
             HorizontalDivider()
         }
 
         for (group in ToolGroup.entries) {
-            val items = ToolItem.entries.filter { it.group == group }
+            // The filter belongs here and nowhere else. A tool already on a bar
+            // but outside it keeps working and keeps its cell -- see
+            // CatalogueFilter, and the rule that makes switching workspace a
+            // change of menu rather than a change of toolbar.
+            val items = ToolItem.entries.filter { it.group == group && it in filter }
             if (items.isEmpty()) continue
             Text(
                 group.label,
@@ -1114,7 +1305,7 @@ private fun ToolChooser(
                 modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
             )
             for (item in items) {
-                val fits = layout.fits(bar.id, item, slot, ignoringSlot = slot)
+                val fits = layout.fits(bar.id, item, cell, ignoring = cell)
                 val already = item == occupant?.item
                 val elsewhere = !already && item in layout
                 DropdownMenuItem(
@@ -1125,7 +1316,7 @@ private fun ToolChooser(
                             // and saying which edge it is leaving is the
                             // difference between a menu and a guess.
                             if (elsewhere) {
-                                "${item.label}  ·  ${layout.locate(item)?.bar?.dock?.label}"
+                                "${item.label}  ·  ${layout.locate(item)?.surface?.dock?.label}"
                             } else {
                                 item.label
                             },
@@ -1136,12 +1327,121 @@ private fun ToolChooser(
                         ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) }
                     },
                     enabled = fits && !already,
-                    onClick = { onLayout(layout.place(bar.id, item, slot)) },
+                    onClick = { onLayout(layout.place(bar.id, item, cell)) },
                 )
             }
         }
     }
 }
+
+/**
+ * Find any control there is, whatever this workspace offers.
+ *
+ * This is trap 2's mitigation, and the workspace plan called it *"not
+ * optional"*: **hiding a tool is a promise it was not needed**, and a promise
+ * you cannot take back is a promise nobody should make. One field, the whole
+ * catalogue, always there.
+ *
+ * A hit that the current filter does not offer is shown with *Add* beside it.
+ * Tapping it does two things and says so: the control goes in the cell, and its
+ * id goes into `filter.show`, so it is offered from then on. Adding to `show`
+ * rather than taking it out of `hide` is deliberate — see [CatalogueFilter]: it
+ * records a decision, and it survives a later change to the groups.
+ */
+@Composable
+private fun ToolSearch(
+    query: String,
+    onQuery: (String) -> Unit,
+    layout: DockLayout,
+    bar: Surface,
+    cell: Cell,
+    filter: CatalogueFilter,
+    onFilter: (CatalogueFilter) -> Unit,
+    onLayout: (DockLayout) -> Unit,
+) {
+    BasicTextField(
+        value = query,
+        onValueChange = onQuery,
+        singleLine = true,
+        textStyle = TextStyle(
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+        ),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { field ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+            ) {
+                Icon(
+                    ToolIcons.search,
+                    null,
+                    Modifier.size(15.dp),
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier.padding(start = 8.dp)) {
+                    if (query.isEmpty()) {
+                        Text(
+                            "Find any control",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    field()
+                }
+            }
+        },
+    )
+
+    if (query.isBlank()) return
+
+    val needle = query.trim().lowercase()
+    // The whole catalogue. That is the point of it.
+    val hits = ToolItem.entries.filter {
+        needle in it.label.lowercase() || needle in it.id || needle in it.short.lowercase()
+    }
+    if (hits.isEmpty()) {
+        Text(
+            "nothing called that",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 8.dp),
+        )
+        return
+    }
+
+    for (item in hits.take(MAX_HITS)) {
+        val offered = item in filter
+        val fits = layout.fits(bar.id, item, cell, ignoring = cell)
+        DropdownMenuItem(
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.label, fontSize = 13.sp)
+                    if (!offered) {
+                        Text(
+                            "  ·  add to this workspace",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            },
+            leadingIcon = { ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) } },
+            enabled = fits,
+            onClick = {
+                if (!offered) onFilter(filter.offering(item))
+                onLayout(layout.place(bar.id, item, cell))
+            },
+        )
+    }
+}
+
+/** A menu is a menu, not a list of everything. Refine the word instead. */
+private const val MAX_HITS = 8
 
 @Composable
 private fun DockTarget(dock: Dock, enabled: Boolean, onClick: () -> Unit) {
@@ -1208,7 +1508,7 @@ private fun Modifier.barSkin(hovered: Boolean): Modifier {
  * docks share. [hostOrigin] converts back to the host's own frame for the one
  * thing that is drawn rather than hit-tested: the ghost under the finger.
  */
-private class DockDrag {
+internal class DockDrag {
     var carrying by mutableStateOf<DockedItem?>(null)
     var pointer by mutableStateOf(Offset.Zero)
     var hover by mutableStateOf<String?>(null)
@@ -1246,25 +1546,28 @@ private class DockDrag {
     fun edgeAt(point: Offset): String? =
         Dock.EDGES.firstOrNull { bounds[it.id]?.contains(point) == true }?.id
 
-    fun barAt(point: Offset): String? =
+    fun surfaceAt(point: Offset): String? =
         bounds.entries
             .filter { it.value.contains(point) }
             .map { it.key }
             .maxByOrNull { if (it.startsWith(DockLayout.FLOAT_PREFIX)) 1 else 0 }
 
     /**
-     * Which slot of [dock] the point is over.
+     * Which cell of [surface] the point is over.
      *
      * The inverse of [SlotCell]'s sizing, and it is only correct because that
-     * sizing is `slots × SLOT` with no exceptions. Measured from [runOrigin],
+     * sizing is `cells × SLOT` with no exceptions. Measured from [runOrigin],
      * which is the run's own position and therefore already scrolled — there is
      * nothing here to add back and nothing to get wrong.
+     *
+     * Still one-dimensional, because the renderer still draws a line of cells.
+     * When it draws a shape this becomes two of the same division — see
+     * `docs/ui-expansion-plan.md`, U3 — and the identity it inverts does not
+     * change, which is the reason that step is cheap.
      */
-    fun slotAt(bar: Bar, point: Offset): Int? {
-        val origin = runOrigin[bar.id] ?: return null
-        if (slotPx <= 0f) return null
-        val along = if (bar.axis == Axis.HORIZONTAL) point.x - origin.x else point.y - origin.y
-        return (along / slotPx).toInt().coerceAtLeast(0)
+    fun cellAt(surface: Surface, point: Offset): Cell? {
+        val origin = runOrigin[surface.id] ?: return null
+        return DropMath.cellAt(surface.region, point - origin, slotPx)
     }
 
     /**
@@ -1281,9 +1584,9 @@ private class DockDrag {
         val held = carrying ?: return null
         val where = pointer
         clear()
-        val target = barAt(where)?.let { layout.bar(it) }
+        val target = surfaceAt(where)?.let { layout.surface(it) }
             ?: return layout.addFloating(held.item, spotAt(where)).first
-        return layout.move(held.bar.id, held.slot, target.id, slotAt(target, where))
+        return layout.move(held.surface.id, held.cell, target.id, cellAt(target, where))
     }
 
     /** A root point as a fraction of the chrome, for a bar that is about to exist. */

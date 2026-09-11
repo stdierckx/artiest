@@ -135,3 +135,38 @@ tasks.withType<Test>().configureEach {
         includeEngines("junit-jupiter", "junit-vintage")
     }
 }
+
+// Writes the two generated documents into docs/.
+//
+// catalogue.json is the published vocabulary — every tool, group, kind, fill
+// order and anchor — as a file that can be read without building the app, which
+// is half of what makes "hand it to a model and ask for a workspace" a real
+// sentence. workspace-example.json is one real workspace written by the real
+// encoder, which docs/workspace-format.md quotes: a worked example a person
+// copies from has to be one the app would actually produce.
+//
+// It runs on the *unit test* classpath, because that is the one classpath in
+// this module that is a plain JVM, and the entry point lives in the test source
+// set so that a main() which writes a file to a path off the command line never
+// reaches the APK.
+//
+// It deliberately does not depend on the test task. ToolCatalogueTest fails
+// when the checked-in file is stale, which is the whole point of it — and a
+// generator that could only run once its own staleness check was already
+// passing would be a generator nobody could use.
+tasks.register<JavaExec>("catalogueJson") {
+    group = "documentation"
+    description = "Writes the generated docs and the shipped workspace assets."
+    dependsOn("compileDebugUnitTestKotlin")
+    val unitTest = tasks.named<Test>("testDebugUnitTest")
+    classpath = files(provider { unitTest.get().classpath })
+    mainClass.set("be.thalos.artiest.ui.CatalogueMainKt")
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(
+                rootProject.file("docs").absolutePath,
+                file("src/main/assets/workspaces").absolutePath,
+            )
+        }
+    )
+}

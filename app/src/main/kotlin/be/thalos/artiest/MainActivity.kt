@@ -89,7 +89,11 @@ import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
 import be.thalos.artiest.ui.DockHost
 import be.thalos.artiest.ui.DockLayout
+import be.thalos.artiest.ui.ChromeCounters
 import be.thalos.artiest.ui.DockStore
+import be.thalos.artiest.ui.Workspace
+import be.thalos.artiest.ui.WorkspaceMenu
+import be.thalos.artiest.ui.WorkspaceStore
 import be.thalos.artiest.ui.IconToolButton
 import be.thalos.artiest.ui.ToolIcons
 import be.thalos.artiest.ui.ToolSlider
@@ -450,8 +454,43 @@ private fun CanvasScreen(
     // changes are rare and a layout that does not survive a force-quit is not a
     // layout anyone will invest in arranging.
     val store = remember { DockStore(context) }
-    var docks by remember { mutableStateOf(store.load()) }
+
+    // Which program you are in. Two stores on purpose, and the split is the one
+    // WorkspaceStore's KDoc argues: the *arrangement* goes to preferences on
+    // every drag, because a drag is frequent and a JSON write per drop is a
+    // dropped frame six months from now; the *workspace* goes to its own file
+    // when you switch, duplicate or leave. A crash after a drag loses nothing --
+    // the arrangement is in preferences and the file catches up.
+    val workspaces = remember { WorkspaceStore(context) }
+    var workspace by remember { mutableStateOf(workspaces.current()) }
+    var entries by remember { mutableStateOf(workspaces.list()) }
+
+    var docks by remember { mutableStateOf(store.load(workspace.filter)) }
     var arranging by remember { mutableStateOf(false) }
+
+    /** Save the arrangement to both stores. The fast one always, the file too. */
+    fun keep(next: DockLayout) {
+        docks = next
+        store.save(next)
+        workspace = workspace.copy(layout = next)
+        workspaces.save(workspace)
+    }
+
+    /**
+     * Switch program: load the file, take its arrangement, take its filter.
+     *
+     * No animation, no dialog, no reload of the document -- the workspace plan
+     * made that a stop condition and it is one line of code away from being
+     * broken. What is on the paper does not change; what is around it does.
+     */
+    fun switchTo(id: String) {
+        val next = workspaces.load(id) ?: return
+        workspaces.switchTo(id)
+        workspace = next
+        docks = next.layout
+        store.save(next.layout)
+        entries = workspaces.list()
+    }
 
     // The colours mixed on the wheel. Pushed when the panel closes rather than
     // on every sample of a drag -- see ColourButton for why.
@@ -925,9 +964,34 @@ private fun CanvasScreen(
 
         DockHost(
             layout = docks,
-            onLayout = { docks = it; store.save(it) },
+            onLayout = { keep(it) },
             arranging = arranging,
             onArranging = { arranging = it },
+            filter = workspace.filter,
+            onFilter = {
+                workspace = workspace.copy(filter = it)
+                workspaces.save(workspace)
+            },
+            arrangeExtras = {
+                WorkspaceMenu(
+                    current = workspace,
+                    entries = entries,
+                    isShipped = workspaces::isShipped,
+                    onSwitch = { switchTo(it) },
+                    onDuplicate = {
+                        val copy = workspaces.duplicate(
+                            workspace.id,
+                            Workspace.copyName(workspace.name, entries.map { it.name }),
+                        )
+                        entries = workspaces.list()
+                        copy?.let { switchTo(it.id) }
+                    },
+                    onReset = {
+                        workspaces.reset(workspace.id)
+                        switchTo(workspace.id)
+                    },
+                )
+            },
         ) { item, axis ->
                 ToolSlot(
                     item = item,
@@ -943,8 +1007,7 @@ private fun CanvasScreen(
                         // this one path, which is what makes adding the next
                         // one a catalogue entry rather than a feature.
                         val (next, _) = docks.addFloating(panel, spot)
-                        docks = next
-                        store.save(next)
+                        keep(next)
                         arranging = true
                     },
                     onInk = { ink = it },
@@ -1531,6 +1594,9 @@ private fun readout(
         "p99 ${r(s.msPerSample(0.99f) * 1000f, 1)} us/sample   " +
         "of a 3108 us interval\n" +
         "alloc    $alloc\n" +
+        // The workspace system's own gate. `recompose N/s` must read 0 with the
+        // pen on the glass -- see ChromeCounters for why zero and not "small".
+        ChromeCounters.readout() + "\n" +
         "predict  ${if (surface.predictionEnabled) "ON" else "off"}   " +
         "${surface.predictor?.implementation ?: "-"}   " +
         "${surface.predictor?.availability ?: "-"}   " +

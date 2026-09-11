@@ -1,0 +1,23 @@
+{
+  "artiest_workspace": 1,
+  "id": "sketcher",
+  "name": "Sketcher",
+  "description": "Pencil, paper, and nothing in the way.",
+  "author": "artiest",
+  "revision": 3,
+  "filter": {"groups": ["draw", "edit"], "hide": ["grain"], "show": []},
+  "defaults": {"brush": null, "shelf": [], "stabilisation": 0.4},
+  "surfaces": [
+    {
+      "id": "left",
+      "dock": "left",
+      "rects": [[0, 0, 1, 12]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil"},
+        {"id": "eraser"}
+      ]
+    }
+  ]
+}
