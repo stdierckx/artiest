@@ -183,6 +183,25 @@ class Layer(
     private var depth = 0
 
     /**
+     * How many times these pixels have changed. Written under [lock].
+     *
+     * A number and not a flag, because the reader is not the writer and there
+     * is no moment either of them could safely clear a flag: the saver copies a
+     * sheet, spends a fifth of a second encoding it, and by then the pen may
+     * have drawn on it again. Recording *which* revision was written and
+     * comparing later cannot lose that stroke; clearing a flag after the encode
+     * can, and would do it silently.
+     *
+     * Read from any thread — `ProjectSaver` reads it off the render thread the
+     * way `PngExporter` reads the stack — which is what the volatile is for.
+     */
+    @Volatile
+    private var revisions = 0L
+
+    /** See [revisions]. Zero for a sheet nothing has been drawn on. */
+    val revision: Long get() = revisions
+
+    /**
      * Rasterize into the layer. Returns false, having never run [block], if the
      * layer is closed.
      *
@@ -208,6 +227,11 @@ class Layer(
                 block(canvas)
             } finally {
                 depth--
+                // Inside the lock, and unconditionally: a block that threw may
+                // still have drawn half of something, and a sheet whose pixels
+                // changed while its revision did not is a sheet the saver will
+                // skip forever.
+                revisions++
             }
             return true
         }

@@ -12,7 +12,6 @@ import android.provider.MediaStore
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.StackCompositor
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.FilterOutputStream
 import java.io.OutputStream
@@ -148,7 +147,7 @@ object PngExporter {
         val startNs = System.nanoTime()
 
         val waitStartNs = System.nanoTime()
-        val notYetStamped = awaitStamped(document, waitMs)
+        val notYetStamped = document.awaitStamped(waitMs)
         val waitNs = System.nanoTime() - waitStartNs
 
         // Before the lock, and this is the line the plan gets wrong. It is also
@@ -229,19 +228,6 @@ object PngExporter {
             // shows up when someone presses Save twice.
             out.recycle()
         }
-    }
-
-    /**
-     * Poll until the render thread has stamped everything queued, or [waitMs]
-     * runs out. Returns what is still outstanding.
-     */
-    private suspend fun awaitStamped(document: Document, waitMs: Long): Int {
-        if (document.pendingCommits == 0) return 0
-        val deadlineNs = System.nanoTime() + waitMs * 1_000_000L
-        while (document.pendingCommits > 0 && System.nanoTime() < deadlineNs) {
-            delay(POLL_MS)
-        }
-        return document.pendingCommits
     }
 
     /**
@@ -403,7 +389,5 @@ object PngExporter {
      * Long enough for a frame that has already been asked for, short enough
      * that a backgrounded export is not a hang. Fifteen frames at 60 Hz.
      */
-    const val DEFAULT_WAIT_MS = 250L
-
-    private const val POLL_MS = 2L
+    const val DEFAULT_WAIT_MS = Document.DEFAULT_WAIT_MS
 }

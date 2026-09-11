@@ -409,6 +409,38 @@ class Document(
     fun drainCommits(sink: CommitQueue.Sink): Int = commits.drain(sink)
 
     /**
+     * Wait, briefly and with a bound, until the render thread has stamped
+     * everything queued. Returns what is still outstanding.
+     *
+     * **Why anything that reads the pixels has one.** [commitStroke] records a
+     * stroke's bounds here on the UI thread and *queues* its pixels; the layer
+     * receives them at the next render. Copy the layer inside that window and
+     * the copy is missing the last stroke, this object's own count says it is
+     * there, and nothing anywhere reports a problem. `PngExporter` found that
+     * first and `ProjectSaver` has exactly the same hole — which is why the
+     * wait lives here now rather than in one of them.
+     *
+     * Polling rather than a completion latch, because the render thread belongs
+     * to graphics-core and the only signal is a callback on the view; a model
+     * that took a dependency on the view to get it would be coupling the file
+     * format to the `SurfaceView` for one bit. At 2 ms granularity against a
+     * 16.7 ms frame the poll costs one wakeup.
+     *
+     * **The caller still has to have asked for a render.** Nothing here can. If
+     * the queue is non-empty because there is no surface at all — the app is
+     * backgrounded — the wait runs out and the caller proceeds with what there
+     * is and says so.
+     */
+    suspend fun awaitStamped(waitMs: Long = DEFAULT_WAIT_MS): Int {
+        if (pendingCommits == 0) return 0
+        val deadlineNs = System.nanoTime() + waitMs * 1_000_000L
+        while (pendingCommits > 0 && System.nanoTime() < deadlineNs) {
+            kotlinx.coroutines.delay(POLL_MS)
+        }
+        return pendingCommits
+    }
+
+    /**
      * Queue a change to the layer stack. UI thread, from the layers panel.
      *
      * Queued for the reason [requestClear] is, and unconditional for the reason
@@ -576,6 +608,20 @@ class Document(
     }
 
     companion object {
+
+        /**
+         * How long anything reading the pixels waits for the render thread.
+         *
+         * A quarter of a second is fifteen frames: long enough that a stamp
+         * which is going to happen has happened, short enough that a save with
+         * no surface behind it is not a hang. Was `PngExporter`'s, and moved
+         * here with [awaitStamped] when the saver turned out to need the same
+         * wait for the same reason.
+         */
+        const val DEFAULT_WAIT_MS = 250L
+
+        /** One wakeup against a 16.7 ms frame. See [awaitStamped]. */
+        private const val POLL_MS = 2L
 
         /**
          * 3300 x 2160 — **landscape**, matching how the tablet is held.
