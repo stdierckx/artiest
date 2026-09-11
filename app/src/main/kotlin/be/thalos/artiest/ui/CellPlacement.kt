@@ -42,6 +42,9 @@ data class CellPlacement(
 
     val rect: CellRect get() = CellRect(x, y, w, h)
 
+    /** Whether this overhangs its shape rather than fitting in it. See [ToolItem.hangs]. */
+    val hangs: Boolean get() = item.hangs
+
     fun covers(cx: Int, cy: Int): Boolean = cx in x until right && cy in y until bottom
 
     fun covers(cell: Cell): Boolean = covers(cell.x, cell.y)

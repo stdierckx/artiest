@@ -92,11 +92,14 @@ class ShippedWorkspacesTest {
     fun `Clean is clean, and is the one that demonstrates the shape`() {
         val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.CLEAN))
         assertEquals(4, ws.layout.all().size, "four controls, no more")
-        assertFalse(ws.layout.edge(Dock.LEFT).region.isStrip, "and it is an L")
-        assertEquals(4, ws.layout.edge(Dock.LEFT).region.cellCount, "drawn to fit them")
-        for (dock in listOf(Dock.TOP, Dock.RIGHT, Dock.BOTTOM)) {
-            assertTrue(ws.layout.edge(dock).isEmpty, "${dock.id} is paper")
-        }
+        val only = assertNotNull(ws.layout.surfaces.singleOrNull(), "one toolbar, and no more")
+        assertFalse(only.region.isStrip, "and it is an L")
+        assertEquals(4, only.region.cellCount, "drawn to fit them")
+        assertEquals(
+            Cell(0, 7),
+            ws.layout.settled(20, 10).surfaces.single().origin,
+            "in the corner a thumb reaches, which a side anchor could not have said",
+        )
         // Something to draw with, something to undo with, and a colour.
         assertTrue(ToolItem.PEN in ws.layout)
         assertTrue(ToolItem.ERASER in ws.layout)
@@ -128,17 +131,36 @@ class ShippedWorkspacesTest {
     }
 
     @Test
-    fun `every shipped workspace fits on a phone-sized grid`() {
-        // Twelve by eight cells is 528 by 352dp, which is a small phone in
-        // landscape. Nothing that ships may need more than that to be whole.
+    fun `every shipped workspace fits on a tablet, and says so on a phone`() {
+        // Nothing that ships may need more than a tablet to be whole, and
+        // whatever a phone cannot show has to reach the overflow chevron rather
+        // than vanish. Everything's slider bar is the only thing that does.
         for (ws in ShippedWorkspaces.all()) {
-            for (surface in ws.layout.surfaces) {
-                if (surface.isEmpty) continue
-                val bounds = surface.region.bounds
-                assertTrue(
-                    bounds.w <= 24 && bounds.h <= 12,
-                    "${ws.id}/${surface.id} is ${bounds.w}x${bounds.h} cells",
+            val tablet = ws.layout.settled(24, 12).fittedTo(24, 12)
+            assertTrue(tablet.isWhole, "${ws.id} does not fit a tablet: ${tablet.overflow}")
+
+            val phone = ws.layout.settled(12, 8).fittedTo(12, 8)
+            for ((id, lost) in phone.overflow) {
+                assertEquals(
+                    listOf(ToolItem.ERASER_SIZE),
+                    lost,
+                    "${ws.id}/$id loses more on a phone than the last slider",
                 )
+            }
+        }
+    }
+
+    @Test
+    fun `no two toolbars of a shipped workspace claim the same cell`() {
+        for (ws in ShippedWorkspaces.all()) {
+            for ((w, h) in listOf(12 to 8, 24 to 12, 28 to 18, 18 to 28)) {
+                val settled = ws.layout.settled(w, h).fittedTo(w, h).layout
+                val claimed = HashSet<Cell>()
+                for (surface in settled.surfaces) {
+                    for (cell in surface.region.cells(FlowOrder.RIGHT_THEN_DOWN)) {
+                        assertTrue(claimed.add(cell), "${ws.id} on ${w}x$h: two claim $cell")
+                    }
+                }
             }
         }
     }

@@ -49,8 +49,12 @@ object ToolCatalogue {
      * 1: pen, pencil, marker, eraser and its size, colour and the wheel, the
      * five sliders, layers, selection and their panels, zoom, fit, clear,
      * export, import, instruments.
+     *
+     * 2: the same tools. The vocabulary around them changed — there are no
+     * docks and no shape presets, and a surface names a side only as a
+     * starting position. See `docs/ui-grid-plan.md`.
      */
-    const val VERSION = 1
+    const val VERSION = 2
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1
@@ -74,18 +78,7 @@ object ToolCatalogue {
 
         strings(1, "kinds", ToolKind.entries.map { it.name.lowercase() }, comma = true)
         strings(1, "flows", FlowOrder.entries.map { it.id }, comma = true)
-        strings(1, "shapes", SurfaceShape.entries.map { it.name.lowercase() }, comma = true)
-
-        list(1, "docks", comma = true) {
-            for ((i, d) in Dock.entries.withIndex()) {
-                line(2, "{")
-                field(3, "id", d.id, comma = true)
-                field(3, "label", d.label, comma = true)
-                field(3, "axis", d.axis.name.lowercase(), comma = true)
-                field(3, "default_cells", d.defaultSlots, comma = false)
-                line(2, "}" + if (i < Dock.entries.lastIndex) "," else "")
-            }
-        }
+        strings(1, "anchors", Side.entries.map { it.id }, comma = true)
 
         val tools = ToolItem.entries.sortedBy { it.id }
         list(1, "tools", comma = false) {
@@ -100,7 +93,7 @@ object ToolCatalogue {
                 field(3, "cells_tall", t.cellsTall, comma = true)
                 // Whether the two numbers above may be swapped to suit where it
                 // lands. True for a slider, false for a panel.
-                field(3, "turns", t.turnsWithDock, comma = false)
+                field(3, "turns", t.turns, comma = false)
                 line(2, "}" + if (i < tools.lastIndex) "," else "")
             }
         }

@@ -40,22 +40,48 @@ fun main(args: Array<String>) {
 /**
  * The workspace `docs/workspace-format.md` walks through.
  *
- * Deliberately not one of the shipped ones: it uses an L, a floating surface, a
- * resized panel and a filter, so that every field in the reference appears in
- * the example rather than being described in prose nobody can copy from.
+ * Deliberately not one of the shipped ones: it uses an L drawn where it sits, a
+ * second surface out in the middle of the paper, a resized panel and a filter,
+ * so that every field in the reference appears in the example rather than being
+ * described in prose nobody can copy from.
  */
 internal fun exampleWorkspace(): Workspace {
-    val (withPanel, floatId) = DockLayout.EMPTY
-        .reshape("left", CellRegion.l(arm = 10, foot = 5))
-        .reflow("left", FlowOrder.DOWN_THEN_RIGHT)
-        .place("left", ToolItem.PEN, Cell(0, 0))
-        .place("left", ToolItem.PENCIL, Cell(0, 1))
-        .place("left", ToolItem.ERASER, Cell(0, 2))
-        .place("left", ToolItem.SIZE, Cell(0, 4))
-        .place("left", ToolItem.COLOUR, Cell(0, 9))
-        .place("top", ToolItem.UNDO, Cell(0, 0))
-        .place("top", ToolItem.REDO, Cell(1, 0))
-        .addFloating(ToolItem.LAYERS_PANEL, BarSpot(0.72f, 0.18f))
+    val arm = Surface(
+        id = "s1",
+        flow = FlowOrder.DOWN_THEN_RIGHT,
+        slots = SurfaceLayout.of(
+            CellRegion.l(arm = 10, foot = 5).translated(0, 6),
+            listOf(
+                CellPlacement(ToolItem.PEN, 0, 6, 1, 1),
+                CellPlacement(ToolItem.PENCIL, 0, 7, 1, 1),
+                CellPlacement(ToolItem.ERASER, 0, 8, 1, 1),
+                CellPlacement(ToolItem.SIZE, 0, 10, 1, 4),
+                CellPlacement(ToolItem.COLOUR, 0, 15, 1, 1),
+            ),
+        ),
+    )
+    val top = Surface(
+        id = "s2",
+        flow = FlowOrder.RIGHT_THEN_DOWN,
+        slots = SurfaceLayout.of(
+            CellRegion.strip(2, Axis.HORIZONTAL).translated(2, 0),
+            listOf(
+                CellPlacement(ToolItem.UNDO, 2, 0, 1, 1),
+                CellPlacement(ToolItem.REDO, 3, 0, 1, 1),
+            ),
+        ),
+    )
+    val panel = Surface(
+        id = "s3",
+        flow = FlowOrder.RIGHT_THEN_DOWN,
+        slots = SurfaceLayout.of(
+            CellRegion.strip(3, Axis.HORIZONTAL).translated(18, 3),
+            // A panel hangs off the cell it is anchored to. Eight by nine is a
+            // size the user dragged out, which is the one thing a file records
+            // that the catalogue could have told it.
+            listOf(CellPlacement(ToolItem.LAYERS_PANEL, 18, 3, 8, 9)),
+        ),
+    )
 
     return Workspace(
         id = "example",
@@ -63,7 +89,7 @@ internal fun exampleWorkspace(): Workspace {
         description = "Every field in the reference, in one file.",
         author = "artiest",
         revision = 1,
-        layout = withPanel.resizeFloating(floatId, 8, 9),
+        layout = DockLayout.of(listOf(arm, top, panel)),
         filter = CatalogueFilter
             .of(ToolGroup.DRAW, ToolGroup.EDIT)
             .hiding(ToolItem.GRAIN)

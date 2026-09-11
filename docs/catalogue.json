@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 1,
+  "version": 2,
   "cell_dp": 44,
   "groups": [
     {
@@ -26,39 +26,7 @@
   ],
   "kinds": ["button", "toggle", "slider", "swatch", "panel"],
   "flows": ["right_down", "left_down", "right_up", "left_up", "down_right", "down_left", "up_right", "up_left"],
-  "shapes": ["bar", "l", "t", "u", "block"],
-  "docks": [
-    {
-      "id": "left",
-      "label": "Left edge",
-      "axis": "vertical",
-      "default_cells": 12
-    },
-    {
-      "id": "top",
-      "label": "Top edge",
-      "axis": "horizontal",
-      "default_cells": 24
-    },
-    {
-      "id": "right",
-      "label": "Right edge",
-      "axis": "vertical",
-      "default_cells": 12
-    },
-    {
-      "id": "bottom",
-      "label": "Bottom edge",
-      "axis": "horizontal",
-      "default_cells": 24
-    },
-    {
-      "id": "float",
-      "label": "Floating",
-      "axis": "horizontal",
-      "default_cells": 8
-    }
-  ],
+  "anchors": ["left", "top", "right", "bottom"],
   "tools": [
     {
       "id": "clear",

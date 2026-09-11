@@ -53,26 +53,31 @@ class WorkspaceJsonTest {
     }
 
     @Test
-    fun `an L survives the round trip, with its flow`() {
+    fun `an L survives the round trip, where it was drawn and with its flow`() {
+        val l = CellRegion.l(arm = 8, foot = 5).translated(2, 4)
         val ws = sketcher().copy(
-            layout = DockLayout.STARTER
-                .reshape("left", CellRegion.l(arm = 8, foot = 5))
-                .reflow("left", FlowOrder.DOWN_THEN_RIGHT),
+            layout = DockLayout.of(
+                listOf(
+                    Surface(
+                        "s1",
+                        FlowOrder.DOWN_THEN_RIGHT,
+                        SurfaceLayout.of(l, listOf(CellPlacement(ToolItem.PEN, 2, 4, 1, 1))),
+                    ),
+                ),
+            ),
         )
         val back = assertNotNull(WorkspaceJson.decode(WorkspaceJson.encode(ws)).workspace)
-        assertEquals(CellRegion.l(arm = 8, foot = 5), back.layout.edge(Dock.LEFT).region)
-        assertEquals(FlowOrder.DOWN_THEN_RIGHT, back.layout.edge(Dock.LEFT).flow)
+        assertEquals(l, back.layout.surface("s1")?.region, "shape and corner both")
+        assertEquals(FlowOrder.DOWN_THEN_RIGHT, back.layout.surface("s1")?.flow)
         assertEquals(ws, back)
     }
 
     @Test
-    fun `a floating surface keeps its position and a resized panel keeps its size`() {
-        val (layout, id) = DockLayout.STARTER.addFloating(
-            ToolItem.COLOUR_PANEL, BarSpot(0.25f, 0.75f),
-        )
-        val ws = sketcher().copy(layout = layout.resizeFloating(id, 8, 9))
+    fun `a surface keeps its corner and a resized panel keeps its size`() {
+        val (layout, id) = DockLayout.EMPTY.addSurface(ToolItem.COLOUR_PANEL, Cell(9, 7))
+        val ws = sketcher().copy(layout = layout.resizePanel(id, Cell(9, 7), 8, 9))
         val back = assertNotNull(WorkspaceJson.decode(WorkspaceJson.encode(ws)).workspace)
-        assertEquals(BarSpot(0.25f, 0.75f), back.layout.surface(id)?.spot)
+        assertEquals(Cell(9, 7), back.layout.surface(id)?.origin)
         val panel = assertNotNull(back.layout.locate(ToolItem.COLOUR_PANEL)?.placement)
         assertEquals(8, panel.w, "a size the user chose is theirs")
         assertEquals(9, panel.h)
@@ -130,9 +135,12 @@ class WorkspaceJsonTest {
     @Test
     fun `the example uses every field the reference describes`() {
         val ws = exampleWorkspace()
-        assertFalse(ws.layout.edge(Dock.LEFT).region.isStrip, "a shape")
-        assertEquals(1, ws.layout.floating.size, "a floating toolbar")
-        assertNotNull(ws.layout.floating.single().spot, "with a position")
+        assertFalse(assertNotNull(ws.layout.surface("s1")).region.isStrip, "a shape")
+        assertEquals(3, ws.layout.surfaces.size, "more than one toolbar")
+        assertTrue(
+            ws.layout.surfaces.any { it.origin != Cell(0, 0) },
+            "at least one of them somewhere other than the corner",
+        )
         assertNotNull(ws.filter.groups, "a filter with groups")
         assertTrue(ws.filter.hide.isNotEmpty(), "something hidden")
         assertTrue(ws.filter.show.isNotEmpty(), "something shown back")
@@ -211,11 +219,15 @@ class WorkspaceJsonTest {
             .first { it.isFile }
             .readText()
         val ws = assertNotNull(WorkspaceJson.decode(text).workspace)
-        val left = ws.layout.edge(Dock.LEFT)
+        val l = assertNotNull(ws.layout.surfaces.firstOrNull { !it.region.isStrip }, "it is an L")
+        val b = l.region.bounds
 
-        assertFalse(left.region.isStrip, "it is an L")
-        assertEquals(Axis.VERTICAL, left.region.localAxis(0, 2), "up the arm")
-        assertEquals(Axis.HORIZONTAL, left.region.localAxis(5, 9), "along the foot")
+        assertEquals(Axis.VERTICAL, l.region.localAxis(b.x, b.y + 2), "up the arm")
+        assertEquals(
+            Axis.HORIZONTAL,
+            l.region.localAxis(b.x + 5, b.bottom - 1),
+            "along the foot",
+        )
 
         val size = assertNotNull(ws.layout.locate(ToolItem.SIZE)?.placement)
         assertEquals(4, size.w, "the slider in the foot is four cells wide")
@@ -261,7 +273,7 @@ class WorkspaceJsonTest {
         val decoded = WorkspaceJson.decode(corpus("duplicates.json"))
         val ws = assertNotNull(decoded.workspace)
         assertEquals("left", ws.layout.locate(ToolItem.PEN)?.surface?.id)
-        assertNull(ws.layout.locate(ToolItem.PENCIL), "the second left edge was dropped")
+        assertNull(ws.layout.locate(ToolItem.PENCIL), "the second toolbar named left was dropped")
         assertEquals(1, ws.layout.all().size)
         assertTrue(decoded.dropped.any { "twice" in it }, decoded.dropped.toString())
         assertTrue(decoded.dropped.any { "more than one toolbar" in it }, decoded.dropped.toString())
@@ -271,18 +283,20 @@ class WorkspaceJsonTest {
     fun `a rectangle that is not a rectangle is dropped and the shape keeps the rest`() {
         val decoded = WorkspaceJson.decode(corpus("negative-rects.json"))
         val ws = assertNotNull(decoded.workspace)
-        assertEquals(CellRegion.strip(6, Axis.VERTICAL), ws.layout.edge(Dock.LEFT).region)
+        assertEquals(CellRegion.strip(6, Axis.VERTICAL), ws.layout.surface("left")?.region)
         assertEquals(3, decoded.dropped.count { "off the screen" in it })
     }
 
     @Test
-    fun `a toolbar entirely off the screen is given its edge's plain bar`() {
+    fun `a toolbar entirely off the screen is given a bar long enough for it`() {
         val decoded = WorkspaceJson.decode(corpus("off-screen.json"))
         val ws = assertNotNull(decoded.workspace)
         // 900,900 is past MAX_COORD, so every rectangle went and the fallback
-        // is the bar that edge has always had. A toolbar with no shape at all
-        // would be a toolbar that cannot be reached.
-        assertEquals(Dock.LEFT.defaultRegion(), ws.layout.edge(Dock.LEFT).region)
+        // is a plain bar sized to what is on it, running the way the side it
+        // named suggests. A toolbar with no shape at all would be a toolbar
+        // that cannot be reached.
+        val left = assertNotNull(ws.layout.surface("left"))
+        assertEquals(CellRegion.strip(left.slots.placements.size, Axis.VERTICAL), left.region)
         assertTrue(decoded.dropped.any { "has no shape" in it }, decoded.dropped.toString())
     }
 
@@ -338,8 +352,7 @@ class WorkspaceJsonTest {
     fun `more toolbars than a screen has are cut off, and the user is told`() {
         val decoded = WorkspaceJson.decode(corpus("too-many-surfaces.json"))
         val ws = assertNotNull(decoded.workspace)
-        // Four edges are always there; the rest are what survived the ceiling.
-        assertTrue(ws.layout.floating.size <= WorkspaceJson.MAX_SURFACES)
+        assertTrue(ws.layout.surfaces.size <= WorkspaceJson.MAX_SURFACES)
         assertTrue(decoded.dropped.any { "more than a screen can hold" in it })
     }
 
@@ -387,7 +400,7 @@ class WorkspaceJsonTest {
             WorkspaceJson.decode("""{"artiest_workspace": 1, "name": "My Inker"}""").workspace
         )
         assertEquals("my-inker", ws.id)
-        assertEquals(4, ws.layout.edges.size, "and the edges are always there")
+        assertTrue(ws.layout.surfaces.isEmpty(), "and a workspace with no toolbars has none")
     }
 
     @Test

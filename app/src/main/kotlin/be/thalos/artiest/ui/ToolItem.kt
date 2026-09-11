@@ -105,7 +105,7 @@ enum class ToolItem(
     /** Height on screen, in cells. One for everything that lives inside a bar. */
     val cellsTall: Int = 1,
     /**
-     * Whether the footprint turns when the bar does.
+     * Whether the footprint turns to suit the shape it lands in.
      *
      * True for a slider, which is a one-dimensional control and wants its long
      * axis to follow the bar: four cells across the bottom, four cells down the
@@ -115,7 +115,7 @@ enum class ToolItem(
      *
      * Meaningless for a one-by-one button, which is why the default is free.
      */
-    val turnsWithDock: Boolean = false,
+    val turns: Boolean = false,
 ) {
     UNDO("undo", "Undo", "Undo", 1, ToolGroup.EDIT),
     REDO("redo", "Redo", "Redo", 1, ToolGroup.EDIT),
@@ -131,8 +131,8 @@ enum class ToolItem(
      * what colour it is right now.
      */
     COLOUR("colour", "Colour", "Colour", 1, ToolGroup.DRAW, ToolKind.SWATCH),
-    SIZE("size", "Size", "Size", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
-    SMOOTHING("smoothing", "Stabilisation", "Smooth", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    SIZE("size", "Size", "Size", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
+    SMOOTHING("smoothing", "Stabilisation", "Smooth", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
 
     /**
      * W7. The tripwire is paid: these two exist because the scratch buffer
@@ -146,8 +146,8 @@ enum class ToolItem(
      * shortcut that makes a pencil impossible: graphite is low flow under a
      * high ceiling.
      */
-    OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
-    FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    OPACITY("opacity", "Opacity", "Opac", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
+    FLOW("flow", "Flow", "Flow", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
 
     /**
      * W8. The paper's tooth, as one slider from smooth to full depth.
@@ -156,7 +156,7 @@ enum class ToolItem(
      * the format carries, but a toolbar with four grain sliders is a
      * synthesiser, not a pencil. W10's preset sets the other three.
      */
-    GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    GRAIN("grain", "Grain", "Grain", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
 
     /**
      * W10's two tools, and the third that joined them later. The original
@@ -192,7 +192,7 @@ enum class ToolItem(
      * panel because "the eraser is too small for this" is a thought you have
      * mid-rub, with the pen already on the glass.
      */
-    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER, turnsWithDock = true),
+    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
 
     /**
      * The layers panel, as a button that opens it.
@@ -314,10 +314,22 @@ enum class ToolItem(
      * would go stale in an L.
      *
      * What is left here is the catalogue's own statement: a slider is four
-     * cells by one, a colour wheel is six by eleven, and [turnsWithDock] says
+     * cells by one, a colour wheel is six by eleven, and [turns] says
      * whether those two numbers may be swapped to suit where it lands.
      */
     val cells: Pair<Int, Int> get() = cellsWide to cellsTall
+
+    /**
+     * Whether this overhangs the shape it is anchored to instead of fitting in
+     * it.
+     *
+     * True for a panel and false for everything else, which is the whole of the
+     * rule [CellRegion.accepts] states: a seven-by-eleven card needs the cell it
+     * is put in, not a seven-by-eleven toolbar. It is derived rather than
+     * declared because a panel that did not overhang would be a panel nobody
+     * could place, and a button that did would cover the drawing.
+     */
+    val hangs: Boolean get() = kind == ToolKind.PANEL
 
     companion object {
         /** The catalogue keyed by [id], for the codec. Unknown ids decode to null. */

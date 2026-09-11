@@ -81,15 +81,6 @@ object ToolIcons {
         ToolItem.STATS -> stats
     }
 
-    /** A frame with the named edge picked out. What the *move to* menu shows. */
-    fun of(dock: Dock): ImageVector = when (dock) {
-        Dock.LEFT -> dockLeft
-        Dock.TOP -> dockTop
-        Dock.RIGHT -> dockRight
-        Dock.BOTTOM -> dockBottom
-        Dock.FLOATING -> dockFloating
-    }
-
     /**
      * A fountain pen: a broad barrel, a collar, and a **solid** nib.
      *
@@ -399,138 +390,40 @@ object ToolIcons {
         }
     }
 
-    /** Four ways at once: the mode in which a control can be picked up. */
+    /**
+     * A screen divided into panes: a bar down one side, a bar across the top,
+     * and the paper in the corner they leave.
+     *
+     * It was four arrows from a point, which is the universal *move* glyph and
+     * was the user's complaint: *"the button to go in arrange mode is a 'move'
+     * icon. That is not a good match."* It was not — the mode is about where
+     * the toolbars are, and moving one control is the smallest thing you can do
+     * in it. This says layout.
+     */
     val arrange: ImageVector by lazy {
         icon("arrange") {
-            stroke {
-                moveTo(12f, 2.8f)
-                lineTo(12f, 21.2f)
-                moveTo(2.8f, 12f)
-                lineTo(21.2f, 12f)
-                moveTo(8.8f, 6.0f)
-                lineTo(12f, 2.8f)
-                lineTo(15.2f, 6.0f)
-                moveTo(8.8f, 18.0f)
-                lineTo(12f, 21.2f)
-                lineTo(15.2f, 18.0f)
-                moveTo(6.0f, 8.8f)
-                lineTo(2.8f, 12f)
-                lineTo(6.0f, 15.2f)
-                moveTo(18.0f, 8.8f)
-                lineTo(21.2f, 12f)
-                lineTo(18.0f, 15.2f)
-            }
+            stroke(1.5f) { rect(2.8f, 3.4f, 21.2f, 20.6f) }
+            fill { rect(5.0f, 5.6f, 8.6f, 18.4f) }
+            fill { rect(10.6f, 5.6f, 19.0f, 9.2f) }
         }
     }
 
     /**
-     * A corner being pulled: two strokes across the angle, and an arrow out of
-     * it. What you grab to make a floating toolbar bigger.
-     */
-    val resize: ImageVector by lazy {
-        icon("resize") {
-            stroke {
-                moveTo(21.0f, 12.0f)
-                lineTo(12.0f, 21.0f)
-                moveTo(21.0f, 17.4f)
-                lineTo(17.4f, 21.0f)
-                moveTo(21.0f, 6.6f)
-                lineTo(6.6f, 21.0f)
-                moveTo(21.0f, 6.6f)
-                lineTo(15.6f, 6.6f)
-                moveTo(21.0f, 6.6f)
-                lineTo(21.0f, 12.0f)
-            }
-        }
-    }
-
-    // ---- the shapes a toolbar can be ---------------------------------------
-
-    /**
-     * The five presets, each drawn as the thing itself inside a screen.
+     * Six dots in two columns. The one part of a toolbar that is only a handle.
      *
-     * A frame with the shape picked out in it, the same idea as [dockLeft] and
-     * for the same reason: what the menu is choosing is *where on the glass*
-     * the toolbar goes, and a picture of the glass is the only way to say that
-     * without a sentence. The frame is thin and the shape is solid, so the
-     * shape is what the eye lands on.
+     * It is the conventional grip on purpose, for the reason [search] is the
+     * conventional lens: a handle that has to be learned is a handle nobody
+     * grabs, and this is the only way to move a toolbar without redrawing it.
      */
-    val shapeBar: ImageVector by lazy { shapeIcon("shape-bar") { fill { rect(4.4f, 4.4f, 7.6f, 19.6f) } } }
-
-    val shapeL: ImageVector by lazy {
-        shapeIcon("shape-l") {
+    val grip: ImageVector by lazy {
+        icon("grip") {
             fill {
-                moveTo(4.4f, 4.4f)
-                lineTo(7.6f, 4.4f)
-                lineTo(7.6f, 16.4f)
-                lineTo(17.6f, 16.4f)
-                lineTo(17.6f, 19.6f)
-                lineTo(4.4f, 19.6f)
-                close()
-            }
-        }
-    }
-
-    val shapeT: ImageVector by lazy {
-        shapeIcon("shape-t") {
-            fill {
-                moveTo(4.4f, 4.4f)
-                lineTo(19.6f, 4.4f)
-                lineTo(19.6f, 7.6f)
-                lineTo(13.6f, 7.6f)
-                lineTo(13.6f, 19.6f)
-                lineTo(10.4f, 19.6f)
-                lineTo(10.4f, 7.6f)
-                lineTo(4.4f, 7.6f)
-                close()
-            }
-        }
-    }
-
-    val shapeU: ImageVector by lazy {
-        shapeIcon("shape-u") {
-            fill {
-                moveTo(4.4f, 4.4f)
-                lineTo(7.6f, 4.4f)
-                lineTo(7.6f, 16.4f)
-                lineTo(16.4f, 16.4f)
-                lineTo(16.4f, 4.4f)
-                lineTo(19.6f, 4.4f)
-                lineTo(19.6f, 19.6f)
-                lineTo(4.4f, 19.6f)
-                close()
-            }
-        }
-    }
-
-    val shapeBlock: ImageVector by lazy {
-        shapeIcon("shape-block") { fill { rect(4.4f, 4.4f, 12.6f, 15.6f) } }
-    }
-
-    /**
-     * A nib over a grid: draw the shape yourself.
-     *
-     * The one interaction in this app that nobody else has, so it gets a glyph
-     * that says *pen* rather than a generic edit pencil — it is the same nib as
-     * [pen], shrunk, over the cells it is painting.
-     */
-    val shapeDraw: ImageVector by lazy {
-        icon("shape-draw") {
-            stroke(1.4f) {
-                moveTo(3.2f, 8.4f); lineTo(15.6f, 8.4f)
-                moveTo(3.2f, 14.0f); lineTo(11.2f, 14.0f)
-                moveTo(3.2f, 19.6f); lineTo(11.2f, 19.6f)
-                moveTo(8.8f, 3.4f); lineTo(8.8f, 19.6f)
-                moveTo(14.4f, 3.4f); lineTo(14.4f, 8.4f)
-                moveTo(3.2f, 3.4f); lineTo(3.2f, 19.6f)
-            }
-            fill {
-                moveTo(12.6f, 17.4f)
-                lineTo(19.4f, 10.6f)
-                lineTo(21.8f, 13.0f)
-                lineTo(15.0f, 19.8f)
-                lineTo(11.8f, 21.0f)
-                close()
+                circle(9.2f, 6.4f, 1.7f)
+                circle(14.8f, 6.4f, 1.7f)
+                circle(9.2f, 12.0f, 1.7f)
+                circle(14.8f, 12.0f, 1.7f)
+                circle(9.2f, 17.6f, 1.7f)
+                circle(14.8f, 17.6f, 1.7f)
             }
         }
     }
@@ -982,25 +875,6 @@ object ToolIcons {
         }
     }
 
-    private val dockLeft: ImageVector by lazy { dockIcon("dock_left", 3.4f, 3.4f, 8.6f, 20.6f) }
-    private val dockTop: ImageVector by lazy { dockIcon("dock_top", 3.4f, 3.4f, 20.6f, 8.6f) }
-    private val dockRight: ImageVector by lazy { dockIcon("dock_right", 15.4f, 3.4f, 20.6f, 20.6f) }
-    private val dockBottom: ImageVector by lazy { dockIcon("dock_bottom", 3.4f, 15.4f, 20.6f, 20.6f) }
-    private val dockFloating: ImageVector by lazy { dockIcon("dock_float", 7.6f, 8.6f, 16.4f, 15.4f) }
-
-    /** A window frame with one region solid: which part of the screen this is. */
-    private fun dockIcon(name: String, l: Float, t: Float, r: Float, b: Float): ImageVector =
-        icon(name) {
-            stroke {
-                moveTo(3.4f, 3.4f)
-                lineTo(20.6f, 3.4f)
-                lineTo(20.6f, 20.6f)
-                lineTo(3.4f, 20.6f)
-                close()
-            }
-            fill { rect(l, t, r, b) }
-        }
-
     // ---- the builder ------------------------------------------------------
 
     private fun icon(name: String, block: IconScope.() -> Unit): ImageVector =
@@ -1020,13 +894,6 @@ object ToolIcons {
         icon(name) {
             dashedBox(2.6f, 2.6f, 15.8f, 15.8f)
             badge()
-        }
-
-    /** A thin screen with the shape solid inside it. See [shapeBar]. */
-    private fun shapeIcon(name: String, shape: IconScope.() -> Unit): ImageVector =
-        icon(name) {
-            stroke(1.3f) { rect(2.6f, 2.6f, 21.4f, 21.4f) }
-            shape()
         }
 
     private class IconScope(private val builder: ImageVector.Builder) {

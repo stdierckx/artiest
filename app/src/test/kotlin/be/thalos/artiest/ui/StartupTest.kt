@@ -68,16 +68,16 @@ class StartupTest {
         assertEquals("everything", workspace.id, "nobody has chosen a workspace yet")
         assertEquals(
             listOf("pen", "pencil", "eraser", "marker", "colour", "marquee"),
-            docks.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            docks.surface("left")!!.slots.placements.map { it.item.id },
             "the left edge is the one the user built, not the one that ships",
         )
         assertEquals(
             listOf("undo", "redo", "import", "export", "stats"),
-            docks.edge(Dock.TOP).slots.placements.map { it.item.id },
+            docks.surface("top")!!.slots.placements.map { it.item.id },
         )
-        assertEquals(6, docks.edge(Dock.RIGHT).slots.placements.size)
-        assertEquals(6, docks.edge(Dock.BOTTOM).slots.placements.size)
-        assertEquals(1, docks.floating.size, "and the panel they fixated")
+        assertEquals(6, docks.surface("right")!!.slots.placements.size)
+        assertEquals(6, docks.surface("bottom")!!.slots.placements.size)
+        assertNotNull(docks.surface("f4"), "and the panel they fixated")
     }
 
     @Test
@@ -124,10 +124,10 @@ class StartupTest {
         val (workspace, docks) = startUp()
 
         val mine = listOf("pen", "pencil", "eraser", "marker", "colour", "marquee")
-        assertEquals(mine, docks.edge(Dock.LEFT).slots.placements.map { it.item.id })
+        assertEquals(mine, docks.surface("left")!!.slots.placements.map { it.item.id })
         assertEquals(
             mine,
-            workspace.layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            workspace.layout.surface("left")!!.slots.placements.map { it.item.id },
             "Everything now means what this install actually had",
         )
 
@@ -137,13 +137,15 @@ class StartupTest {
         workspaces.switchTo(ShippedWorkspaces.SKETCHER)
         assertEquals(
             listOf("pen", "pencil", "marker", "eraser", "colour"),
-            workspaces.current().layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            workspaces.current().layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
 
         workspaces.switchTo(ShippedWorkspaces.EVERYTHING)
         assertEquals(
             mine,
-            workspaces.current().layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            // "left" and not "s1": what Everything holds now is the arrangement
+            // this install already had, surface names and all.
+            workspaces.current().layout.surface("left")!!.slots.placements.map { it.item.id },
             "and they are still there",
         )
     }
@@ -190,7 +192,7 @@ class StartupTest {
         assertEquals("sketcher", sketcher.id)
         assertEquals(
             listOf("pen", "pencil", "marker", "eraser", "colour"),
-            sketcher.layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            sketcher.layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
     }
 

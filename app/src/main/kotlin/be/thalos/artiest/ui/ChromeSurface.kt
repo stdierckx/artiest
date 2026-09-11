@@ -19,9 +19,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -82,10 +79,9 @@ import kotlin.math.roundToInt
  *
  * A shape is exactly as big as it is; there is nothing to scroll to. What does
  * not fit goes to overflow, which is visible and tappable — see
- * `docs/ui-expansion-plan.md`, U9. A plain bar keeps the scroll it has, because
- * a bar can be longer than the screen and always could. **Do not add a scroll
- * here**: it would put an offset back between the cell grid and the pointer,
- * which is the one thing this geometry exists to avoid.
+ * `docs/ui-expansion-plan.md`, U9. **Do not add a scroll here**: it would put
+ * an offset back between the cell grid and the pointer, which is the one thing
+ * this geometry exists to avoid.
  */
 @Composable
 internal fun ChromeSurface(
@@ -161,10 +157,6 @@ internal fun ChromeSurface(
             .drawBehind {
                 drawPath(outline, fill)
                 drawPath(outline, edge, style = Stroke(width = strokePx))
-            }
-            .onGloballyPositioned {
-                drag.bounds[surface.id] = it.boundsInRoot()
-                drag.runOrigin[surface.id] = it.positionInRoot()
             },
     ) { measurables, _ ->
         val width = (bounds.w * slotPx).roundToInt()

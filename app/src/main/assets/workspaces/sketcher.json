@@ -1,6 +1,6 @@
 {
-  "artiest_workspace": 1,
-  "catalogue": 1,
+  "artiest_workspace": 2,
+  "catalogue": 2,
   "id": "sketcher",
   "name": "Sketcher",
   "description": "Pencil, paper, and nothing in the way.",
@@ -10,9 +10,9 @@
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {
-      "id": "left",
-      "dock": "left",
-      "rects": [[0, 0, 1, 12]],
+      "id": "s1",
+      "anchor": "left",
+      "rects": [[0, 0, 1, 7]],
       "flow": "down_right",
       "tools": [
         {"id": "pen", "at": [0, 0]},
@@ -23,9 +23,9 @@
       ]
     },
     {
-      "id": "top",
-      "dock": "top",
-      "rects": [[0, 0, 24, 1]],
+      "id": "s2",
+      "anchor": "top",
+      "rects": [[0, 0, 2, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "undo", "at": [0, 0]},
@@ -33,9 +33,9 @@
       ]
     },
     {
-      "id": "right",
-      "dock": "right",
-      "rects": [[0, 0, 1, 12]],
+      "id": "s3",
+      "anchor": "right",
+      "rects": [[0, 0, 1, 3]],
       "flow": "down_right",
       "tools": [
         {"id": "layers", "at": [0, 0]},
@@ -43,9 +43,9 @@
       ]
     },
     {
-      "id": "bottom",
-      "dock": "bottom",
-      "rects": [[0, 0, 24, 1]],
+      "id": "s4",
+      "anchor": "bottom",
+      "rects": [[0, 0, 14, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "size", "at": [0, 0]},

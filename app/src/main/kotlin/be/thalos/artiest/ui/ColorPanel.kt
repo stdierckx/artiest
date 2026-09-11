@@ -71,11 +71,13 @@ fun ColourButton(
     palette: List<Int>,
     recent: List<Int>,
     onCommit: (Int) -> Unit,
-    onFixate: (BarSpot) -> Unit,
+    onFixate: (Cell) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var here by remember { mutableStateOf(Offset.Zero) }
     val view = LocalView.current
+    // The grid the fixated card lands on: a cell is Chrome.SLOT, everywhere.
+    val slotPx = with(LocalDensity.current) { Chrome.SLOT.toPx() }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -113,7 +115,7 @@ fun ColourButton(
                     // is this button: the new bar appears beside it and the
                     // drag that moves it somewhere better is the one arrange
                     // mode has just been turned on for.
-                    onFixate(BarSpot.beside(here, view.width, view.height))
+                    onFixate(DropMath.cellBeside(here, view.width, view.height, slotPx))
                 },
             )
         }

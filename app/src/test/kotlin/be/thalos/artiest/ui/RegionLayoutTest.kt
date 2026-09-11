@@ -320,17 +320,24 @@ class RegionLayoutTest {
         assertEquals(Axis.HORIZONTAL, CellRegion.l(4, 4).localAxis(3, 0))
     }
 
-    // ---- the bar that grows, and the shape that does not --------------------
+    // ---- the panel that hangs off, and everything else that does not --------
 
     @Test
-    fun `a panel deeper than a bar still goes on the bar`() {
+    fun `a panel hangs off whatever it is anchored to`() {
+        // A bar used to grow across itself to hold a deep item, which made a
+        // panel placeable in about two cells of the whole app. It needs the
+        // cell it is anchored to and nothing else now — see CellRegion.accepts.
         val left = CellRegion.strip(12, Axis.VERTICAL)
-        assertTrue(
-            left.accepts(0, 0, 6, 11),
-            "a bar is as thick as the thickest thing on it — that is what a bar is",
-        )
-        assertFalse(left.accepts(0, 2, 6, 11), "but it is only twelve cells long")
-        assertFalse(left.accepts(1, 0, 6, 11), "and it starts where it starts")
+        for (y in 0 until 12) {
+            assertTrue(left.accepts(0, y, 6, 11, hangs = true), "anchored at 0,$y")
+        }
+        assertFalse(left.accepts(1, 0, 6, 11, hangs = true), "and it starts where it starts")
+        assertFalse(left.accepts(0, 12, 6, 11, hangs = true), "and it starts on the shape")
+
+        // Everything that is not a panel is inside the shape, corner to corner.
+        assertFalse(left.accepts(0, 0, 6, 11), "nothing else grows a toolbar")
+        assertTrue(left.accepts(0, 8, 1, 4))
+        assertFalse(left.accepts(0, 9, 1, 4), "it is only twelve cells long")
     }
 
     @Test

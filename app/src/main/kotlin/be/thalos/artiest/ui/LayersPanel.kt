@@ -96,11 +96,13 @@ fun LayersButton(
     onAdd: () -> Unit,
     onDuplicate: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
-    onFixate: (BarSpot) -> Unit,
+    onFixate: (Cell) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var here by remember { mutableStateOf(Offset.Zero) }
     val view = LocalView.current
+    // The grid the fixated card lands on: a cell is Chrome.SLOT, everywhere.
+    val slotPx = with(LocalDensity.current) { Chrome.SLOT.toPx() }
 
     Box(
         contentAlignment = Alignment.Center,
@@ -132,7 +134,7 @@ fun LayersButton(
                 onDismiss = { open = false },
                 onFixate = {
                     open = false
-                    onFixate(BarSpot.beside(here, view.width, view.height))
+                    onFixate(DropMath.cellBeside(here, view.width, view.height, slotPx))
                 },
             )
         }

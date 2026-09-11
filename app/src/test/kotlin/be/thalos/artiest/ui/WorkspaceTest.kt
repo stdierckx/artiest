@@ -85,7 +85,7 @@ class WorkspaceTest {
         val narrow = CatalogueFilter.of(ToolGroup.DRAW)
         assertFalse(ToolItem.UNDO in narrow)
         assertTrue(ToolItem.UNDO in layout, "still on the top edge, still working")
-        assertEquals(14, layout.all().size)
+        assertEquals(20, layout.all().size)
     }
 
     // ---- the workspace itself ----------------------------------------------
@@ -138,7 +138,7 @@ class WorkspaceTest {
             filter = CatalogueFilter.of(ToolGroup.DRAW, ToolGroup.EDIT),
             defaults = WorkspaceDefaults(stabilisation = 0.4f),
         )
-        assertEquals(14, ws.layout.all().size)
+        assertEquals(20, ws.layout.all().size)
         assertTrue(ToolItem.PEN in ws.filter)
         assertFalse(ToolItem.STATS in ws.filter)
         assertFalse(ws.defaults.isEmpty)
