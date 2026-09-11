@@ -71,15 +71,23 @@ class WorkspaceStore(context: Context) {
         }
     }
 
-    /** Put a shipped workspace back the way it came. Null for one that is not shipped. */
+    /**
+     * Put a shipped workspace back the way it came. Null for one that is not
+     * shipped.
+     *
+     * **The compiled-in copy is behind the asset, not beside it.** A shipped
+     * file that will not open — missing from the APK, unreadable, or decoding
+     * to nothing — is a bug in this build and never in the user's data, so it
+     * must not be able to leave somebody with no workspaces at all. Reading the
+     * asset is how the decoder gets exercised on every first run, which is
+     * worth having; being unable to read it is not worth failing over.
+     *
+     * That fallback was missing for the *missing asset* case and present only
+     * for the *undecodable* one, which is the half that never happens.
+     */
     fun reset(id: String): Workspace? {
-        val text = asset(id) ?: return null
-        val fresh = WorkspaceJson.decode(text).workspace
-            // A shipped file that will not decode is a bug in this build, not
-            // in the user's data, so there is a compiled-in copy behind it. The
-            // app must still open.
-            ?: ShippedWorkspaces.byId(id)
-            ?: return null
+        val shipped = ShippedWorkspaces.byId(id) ?: return null
+        val fresh = asset(id)?.let { WorkspaceJson.decode(it).workspace } ?: shipped
         return if (files.save(fresh)) fresh else null
     }
 
