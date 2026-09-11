@@ -69,6 +69,8 @@ import be.thalos.artiest.doc.LayerInfo
 import be.thalos.artiest.doc.LayerOp
 import be.thalos.artiest.doc.LayerStack
 import be.thalos.artiest.engine.brush.BrushCodec
+import be.thalos.artiest.engine.brush.BrushEntry
+import be.thalos.artiest.engine.brush.BrushLibrary
 import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
@@ -85,6 +87,7 @@ import be.thalos.artiest.ui.SelectionOverlay
 import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.LayersPanelCard
+import be.thalos.artiest.ui.BrushFiles
 import be.thalos.artiest.ui.BrushStore
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
@@ -419,8 +422,39 @@ private fun CanvasScreen(
     val brushCtx = LocalContext.current
     val brushStore = remember(brushCtx) { BrushStore(brushCtx) }
 
-    /** W10. Which of the two tools is in the hand, restored from last time. */
-    var preset by remember { mutableStateOf(brushStore.loadPreset()) }
+    /**
+     * The shelf: the three shipped brushes and whatever is in `files/brushes`.
+     *
+     * Read once, on the thread that is composing, and that is deliberate rather
+     * than lazy. Every path below wants to know *which brush is in the hand*
+     * before the first frame — the restore path applies its wiring, the toolbar
+     * lights its button — and a library that arrived a moment later would mean
+     * a saved brush was briefly the pen and then was not, which is exactly the
+     * kind of flicker that reads as a bug in the brush rather than in the load.
+     * It is a handful of two-kilobyte text files; see `BrushFiles`.
+     */
+    val brushFiles = remember(brushCtx) { BrushFiles(java.io.File(brushCtx.filesDir, "brushes")) }
+    var library by remember { mutableStateOf(brushFiles.library()) }
+
+    /** W10, and now Wb1. Which brush is in the hand, restored from last time. */
+    var brushId by remember { mutableStateOf(brushStore.loadId()) }
+
+    /**
+     * That id's entry, or the pen.
+     *
+     * Derived on every recomposition rather than held, because the two things
+     * it is derived from are both state: deleting the brush in the hand has to
+     * hand back the pen without anybody remembering to arrange it.
+     */
+    val brush = library.entryFor(brushId)
+
+    /**
+     * Whether the brush in the hand has been moved since it was picked.
+     *
+     * What the shelf's modified mark reads. Recomputed where the sliders are
+     * pushed into the pen, which is the only place it can change.
+     */
+    var brushModified by remember { mutableStateOf(false) }
 
     /** W11. Whether that tool is currently taking ink out instead of putting it in. */
     var eraser by remember { mutableStateOf(false) }
@@ -751,10 +785,10 @@ private fun CanvasScreen(
         // pencil's *point* and now sets the width of the mark it makes laid
         // over, which is four to five times bigger. Carrying the old number
         // across would hand the user a pencil a quarter of the size they had.
-        if (brushStore.storedTuning() != BrushPreset.TUNING) {
-            preset.applyTo(v.pen)
+        if (brushStore.storedTuning() != brush.tuning) {
+            brush.applyTo(v.pen)
             v.pen.erase = false
-            brushStore.save(v.pen, preset)
+            brushStore.save(v.pen, brush)
             sizeMax = v.pen.sizeMax
             eraserSize = v.pen.eraseSizeMax
             smoothing = v.pen.stabilization
@@ -792,7 +826,7 @@ private fun CanvasScreen(
             pen.burnish = b.burnish
             pen.erase = b.erase
             pen.eraseSizeMax = b.eraseSizeMax
-            preset.applyToShapeOnly(v.pen)
+            brush.applyShapeOnlyTo(v.pen)
         }
         sizeMax = v.pen.sizeMax
         eraserSize = v.pen.eraseSizeMax
@@ -814,7 +848,11 @@ private fun CanvasScreen(
         v.pen.opacity = opacity
         v.pen.flow = flow
         v.pen.grain = v.pen.grain.copy(strength = grain)
-        brushStore.save(v.pen, preset)
+        brushStore.save(v.pen, brush)
+        // Two encodes of fifteen lines, once per slider change. Cheap, and it
+        // is the only moment the answer can have changed -- the alternative is
+        // a panel that asks the question on every recomposition.
+        brushModified = !brush.matches(v.pen)
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -1218,9 +1256,11 @@ private fun CanvasScreen(
                     onWet = {
                         val v = surface ?: return@DebugRow
                         val on = v.pen.opacity < 1f
-                        val p = if (on) BrushPreset.PEN else BrushPreset.PENCIL
+                        val p = library.entryFor(
+                            if (on) BrushPreset.PEN.id else BrushPreset.PENCIL.id,
+                        )
                         p.applyTo(v.pen)
-                        preset = p
+                        brushId = p.id
                         sizeMax = v.pen.sizeMax
                         eraserSize = v.pen.eraseSizeMax
                         smoothing = v.pen.stabilization
@@ -1393,8 +1433,9 @@ private fun CanvasScreen(
                         setSelecting(false)
                         generation++
                     },
-                    preset = preset,
-                    onPreset = { p ->
+                    library = library,
+                    brushId = brushId,
+                    onBrush = { p ->
                         // The preset writes the whole brush, then the sliders
                         // are pulled back from it. Without that second half the
                         // LaunchedEffect above would push the *old* slider
@@ -1402,7 +1443,7 @@ private fun CanvasScreen(
                         // and switching tools would half work.
                         surface?.let { v ->
                             p.applyTo(v.pen)
-                            preset = p
+                            brushId = p.id
                             // Picking a brush turns the marquee off, the mirror
                             // of picking a shape turning it on. Without it the
                             // pen button and the Select button are lit at the
@@ -1550,8 +1591,9 @@ private fun ToolSlot(
     onFlow: (Float) -> Unit,
     grain: Float,
     onGrain: (Float) -> Unit,
-    preset: BrushPreset,
-    onPreset: (BrushPreset) -> Unit,
+    library: BrushLibrary,
+    brushId: String,
+    onBrush: (BrushEntry) -> Unit,
     eraser: Boolean,
     barrel: Boolean,
     onEraser: () -> Unit,
@@ -1633,22 +1675,22 @@ private fun ToolSlot(
         ToolItem.PEN -> IconToolButton(
             icon = ToolIcons.pen,
             label = item.label,
-            onClick = { onPreset(BrushPreset.PEN) },
-            selected = preset == BrushPreset.PEN && !selecting && !barrel,
+            onClick = { onBrush(library.entryFor(BrushPreset.PEN.id)) },
+            selected = brushId == BrushPreset.PEN.id && !selecting && !barrel,
         )
 
         ToolItem.PENCIL -> IconToolButton(
             icon = ToolIcons.pencil,
             label = item.label,
-            onClick = { onPreset(BrushPreset.PENCIL) },
-            selected = preset == BrushPreset.PENCIL && !selecting && !barrel,
+            onClick = { onBrush(library.entryFor(BrushPreset.PENCIL.id)) },
+            selected = brushId == BrushPreset.PENCIL.id && !selecting && !barrel,
         )
 
         ToolItem.MARKER -> IconToolButton(
             icon = ToolIcons.marker,
             label = item.label,
-            onClick = { onPreset(BrushPreset.MARKER) },
-            selected = preset == BrushPreset.MARKER && !selecting && !barrel,
+            onClick = { onBrush(library.entryFor(BrushPreset.MARKER.id)) },
+            selected = brushId == BrushPreset.MARKER.id && !selecting && !barrel,
         )
 
         ToolItem.ERASER -> IconToolButton(

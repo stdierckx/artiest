@@ -146,12 +146,33 @@ class BrushEntry(
         ?: BrushPreset.PEN.create()
 
     /**
+     * Make [brush] be this entry, overwriting everything.
+     *
+     * What picking a row does. The brush in the hand is a live object the
+     * render thread reads, so it is *configured* rather than replaced — see
+     * `InkSurfaceView.pen`, which is a `val` for that reason.
+     */
+    fun applyTo(brush: Brush) {
+        adoptBrush(create(), brush)
+    }
+
+    /**
      * Re-attach this entry's sensor wiring to [brush], leaving every scalar
      * alone. See [BrushPreset.applyToShapeOnly], which this generalises.
      */
     fun applyShapeOnlyTo(brush: Brush) {
         copyWiringOnto(create(), brush)
     }
+
+    /**
+     * A short value that changes whenever anything about how this draws does.
+     *
+     * The key a rendered swatch is cached under. It is not [id] alone, because
+     * saving over a brush keeps the id and changes the mark — and a shelf that
+     * kept showing the old picture would be a shelf that lies about the one
+     * thing it exists to show.
+     */
+    val stamp: String get() = "$id/" + (text?.hashCode() ?: tuning)
 
     /** Whether the shelf may delete this. Never a built-in. */
     val removable: Boolean get() = origin != BrushOrigin.BUILT_IN
@@ -248,6 +269,56 @@ internal fun copyWiringOnto(from: Brush, to: Brush) {
     )) {
         if (dst.inputCount > 0) continue
         if (src.inputCount == 0) continue
+        dst.combine = src.combine
+        for (i in 0 until src.inputCount) dst.drive(src.sensorAt(i), src.curveAt(i))
+    }
+}
+
+/**
+ * Every scalar and every sensor wiring of [from], onto [to].
+ *
+ * The other half of [copyWiringOnto], and the two are deliberately separate:
+ * this one is *"be that brush"* and is what picking a row from the shelf does,
+ * while that one is *"you are already mostly that brush, put back what is
+ * missing"* and is what restoring a saved file does. Using this one for a
+ * restore would throw away the sliders the user last dragged; using that one to
+ * pick a brush would leave the previous brush's numbers in place, and the shelf
+ * would appear not to work.
+ *
+ * [to] is configured rather than replaced because the brush in the hand is a
+ * live object the render thread reads.
+ */
+fun adoptBrush(from: Brush, to: Brush) {
+    to.sizeMin = from.sizeMin
+    to.sizeMax = from.sizeMax
+    to.sizeCurve = from.sizeCurve
+    to.spacing = from.spacing
+    to.isotropicSpacing = from.isotropicSpacing
+    to.hardness = from.hardness
+    to.opacity = from.opacity
+    to.flow = from.flow
+    to.stabilization = from.stabilization
+    to.antiAlias = from.antiAlias
+    to.onsetMillis = from.onsetMillis
+    to.onsetPressure = from.onsetPressure
+    to.grain = from.grain
+    to.burnish = from.burnish
+    to.erase = from.erase
+    to.eraseSizeMax = from.eraseSizeMax
+    for ((src, dst) in listOf(
+        from.size to to.size,
+        from.flowOption to to.flowOption,
+        from.aspect to to.aspect,
+        from.rotation to to.rotation,
+        from.scatter to to.scatter,
+        from.sizeJitter to to.sizeJitter,
+    )) {
+        // Cleared first, and then driven once per input: a brush that kept the
+        // old one's sensors would be the two brushes at once, which reads as
+        // the shelf half working rather than as a bug.
+        dst.clearInputs()
+        dst.min = src.min
+        dst.max = src.max
         dst.combine = src.combine
         for (i in 0 until src.inputCount) dst.drive(src.sensorAt(i), src.curveAt(i))
     }
