@@ -308,6 +308,8 @@ private fun SurfaceView(
             drag = drag,
             filter = filter,
             onFilter = onFilter,
+            gridW = gridW,
+            gridH = gridH,
             slotContent = slotContent,
         )
 
@@ -410,6 +412,120 @@ private fun SurfaceGrip(
             "Move this toolbar",
             Modifier.size(11.dp),
             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+        )
+    }
+}
+
+/**
+ * The corner you pull to make a panel bigger.
+ *
+ * ## Why only a panel has one
+ *
+ * Everything else is as big as the catalogue says it is — a button is one cell
+ * because a button is one cell — so a handle on it would be a handle that does
+ * nothing, and a control wearing a handle that does nothing is a control the
+ * user will try twice and then distrust. A panel is the one item whose size is
+ * the user's rather than the catalogue's: it is a window onto a list that has
+ * no natural length. See [DockLayout.resizePanel].
+ *
+ * ## Why it reports cells and not pixels
+ *
+ * The layout has no other unit. A panel is a whole number of cells wide and a
+ * whole number deep, so a handle reporting pixels would be asking the model to
+ * hold a size it cannot represent. The visible consequence is that it moves in
+ * steps of 44dp, and that is the right kind of visible: it snaps, the snap is
+ * the grid, and the grid is the thing every other gesture in arrange mode is
+ * already made of.
+ *
+ * ## Where it is, and why there
+ *
+ * Centred on the panel's **bottom-right** corner, which is the corner that
+ * moves — the top-left cell is the one the panel is anchored to and it stays
+ * put. [SurfaceGrip] is centred on a surface's top-left in the same way, so the
+ * two handles read as a pair: the one that moves the whole thing is at the
+ * start, the one that sizes this panel is at the end.
+ *
+ * Like every other piece of furniture it is drawn **only while arranging**.
+ * Screen the user is paying for with nothing to show for it is screen that
+ * should be paper.
+ *
+ * ## Why the size is committed on every step and not on the lift
+ *
+ * Because the panel underneath has to grow as the hand moves, and the panel is
+ * drawn from the layout. A preview held locally would mean two sources for one
+ * number, and the drawing you see would be the one that is not saved. The write
+ * is guarded instead: the layout is touched once per whole cell crossed, not
+ * once per pointer event.
+ */
+@Composable
+internal fun ScaleHandle(
+    slotPx: Float,
+    w: Int,
+    h: Int,
+    maxW: Int,
+    maxH: Int,
+    onScale: (Int, Int) -> Unit,
+    modifier: Modifier,
+) {
+    val scale by rememberUpdatedState(onScale)
+    val size by rememberUpdatedState(w to h)
+    val room by rememberUpdatedState(maxW to maxH)
+    var pulling by remember { mutableStateOf(false) }
+
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(18.dp)
+            .clip(CircleShape)
+            .background(if (pulling) scheme.primary else scheme.surfaceContainerHigh)
+            .border(
+                1.dp,
+                scheme.primary.copy(alpha = if (pulling) 1f else 0.5f),
+                CircleShape,
+            )
+            .pointerInput(slotPx) {
+                var start = 1 to 1
+                var sent = 1 to 1
+                var travelled = Offset.Zero
+                detectDragGestures(
+                    onDragStart = {
+                        start = size
+                        sent = size
+                        travelled = Offset.Zero
+                        pulling = true
+                    },
+                    onDrag = { change, delta ->
+                        change.consume()
+                        travelled += delta
+                        if (slotPx > 0f) {
+                            // Clamped to the model's own limits *and* to what
+                            // is left of the screen, so a panel cannot be
+                            // dragged out past the glass and take its own
+                            // handle with it.
+                            val (rw, rh) = room
+                            val next = Pair(
+                                (start.first + (travelled.x / slotPx).roundToInt())
+                                    .coerceIn(DockLayout.MIN_PANEL, minOf(rw, DockLayout.MAX_PANEL)),
+                                (start.second + (travelled.y / slotPx).roundToInt())
+                                    .coerceIn(DockLayout.MIN_PANEL, minOf(rh, DockLayout.MAX_PANEL)),
+                            )
+                            if (next != sent) {
+                                sent = next
+                                scale(next.first, next.second)
+                            }
+                        }
+                    },
+                    onDragEnd = { pulling = false },
+                    onDragCancel = { pulling = false },
+                )
+            },
+    ) {
+        Icon(
+            ToolIcons.scale,
+            "Scale this panel",
+            Modifier.size(11.dp),
+            if (pulling) scheme.onPrimary else scheme.onSurface.copy(alpha = 0.7f),
         )
     }
 }

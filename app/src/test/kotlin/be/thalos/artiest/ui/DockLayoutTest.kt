@@ -268,6 +268,21 @@ class DockLayoutTest {
     }
 
     @Test
+    fun `a panel does not grow over what is beside it`() {
+        // What the handle is dragged against. The refusal is the model's, and
+        // it has to be a refusal rather than a shove: the button beside the
+        // panel is one the user did not touch.
+        val bar = DockLayout.of(listOf(bar("a", Cell(0, 0), 12, Axis.HORIZONTAL)))
+            .place("a", ToolItem.COLOUR_PANEL, Cell(0, 0))
+            .place("a", ToolItem.PEN, Cell(7, 0))
+        val wider = bar.resizePanel("a", Cell(0, 0), 9, 11)
+        assertSame(bar, wider, "it stops at the button rather than covering it")
+
+        val taller = bar.resizePanel("a", Cell(0, 0), 6, 16)
+        assertEquals(16, taller.locate(ToolItem.COLOUR_PANEL)?.placement?.h, "down is free")
+    }
+
+    @Test
     fun `a chosen size follows the control onto a surface that runs the same way`() {
         val (next, id) = empty.addSurface(ToolItem.COLOUR_PANEL, Cell(0, 0))
         val sized = next.resizePanel(id, Cell(0, 0), 8, 9)

@@ -429,6 +429,31 @@ object ToolIcons {
     }
 
     /**
+     * A diagonal arrow with a head at each end: the corner you pull to make a
+     * panel bigger.
+     *
+     * The conventional one, for the reason [grip] is the conventional grip. It
+     * points down-right and up-left because that is the direction the handle
+     * moves in — a panel is anchored by its top-left cell and grows towards the
+     * bottom-right, so the glyph is also a statement about which corner stays
+     * put.
+     */
+    val scale: ImageVector by lazy {
+        icon("scale") {
+            stroke(1.8f) {
+                moveTo(8.2f, 8.2f)
+                lineTo(18.4f, 18.4f)
+                moveTo(8.2f, 13.6f)
+                lineTo(8.2f, 8.2f)
+                lineTo(13.6f, 8.2f)
+                moveTo(18.4f, 13.0f)
+                lineTo(18.4f, 18.4f)
+                lineTo(13.0f, 18.4f)
+            }
+        }
+    }
+
+    /**
      * A screen with a bar down one side: a workspace, seen from far enough away
      * to be a shape rather than a set of buttons.
      *

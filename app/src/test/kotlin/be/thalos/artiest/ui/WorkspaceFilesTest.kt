@@ -73,6 +73,29 @@ class WorkspaceFilesTest {
     }
 
     @Test
+    fun `saving twice under one name gives two workspaces, not one`() {
+        // What *Save as* does when somebody calls both of them "Inking",
+        // which is what somebody naming things with a pen in their hand does.
+        files.save(workspace("sketcher", "Sketcher"))
+        val first = assertNotNull(files.duplicate("sketcher", "Inking"))
+        val second = assertNotNull(files.duplicate("sketcher", "Inking"))
+        assertEquals("inking", first.id)
+        assertEquals("inking-2", second.id, "the second one gets out of the first one's way")
+        assertEquals(3, files.list().size)
+    }
+
+    @Test
+    fun `a rename keeps the file, the id and the arrangement`() {
+        files.save(workspace("inking", "Inking").copy(revision = 4))
+        val renamed = assertNotNull(files.load("inking")).workspace!!.renamed("Inking, fine")
+        files.save(renamed)
+        assertEquals("inking", renamed.id, "a name is not a file name")
+        assertEquals(5, renamed.revision)
+        assertEquals(listOf("Inking, fine"), files.list().map { it.name })
+        assertEquals(DockLayout.STARTER, assertNotNull(files.load("inking")).workspace?.layout)
+    }
+
+    @Test
     fun `an import never overwrites what is already here`() {
         val mine = workspace("sketcher", "Sketcher").copy(
             description = "the one I have spent a month on",

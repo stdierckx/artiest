@@ -3,6 +3,7 @@ package be.thalos.artiest.ui
 import android.graphics.CornerPathEffect
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.asComposePath
@@ -85,6 +87,9 @@ internal fun ChromeSurface(
     drag: DockDrag,
     filter: CatalogueFilter,
     onFilter: (CatalogueFilter) -> Unit,
+    /** How big the glass is, in cells. Only the scale handle asks — see [ScaleHandle]. */
+    gridW: Int,
+    gridH: Int,
     modifier: Modifier = Modifier,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
@@ -149,6 +154,9 @@ internal fun ChromeSurface(
                     drag = drag,
                     filter = filter,
                     onFilter = onFilter,
+                    slotPx = slotPx,
+                    gridW = gridW,
+                    gridH = gridH,
                     slotContent = slotContent,
                 )
             }
@@ -200,6 +208,9 @@ private fun ShapedCell(
     drag: DockDrag,
     filter: CatalogueFilter,
     onFilter: (CatalogueFilter) -> Unit,
+    slotPx: Float,
+    gridW: Int,
+    gridH: Int,
     slotContent: @Composable (ToolItem, Axis) -> Unit,
 ) {
     var chooser by remember { mutableStateOf(false) }
@@ -229,6 +240,23 @@ private fun ShapedCell(
             arranging -> EmptyTarget { chooser = true }
 
             else -> Unit
+        }
+
+        // The one control whose size is the user's rather than the
+        // catalogue's, so the one control with a handle. It is drawn after the
+        // chip and therefore over it, which is also what gives it the pointer:
+        // the chip's own gesture would otherwise carry the panel away the
+        // moment somebody tried to make it bigger.
+        if (arranging && placed != null && placed.hangs) {
+            ScaleHandle(
+                slotPx = slotPx,
+                w = placed.w,
+                h = placed.h,
+                maxW = gridW - cell.x,
+                maxH = gridH - cell.y,
+                onScale = { w, h -> onLayout(layout.resizePanel(surface.id, cell, w, h)) },
+                modifier = Modifier.align(Alignment.BottomEnd).offset(9.dp, 9.dp),
+            )
         }
 
         if (chooser) {

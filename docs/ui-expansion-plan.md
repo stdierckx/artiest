@@ -24,6 +24,23 @@ One of the three things owed below is now paid by that change rather than by
 this one: **two surfaces can no longer overlap**, because a surface's position
 is cells and the pen will not paint over a cell another one owns.
 
+Two things have been added since, both because the user asked for them after
+using what was here:
+
+- **A panel is scaled from its corner again.** The model always could —
+  `DockLayout.resizePanel` and the `@6x11` in the codec survived the rewrite
+  untouched — but the handle went with the floating bar it used to hang off.
+  It is back on the panel itself, centred on the bottom-right corner, drawn
+  only while arranging, and it snaps to cells because cells are the only unit
+  the layout has. See `ScaleHandle`.
+- **A workspace can be saved under a name you type, renamed, and deleted.**
+  The wardrobe trap below said *build U1–U10 and stop*, and this is a step past
+  it, so it is worth saying what makes it a small one: no gallery, no cloud, no
+  second model. *Save as* is `duplicate` with the name from a text field,
+  *Rename* is `Workspace.renamed`, and *Delete* is the `delete` that
+  `WorkspaceStore` already had. The three shipped workspaces can be neither
+  renamed nor deleted, because *Put back* has to have something to put back.
+
 ## What was built
 
 | # | Item | State |

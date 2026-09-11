@@ -589,9 +589,16 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
         /** Room to drop something else in beside a freshly fixated panel. */
         private const val SPARE_CELLS = 2
 
-        /** A panel smaller than this is not readable; larger than this is not a screen. */
-        private const val MIN_PANEL = 2
-        private const val MAX_PANEL = 24
+        /**
+         * A panel smaller than this is not readable; larger than this is not a
+         * screen.
+         *
+         * Not private, because the handle that drags a panel bigger has to stop
+         * where the model stops. A handle that kept moving after the number had
+         * stopped changing would read as the drag having broken.
+         */
+        const val MIN_PANEL = 2
+        const val MAX_PANEL = 24
 
         /**
          * Build a layout from whatever surfaces are supplied.

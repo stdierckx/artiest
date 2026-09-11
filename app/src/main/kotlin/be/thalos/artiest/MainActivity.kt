@@ -992,13 +992,29 @@ private fun CanvasScreen(
                     entries = entries,
                     isShipped = workspaces::isShipped,
                     onSwitch = { switchTo(it) },
-                    onDuplicate = {
-                        val copy = workspaces.duplicate(
-                            workspace.id,
-                            Workspace.copyName(workspace.name, entries.map { it.name }),
-                        )
+                    onSaveAs = { name ->
+                        // The copy is taken from the file, so the file is put
+                        // beyond doubt first. `keep` has almost certainly
+                        // written it already; the one case it has not is the
+                        // one where a workspace's file is missing and the app
+                        // is running on the fallback, and that is exactly the
+                        // case where losing the arrangement would hurt most.
+                        // Then we go and live in the copy, because the copy is
+                        // the one that was named.
+                        workspaces.save(workspace)
+                        val copy = workspaces.duplicate(workspace.id, name)
                         entries = workspaces.list()
                         copy?.let { switchTo(it.id) }
+                    },
+                    onRename = { name ->
+                        workspace = workspace.renamed(name)
+                        workspaces.save(workspace)
+                        entries = workspaces.list()
+                    },
+                    onDelete = {
+                        workspaces.delete(workspace.id)
+                        entries = workspaces.list()
+                        switchTo(WorkspaceStore.DEFAULT_ID)
                     },
                     onReset = {
                         workspaces.reset(workspace.id)
