@@ -227,6 +227,19 @@ object OraFile {
                 )
             }
 
+            // The file's own picture, if it brought one. Without it the card in
+            // the gallery is blank until the drawing is next drawn on -- and a
+            // drawing that has just been opened from somewhere else is exactly
+            // the one the user wants to recognise.
+            it.getEntry(Ora.THUMBNAIL)?.let { entry ->
+                runCatching {
+                    val bytes = it.getInputStream(entry).use { stream -> stream.readBytes() }
+                    files.writeAtomically(files.thumbnailOf(project.id)) { tmp ->
+                        tmp.writeBytes(bytes)
+                    }
+                }
+            }
+
             val saved = project.revised(now, sheets, active = sheets.lastIndex.coerceAtLeast(0))
             if (!files.save(saved)) {
                 return@withContext OraResult.Failed("the project file could not be written")
