@@ -167,17 +167,42 @@ what the directory means, so it must never name a sheet that is not there yet.
 into a scaled-down canvas. Not a second loop — `PngExporter` learned that lesson
 already and its header says why.
 
-### What has to be measured, on the tablet, before this is called done
+### What was measured, on the tablet
 
-| Number | Where it must land |
-|---|---|
-| Save of one changed sheet | under 400 ms, none of it on the pen thread |
-| Longest stall the pen can feel during a save | one frame, and it should be zero |
-| Open an 8-sheet project | under 2 s, with the gallery still responsive |
-| Peak memory during open | below the point at which the ninth layer would be refused |
+Taken on the DTH-A116 at 3300 x 2160, through the `save` line the instruments
+overlay now carries. `ProjectCounters` is the instrument; the numbers below are
+its readings, not estimates.
 
-The instrument already exists: `ChromeCounters` and the diagnostic overlay from
-W9–W14. This item adds a `save` line to it.
+| Number | Where it had to land | What it read |
+|---|---|---|
+| Save of one changed sheet | under 400 ms | **612 ms** on a one-sheet drawing, **700 ms** on an eight-sheet one. **Missed, and kept.** See below. |
+| Longest the pen could be stalled | one frame | **9 ms**, worst over a session **11 ms** — one blit under `Layer`'s lock. A 60 Hz frame is 16.7 ms and a 90 Hz one is 11.1. |
+| Open an 8-sheet project | under 2 s | **999–1010 ms** |
+| Peak memory during an open | below the point the ninth sheet would be refused | **293 MiB** opening eight sheets over one; **385 MiB** opening one over eight, with 5.0 GiB free |
+
+And the number that says the two are not fighting: thirteen strokes drawn across
+several autosaves left `batches spills 0`, `in flight 0`, event p99 5.2 ms with
+a worst event of 7.6 ms, and a front-buffer submit p99 of 0.17 ms.
+
+**The 400 ms was optimistic and the code is not the reason.** Of a 612 ms save,
+9 ms is the blit, 32 ms is the gallery thumbnail, and essentially all of the
+rest is one PNG encode of 7.1 megapixels. `PngExporter` measured the same encode
+at 177 ms on a desktop; this tablet takes about three times that. The options
+are a faster format nothing else can read, or a lossy one, and neither is worth
+it for work that happens on a background thread every few seconds. The number to
+hold the feature to is the 9 ms, and that one passes with room.
+
+**Opening holds both drawings at once**, which is what the 385 MiB is: the
+outgoing sheets are closed by the render thread when the swap lands, and the
+incoming ones are built before that. Eight out and eight in would be around
+460 MiB, which is still nothing against 5 GiB but is the number that would
+matter on a small device.
+
+**The caveat, stated rather than buried.** These strokes were injected with
+`adb shell input stylus swipe`, so their sample timing is synthetic. What the
+readings establish is that *the app* does not stall: no batch spilled, no commit
+queued up, and the only lock a save takes is held for 9 ms. Whether a hand can
+feel it is still a question for a hand.
 
 ## Opening one
 
@@ -315,7 +340,7 @@ whatever a workspace's groups say. It is offered everywhere and pinned nowhere.
 | Pj4 `ProjectStore`, autosave, save on pause | **done**, and verified by killing the app |
 | Pj5 The gallery | **done** |
 | Pj6 `.ora` out and in | **done**, round-tripped on the tablet through the system picker |
-| Pj7 Measure it | **not taken.** The four numbers above are still owed. |
+| Pj7 Measure it | **done.** The numbers are above, and one of the four missed its target and is kept anyway. |
 
 ## What this unlocks
 

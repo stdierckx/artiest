@@ -110,6 +110,7 @@ import androidx.lifecycle.lifecycleScope
 import be.thalos.artiest.io.PngExporter
 import be.thalos.artiest.project.OpenResult
 import be.thalos.artiest.project.OraResult
+import be.thalos.artiest.project.ProjectCounters
 import be.thalos.artiest.project.OraShare
 import be.thalos.artiest.project.Project
 import be.thalos.artiest.project.ProjectLoader
@@ -1926,6 +1927,15 @@ private fun readout(
         "${project.sheets.size} sheet(s)   " +
         (lastSave?.let { "last save ${it.sheetsWritten} in ${it.ms} ms" } ?: "not saved yet") +
         "\n" +
+        // Pj7's gate, and `on lock` is the whole of it: every other part of a
+        // save is off the thread the pen is on, and this one is a single blit
+        // out from under Layer's lock. `worst` is the session's, because a gate
+        // that only remembered the last save would forget the frame it dropped.
+        "save     on lock ${ProjectCounters.onLock} ms   " +
+        "worst ${ProjectCounters.worstOnLock} ms   " +
+        "thumb ${ProjectCounters.thumbnail} ms   " +
+        "open ${ProjectCounters.open} ms for ${ProjectCounters.opened} sheet(s)   " +
+        "peak ${ProjectCounters.openPeak} MiB\n" +
         "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
         // The undo budget, which is the number that decides whether a long

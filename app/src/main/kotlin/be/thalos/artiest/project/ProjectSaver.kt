@@ -208,13 +208,17 @@ class ProjectSaver(private val files: ProjectFiles) {
             described = sheets
             describedActive = saved.active
 
+            val thumbStartNs = System.nanoTime()
             thumbnail(project, document)
+            ProjectCounters.drewThumbnail((System.nanoTime() - thumbStartNs) / 1_000_000L)
 
+            val ms = (System.nanoTime() - startNs) / 1_000_000L
+            ProjectCounters.saved(ms, encoded)
             return SaveResult.Saved(
                 project = saved,
                 sheetsWritten = encoded,
                 notYetStamped = notYetStamped,
-                ms = (System.nanoTime() - startNs) / 1_000_000L,
+                ms = ms,
             )
         } finally {
             transient?.recycle()
@@ -243,7 +247,14 @@ class ProjectSaver(private val files: ProjectFiles) {
     private fun copy(layer: Layer, out: Bitmap): Boolean {
         out.eraseColor(0)
         val canvas = Canvas(out)
-        return layer.read { src -> canvas.drawBitmap(src, 0f, 0f, null) }
+        // Timed here and not around the call, because the erase above is a
+        // full-page memset that has nothing to do with the lock -- and a gate
+        // whose number includes work that is not on the lock is a gate that
+        // fails for the wrong reason. It measured 21 ms that way and 7 this.
+        val startNs = System.nanoTime()
+        val ok = layer.read { src -> canvas.drawBitmap(src, 0f, 0f, null) }
+        ProjectCounters.copied((System.nanoTime() - startNs) / 1_000_000L)
+        return ok
     }
 
     /** Encode to `x.tmp` and rename. See [ProjectFiles.writeAtomically]. */

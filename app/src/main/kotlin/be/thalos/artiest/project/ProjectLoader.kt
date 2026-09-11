@@ -98,6 +98,13 @@ object ProjectLoader {
 
     private fun build(files: ProjectFiles, project: Project, document: Document): Built {
         val startNs = System.nanoTime()
+        // Bitmap pixels have lived on the native heap since Oreo, so this is
+        // the number that says whether an eight-sheet open comes anywhere near
+        // the point at which the ninth sheet would be refused. Sampled as the
+        // sheets are built, because the peak is in the middle: one decoded
+        // picture and one fresh sheet exist at once, per sheet, for the width
+        // of a blit.
+        var peak = android.os.Debug.getNativeHeapAllocatedSize()
         val notes = ArrayList<String>()
         val sheets = ArrayList<LayerOp.Open.Sheet>(maxOf(1, project.sheets.size))
 
@@ -133,9 +140,12 @@ object ProjectLoader {
                 visible = described.visible,
                 blend = described.blend,
             )
+            peak = maxOf(peak, android.os.Debug.getNativeHeapAllocatedSize())
         }
 
-        return Built.Sheets(sheets, notes, (System.nanoTime() - startNs) / 1_000_000L)
+        val ms = (System.nanoTime() - startNs) / 1_000_000L
+        ProjectCounters.openedProject(ms, sheets.size, peak)
+        return Built.Sheets(sheets, notes, ms)
     }
 
     private enum class Painted { DRAWN, MISSING, CLOSED }
