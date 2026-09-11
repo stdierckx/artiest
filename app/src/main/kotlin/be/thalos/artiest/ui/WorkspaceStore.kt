@@ -97,6 +97,49 @@ class WorkspaceStore(context: Context) {
             .use { it.readText() }
     }.getOrNull()
 
+    /**
+     * Take the arrangement this install already had into the workspace it is
+     * in. Once, ever.
+     *
+     * ## The bug this exists to stop, which was found on a tablet
+     *
+     * Before workspaces, the bars lived in one preference string and nowhere
+     * else. After them, *Everything* is a file, and the file that ships holds
+     * the **factory** starter. So an install that had been arranged for months
+     * came up correctly — the preference still decides what is on screen — and
+     * then the first switch to *Sketcher* replaced those bars with Sketcher's,
+     * overwrote the preference on the way, and switching back to *Everything*
+     * gave the factory layout. The arrangement was gone, with nothing that had
+     * asked and nothing that could undo it.
+     *
+     * The rule it broke is the one an upgrade must never break:
+     *
+     * > **The bars you had are the bars you get** — not just on the first
+     * > launch, but for as long as you want them.
+     *
+     * So on the first launch after workspaces arrive, whatever was in the
+     * preference *becomes* what the current workspace means. Switching away and
+     * back then returns you to your own bars, because they are what the file
+     * says.
+     *
+     * ## Once, and why it is flagged rather than inferred
+     *
+     * It cannot be "whenever the file and the preference disagree", because
+     * they disagree constantly and on purpose: the preference is the fast path
+     * and is written on every drag, and the file catches up later. So there is
+     * a flag, it is set the first time this is called, and it is never cleared
+     * — the same shape as `DockStore`'s offered set, and for the same reason.
+     * A fresh install has no arrangement to adopt and this does nothing.
+     */
+    fun adoptOnce(bars: DockLayout): Workspace? {
+        if (prefs.getBoolean(KEY_ADOPTED, false)) return null
+        prefs.edit().putBoolean(KEY_ADOPTED, true).apply()
+        val current = current()
+        if (bars == current.layout) return null
+        val adopted = current.copy(layout = bars, revision = current.revision + 1)
+        return if (files.save(adopted)) adopted else null
+    }
+
     /** True for one of the three that came with the app. */
     fun isShipped(id: String): Boolean = id in ShippedWorkspaces.ids
 
@@ -143,6 +186,9 @@ class WorkspaceStore(context: Context) {
     companion object {
         private const val PREFS = "chrome"
         private const val KEY_CURRENT = "workspace.current"
+
+        /** Set the first time [adoptOnce] runs. Never cleared. */
+        private const val KEY_ADOPTED = "workspace.adopted"
         private const val DIRECTORY = "workspaces"
 
         /** The one that is there before anybody has made one. */

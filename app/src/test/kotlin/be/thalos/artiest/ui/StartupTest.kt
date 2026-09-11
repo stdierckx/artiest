@@ -55,8 +55,9 @@ class StartupTest {
     private fun startUp(): Pair<Workspace, DockLayout> {
         val store = DockStore(context)
         val workspaces = WorkspaceStore(context)
-        val workspace = workspaces.current()
-        return workspace to store.load(workspace.filter)
+        val loaded = workspaces.current()
+        val bars = store.load(loaded.filter)
+        return (workspaces.adoptOnce(bars) ?: loaded) to bars
     }
 
     @Test
@@ -111,6 +112,66 @@ class StartupTest {
             val loaded = assertNotNull(store.load(id), id)
             assertEquals(ShippedWorkspaces.byId(id), loaded, "$id came back changed")
         }
+    }
+
+    @Test
+    fun `switching away and back gives you your own bars, not the factory ones`() {
+        // The bug a tablet found, as a test. Before this, Everything meant the
+        // *shipped* starter, so the first switch to Sketcher replaced an
+        // arrangement somebody had built and switching back handed them the
+        // factory layout. Nothing asked, and nothing could undo it.
+        seedPrefs()
+        val (workspace, docks) = startUp()
+
+        val mine = listOf("pen", "pencil", "eraser", "marker", "colour", "marquee")
+        assertEquals(mine, docks.edge(Dock.LEFT).slots.placements.map { it.item.id })
+        assertEquals(
+            mine,
+            workspace.layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            "Everything now means what this install actually had",
+        )
+
+        // Go to Sketcher, which really does replace the bars -- that is what
+        // switching is for -- and come home.
+        val workspaces = WorkspaceStore(context)
+        workspaces.switchTo(ShippedWorkspaces.SKETCHER)
+        assertEquals(
+            listOf("pen", "pencil", "marker", "eraser", "colour"),
+            workspaces.current().layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+        )
+
+        workspaces.switchTo(ShippedWorkspaces.EVERYTHING)
+        assertEquals(
+            mine,
+            workspaces.current().layout.edge(Dock.LEFT).slots.placements.map { it.item.id },
+            "and they are still there",
+        )
+    }
+
+    @Test
+    fun `adopting happens once, so a later drag is not undone by a restart`() {
+        seedPrefs()
+        startUp()
+
+        // A drag moves a control and writes the fast path. The file catches up
+        // later, on purpose -- so a second adoption would be a stale layout
+        // overwriting a fresh one.
+        val store = DockStore(context)
+        val moved = store.load(CatalogueFilter.EVERYTHING).remove("left", Cell(0, 5))
+        store.save(moved)
+
+        val workspaces = WorkspaceStore(context)
+        assertEquals(null, workspaces.adoptOnce(moved), "once, ever")
+    }
+
+    @Test
+    fun `a fresh install has nothing to adopt`() {
+        val workspaces = WorkspaceStore(context)
+        assertEquals(
+            null,
+            workspaces.adoptOnce(DockLayout.STARTER),
+            "the starter is already what Everything says",
+        )
     }
 
     @Test

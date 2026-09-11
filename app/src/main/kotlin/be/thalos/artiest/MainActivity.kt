@@ -462,10 +462,24 @@ private fun CanvasScreen(
     // when you switch, duplicate or leave. A crash after a drag loses nothing --
     // the arrangement is in preferences and the file catches up.
     val workspaces = remember { WorkspaceStore(context) }
-    var workspace by remember { mutableStateOf(workspaces.current()) }
+
+    // Read in one step, because the second half depends on the first and the
+    // third fixes up both. On the first launch after workspaces arrived, the
+    // arrangement this install already had *becomes* what the current workspace
+    // means -- see WorkspaceStore.adoptOnce. Without it the first switch away
+    // replaces bars somebody built with the factory ones and there is no way
+    // back to them, which is a tablet's worth of arranging gone with nothing
+    // having asked.
+    val startup = remember {
+        val loaded = workspaces.current()
+        val bars = store.load(loaded.filter)
+        (workspaces.adoptOnce(bars) ?: loaded) to bars
+    }
+
+    var workspace by remember { mutableStateOf(startup.first) }
     var entries by remember { mutableStateOf(workspaces.list()) }
 
-    var docks by remember { mutableStateOf(store.load(workspace.filter)) }
+    var docks by remember { mutableStateOf(startup.second) }
     var arranging by remember { mutableStateOf(false) }
 
     /** Save the arrangement to both stores. The fast one always, the file too. */
