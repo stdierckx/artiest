@@ -9,8 +9,9 @@ package be.thalos.artiest.ui
  *
  * ## Three properties, and everything else follows from them
  *
- * **`at` is optional.** A tool may say which cell it is in, or say nothing and
- * be packed in flow order. That is what makes a workspace something a person
+ * **`at` is optional, everywhere.** A tool may say which cell it is in, or say
+ * nothing and be packed in flow order; a surface may say where its corner is,
+ * or name a side and be put there once. That is what makes a workspace something a person
  * can write by hand — *"pen, pencil, eraser, colour, down the left edge"* is a
  * list of four names — while still letting one that was arranged by hand keep
  * every position exactly.
@@ -52,7 +53,7 @@ package be.thalos.artiest.ui
 object WorkspaceJson {
 
     /** The version of the *format*. A file that claims another is still read. */
-    const val FORMAT = 1
+    const val FORMAT = 2
 
     /** More surfaces than a screen can hold. */
     const val MAX_SURFACES = 16
@@ -97,7 +98,7 @@ object WorkspaceJson {
         append("  \"filter\": ").append(encodeFilter(ws.filter)).append(",\n")
         append("  \"defaults\": ").append(encodeDefaults(ws.defaults)).append(",\n")
         append("  \"surfaces\": [\n")
-        val surfaces = ws.layout.surfaces.filter { !it.isEmpty || it.dock.isEdge }
+        val surfaces = ws.layout.surfaces
         for ((i, s) in surfaces.withIndex()) {
             append(encodeSurface(s))
             append(if (i < surfaces.lastIndex) ",\n" else "\n")
@@ -129,16 +130,32 @@ object WorkspaceJson {
         append("}")
     }
 
+    /**
+     * One surface: where its corner is, the shape from that corner, and what is
+     * on it.
+     *
+     * **Everything inside a surface is written relative to its own corner**, and
+     * the corner is the one absolute thing. That is what makes a shape
+     * readable — `[[0, 0, 1, 8], [0, 7, 4, 1]]` is an L wherever it is put, and
+     * moving the toolbar changes two numbers instead of all of them.
+     */
     private fun encodeSurface(s: Surface): String = buildString {
+        val b = s.region.bounds
         append("    {\n")
         append("      \"id\": ").append(quote(s.id)).append(",\n")
-        append("      \"dock\": ").append(quote(s.dock.id)).append(",\n")
-        s.spot?.let {
-            append("      \"at\": [").append(round(it.x)).append(", ").append(round(it.y))
-                .append("],\n")
+        when (val a = s.anchor) {
+            // A side by name, a corner as two fractions, or — for a surface
+            // that has already been on a screen — the cells it is actually at.
+            is Anchor.Edge -> append("      \"anchor\": ").append(quote(a.side.id)).append(",\n")
+            is Anchor.Spot ->
+                append("      \"anchor\": [").append(round(a.x)).append(", ")
+                    .append(round(a.y)).append("],\n")
+            null -> append("      \"at\": [").append(b.x).append(", ").append(b.y).append("],\n")
         }
         append("      \"rects\": [")
-        append(s.region.rects.joinToString(", ") { "[${it.x}, ${it.y}, ${it.w}, ${it.h}]" })
+        append(s.region.rects.joinToString(", ") {
+            "[${it.x - b.x}, ${it.y - b.y}, ${it.w}, ${it.h}]"
+        })
         append("],\n")
         append("      \"flow\": ").append(quote(s.flow.id)).append(",\n")
         append("      \"tools\": [")
@@ -148,8 +165,8 @@ object WorkspaceJson {
             append("\n")
             for ((i, p) in s.slots.placements.withIndex()) {
                 append("        {\"id\": ").append(quote(p.item.id))
-                append(", \"at\": [").append(p.x).append(", ").append(p.y).append("]")
-                if (p.item.kind == ToolKind.PANEL) {
+                append(", \"at\": [").append(p.x - b.x).append(", ").append(p.y - b.y).append("]")
+                if (p.hangs) {
                     append(", \"size\": [").append(p.w).append(", ").append(p.h).append("]")
                 }
                 append("}")
@@ -188,7 +205,7 @@ object WorkspaceJson {
 
         val filter = decodeFilter(root.obj("filter"), dropped)
         val defaults = decodeDefaults(root.obj("defaults"), dropped)
-        val layout = decodeSurfaces(root.arr("surfaces"), dropped)
+        val layout = decodeSurfaces(root.arr("surfaces"), format ?: 1, dropped)
 
         return Decoded(
             Workspace(
@@ -269,6 +286,7 @@ object WorkspaceJson {
 
     private fun decodeSurfaces(
         items: List<JsonValue>?,
+        format: Int,
         dropped: MutableList<String>,
     ): DockLayout {
         if (items == null) return DockLayout.EMPTY
@@ -279,53 +297,112 @@ object WorkspaceJson {
         val out = ArrayList<Surface>()
         val seen = HashSet<String>()
         val placed = HashSet<ToolItem>()
-        var floats = 0
+        var made = 0
         for (value in items.take(MAX_SURFACES)) {
             val obj = value as? JsonValue.Obj ?: continue
             for (key in obj.unknown(SURFACE_KEYS)) dropped += "toolbar: \"$key\" is not a field"
 
-            val dockId = obj.str("dock") ?: obj.str("id")
-            val dock = Dock.byId(dockId ?: "")
-                ?: if (dockId?.startsWith(DockLayout.FLOAT_PREFIX) == true) Dock.FLOATING else null
-            if (dock == null) {
-                dropped += "toolbar \"$dockId\" — there is no such edge"
-                continue
-            }
-            val id = if (dock.isEdge) dock.id else {
-                obj.str("id")?.takeIf { it.startsWith(DockLayout.FLOAT_PREFIX) }
-                    ?: "${DockLayout.FLOAT_PREFIX}${++floats}"
-            }
+            // A format 1 file named its surfaces after the dock they hung on
+            // and usually carried no "id" at all, so the dock is the fallback
+            // before a made-up name is: an id is what a later edit keys on, and
+            // one that changes every time the file is read is not an id.
+            val id = obj.str("id")?.let(::clean)?.take(Workspace.MAX_SLUG)?.takeIf { it.isNotEmpty() }
+                ?: obj.str("dock")?.takeIf { Side.byId(it) != null }
+                ?: "${DockLayout.ID_PREFIX}${++made}"
             if (!seen.add(id)) {
                 dropped += "toolbar \"$id\" appears twice — the first one was kept"
                 continue
             }
 
-            val region = decodeRegion(obj.arr("rects"), dock, id, dropped)
-            val flow = obj.str("flow")?.let { FlowOrder.byId(it) } ?: dock.defaultFlow()
-            val spot = if (dock.isEdge) null else obj.arr("at")?.let { at ->
-                val x = (at.getOrNull(0) as? JsonValue.Num)?.value?.toFloat()
-                val y = (at.getOrNull(1) as? JsonValue.Num)?.value?.toFloat()
-                if (x == null || y == null) null else BarSpot.of(x, y)
-            }
+            val tools = obj.arr("tools")
+            val anchor = decodeAnchor(obj, id, dropped)
+            val region = decodeRegion(obj.arr("rects"), tools, anchor, id, dropped)
+            val corner = decodeCorner(obj, format, anchor)
+            val flow = obj.str("flow")?.let { FlowOrder.byId(it) }
+                ?: FlowOrder.along(region.stripAxis ?: Axis.HORIZONTAL)
 
-            out += Surface(
-                id = id,
-                dock = dock,
-                spot = spot,
-                flow = flow,
-                slots = decodeTools(obj.arr("tools"), region, flow, id, placed, dropped),
-            )
+            val slots = decodeTools(tools, region, flow, id, placed, dropped)
+            val surface = Surface(id, flow, slots, anchor).movedTo(corner)
+            // A format 1 file's shapes were as long as the dock they hung on,
+            // and the renderer of the day drew only as far as the last control.
+            // Nothing hides a tail now, so they are cut back to what is on them
+            // — see Surface.trimmedToContents.
+            out += if (format >= 2) surface else surface.trimmedToContents() ?: continue
         }
         return DockLayout.of(out)
     }
 
+    /**
+     * `"anchor": "left"`, or nothing at all.
+     *
+     * An anchor is a starting position for a surface that has never been on a
+     * screen — see [Anchor]. A file that says where its corner is in cells needs
+     * none, and most files written by the app say exactly that.
+     *
+     * Format 1 called it `"dock"` and meant something stronger by it, and a
+     * `"dock": "float"` carried its position as a **fraction** in `"at"`. Both
+     * are read, and both come back as an anchor that is resolved once.
+     */
+    private fun decodeAnchor(
+        obj: JsonValue.Obj,
+        id: String,
+        dropped: MutableList<String>,
+    ): Anchor? {
+        // Two fractions: a corner, which a side cannot name. Clean's L wants
+        // the bottom-left and "left" would give it the middle of the edge.
+        obj.arr("anchor")?.let { return spotOf(it) }
+
+        val named = obj.str("anchor") ?: obj.str("dock") ?: return null
+        Anchor.edge(named)?.let { return it }
+        // Format 1 called a surface that was on no edge a float, and carried its
+        // position as a fraction in "at".
+        if (named == LEGACY_FLOAT) return obj.arr("at")?.let { spotOf(it) }
+        dropped += "toolbar \"$id\": there is no side called \"$named\""
+        return null
+    }
+
+    /** Two numbers between nought and one, or null. */
+    private fun spotOf(at: List<JsonValue>): Anchor.Spot? {
+        val x = (at.getOrNull(0) as? JsonValue.Num)?.value?.toFloat() ?: return null
+        val y = (at.getOrNull(1) as? JsonValue.Num)?.value?.toFloat() ?: return null
+        if (!x.isFinite() || !y.isFinite()) return null
+        return Anchor.Spot(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+    }
+
+    /**
+     * Where the surface's corner goes, in cells.
+     *
+     * `"at": [4, 0]` and nothing else. An anchored surface is put at the origin
+     * and moved by [DockLayout.settled] the first time it is on a screen, so the
+     * two are never both honoured.
+     *
+     * A format 1 file's `"at"` was a fraction of the screen and belonged to a
+     * float; that is read as an anchor instead, above, and never as cells.
+     */
+    private fun decodeCorner(obj: JsonValue.Obj, format: Int, anchor: Anchor?): Cell {
+        if (anchor != null || format < 2) return Cell(0, 0)
+        val at = obj.arr("at") ?: return Cell(0, 0)
+        val x = (at.getOrNull(0) as? JsonValue.Num)?.value?.toInt() ?: 0
+        val y = (at.getOrNull(1) as? JsonValue.Num)?.value?.toInt() ?: 0
+        return Cell(x.coerceIn(0, CellRegion.MAX_COORD), y.coerceIn(0, CellRegion.MAX_COORD))
+    }
+
+    /**
+     * The shape, from the surface's own corner.
+     *
+     * With no `"rects"` at all it is a plain bar long enough for what is on it,
+     * running the way the anchor suggests — which is what makes
+     * `{"anchor": "left", "tools": ["pen", "pencil", "eraser"]}` a whole
+     * toolbar. That is the same promise `at` being optional makes, one level up.
+     */
     private fun decodeRegion(
         items: List<JsonValue>?,
-        dock: Dock,
+        tools: List<JsonValue>?,
+        anchor: Anchor?,
         id: String,
         dropped: MutableList<String>,
     ): CellRegion {
-        if (items == null) return dock.defaultRegion()
+        if (items == null) return defaultStrip(tools, anchor)
         if (items.size > MAX_RECTS) {
             dropped += "toolbar \"$id\": only the first $MAX_RECTS rectangles were read"
         }
@@ -345,10 +422,25 @@ object WorkspaceJson {
             rects += rect
         }
         if (rects.isEmpty()) {
-            dropped += "toolbar \"$id\" has no shape — it was given the plain bar for its edge"
-            return dock.defaultRegion()
+            dropped += "toolbar \"$id\" has no shape — it was given a plain bar"
+            return defaultStrip(tools, anchor)
         }
         return CellRegion.of(rects)
+    }
+
+    /** A bar long enough for [tools], upright against a side or flat otherwise. */
+    private fun defaultStrip(tools: List<JsonValue>?, anchor: Anchor?): CellRegion {
+        var length = 0
+        for (value in tools.orEmpty().take(MAX_ITEMS)) {
+            val name = (value as? JsonValue.Str)?.value
+                ?: ((value as? JsonValue.Obj)?.str("id"))
+                ?: continue
+            val item = ToolItem.byId(name) ?: continue
+            length += if (item.hangs) 1 else item.cellsWide
+        }
+        val side = (anchor as? Anchor.Edge)?.side
+        val axis = if (side == Side.LEFT || side == Side.RIGHT) Axis.VERTICAL else Axis.HORIZONTAL
+        return CellRegion.strip(length.coerceAtLeast(1), axis)
     }
 
     /**
@@ -402,7 +494,7 @@ object WorkspaceJson {
             // Only a panel may carry a size, and only because the user can
             // resize one. See the file KDoc.
             val size = obj.arr("size")
-                ?.takeIf { item.kind == ToolKind.PANEL }
+                ?.takeIf { item.hangs }
                 ?.mapNotNull { (it as? JsonValue.Num)?.value?.toInt() }
                 ?.takeIf { it.size == 2 && it.all { n -> n in 1..CellRegion.MAX_SPAN } }
 
@@ -474,12 +566,15 @@ object WorkspaceJson {
     /** Three places, the same as `DockCodec`. A thousandth of a screen is exact enough. */
     private fun round(v: Float): String = ((v * 1000f).toInt() / 1000f).toString()
 
+    /** What format 1 called a surface that was not on an edge. */
+    private const val LEGACY_FLOAT = "float"
+
     private val ROOT_KEYS = setOf(
         "artiest_workspace", "catalogue", "id", "name", "description", "author",
         "revision", "filter", "defaults", "surfaces",
     )
     private val FILTER_KEYS = setOf("groups", "hide", "show")
     private val DEFAULTS_KEYS = setOf("brush", "shelf", "stabilisation")
-    private val SURFACE_KEYS = setOf("id", "dock", "at", "rects", "flow", "tools")
+    private val SURFACE_KEYS = setOf("id", "anchor", "dock", "at", "rects", "flow", "tools")
     private val TOOL_KEYS = setOf("id", "at", "size")
 }

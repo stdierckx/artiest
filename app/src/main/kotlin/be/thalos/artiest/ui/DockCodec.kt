@@ -3,22 +3,24 @@ package be.thalos.artiest.ui
 /**
  * Every surface as one line of text, for `SharedPreferences`.
  *
- * Format: `v4|<surface>|<surface>|…`, where an edge is
+ * Format: `v5|<surface>|<surface>|…`, where a surface is
  *
  * ```
- * left:R0,0,1,12:down_right:0,0=pen,0,1=pencil,0,4=colour
- * ```
- *
- * and a floating surface carries its position and its own name:
- *
- * ```
- * f1@0.32,0.45:R0,0,8,1:right_down:0,0=colour_panel@6x11
+ * s1:R0,4,1,7:down_right:0,4=pen,0,5=pencil,0,8=colour
  * ```
  *
  * Four fields: the id, the **shape** as an `R` and a list of `x,y,w,h`
  * rectangles joined by `+`, the fill order, and what is on it as `x,y=id`.
- * A surface with nothing on it may be written or left out; both decode the same
- * way, because [DockLayout.of] fills in the four edges and drops nothing else.
+ *
+ * **Every number is a screen cell.** That is the whole of what changed in `v5`
+ * and it is why the version moved: in `v4` a region started at `0,0` and a dock
+ * decided where that corner went, so the same four numbers meant different
+ * places on different edges. Now `R0,4,1,7` is column nought, rows four to ten,
+ * and nothing else has an opinion. See `docs/ui-grid-plan.md`.
+ *
+ * A surface that has never been on a screen carries an anchor after its id —
+ * `s1^left`, or `s1^@0.32,0.45` — and loses it the moment it has been on one.
+ * See [Anchor].
  *
  * **Sizes are still not written**, with the one exception they always had. How
  * many cells a control takes follows from the item and from the shape it is
@@ -39,42 +41,54 @@ package be.thalos.artiest.ui
  *
  * So an unreadable string decodes to null and the caller falls back to a
  * default, and a readable string with unusable *entries* drops those entries and
- * keeps the rest. Unknown item ids, unknown dock names, unreadable positions and
- * rectangles off the grid are all the same kind of event and all drop one thing
- * rather than the line.
+ * keeps the rest. Unknown item ids, unreadable positions and rectangles off the
+ * grid are all the same kind of event and all drop one thing rather than the
+ * line.
  *
- * ## The three older formats
+ * ## The four older formats
  *
- * `v1` was one bar, before there were docks, and it sat across the top; it
- * decodes to the top edge at the slot numbers it was saved with. `v2` had five
- * fixed docks, one of them a single floating bar; its `float` segment becomes
- * the first floating surface. `v3` was the same five-plus-N model with a slot
- * count instead of a shape, and it becomes a strip of that length along the
- * dock's own axis — which is exactly the shape it always drew.
+ * All of them had docks, and all of them decode to an **anchored** surface: the
+ * edge is remembered, resolved to real cells the first time the layout meets a
+ * screen, and then forgotten. That is the only thing in the app that knows a
+ * dock ever existed.
+ *
+ * They also come back **trimmed**. A bar was as long as its dock said and the
+ * renderer drew only as far as the last control on it; nothing hides a tail any
+ * more, so a twelve-cell left edge holding five buttons would migrate as seven
+ * cells of grey. See [Surface.trimmedToContents].
+ *
+ * `v1` was one bar, before there were docks, and it sat across the top. `v2`
+ * had five fixed docks, one of them a single floating bar. `v3` was the same
+ * five-plus-N model with a slot count instead of a shape. `v4` had shapes, and
+ * an edge or a fraction to hang each one on.
  *
  * Reading any of them as a failure would have been the easy thing and would
  * have silently emptied the toolbar of everyone who had already arranged one.
  *
  * ## Which way this format travels
  *
- * Forwards only. A `v4` string handed to a build that only knows `v3` is
+ * Forwards only. A `v5` string handed to a build that only knows `v4` is
  * unreadable and falls back to the default, which is why this is a
  * *preference* and never a sharing format. Sharing a workspace is a JSON file
  * that names its own version and drops what it cannot do — see
- * `docs/ui-expansion-plan.md`, U7.
+ * `docs/workspace-format.md`.
  */
 object DockCodec {
 
-    private const val VERSION = "v4"
+    private const val VERSION = "v5"
 
     /** Where a pre-docking bar lands. See the class KDoc. */
-    internal val V1_DOCK = Dock.TOP
+    internal val V1_SIDE = Side.TOP
 
     fun encode(layout: DockLayout): String = buildString {
         append(VERSION)
         for (surface in layout.surfaces) {
             append('|').append(surface.id)
-            surface.spot?.let { append('@').append(fmt(it.x)).append(',').append(fmt(it.y)) }
+            when (val a = surface.anchor) {
+                is Anchor.Edge -> append('^').append(a.side.id)
+                is Anchor.Spot -> append("^@").append(fmt(a.x)).append(',').append(fmt(a.y))
+                null -> Unit
+            }
             append(':').append(encodeRegion(surface.region))
             append(':').append(surface.flow.id)
             append(':').append(
@@ -82,7 +96,7 @@ object DockCodec {
                     // A panel carries the size the user gave it; nothing else
                     // does, because nothing else can be resized and a number
                     // that is always derivable is a number that can go stale.
-                    if (p.item.kind == ToolKind.PANEL) {
+                    if (p.hangs) {
                         "${p.x},${p.y}=${p.item.id}@${p.w}x${p.h}"
                     } else {
                         "${p.x},${p.y}=${p.item.id}"
@@ -98,18 +112,19 @@ object DockCodec {
         if (text.startsWith("v1|")) return decodeV1(text)
         if (text.startsWith("v2|")) return decodeV2(text)
         if (text.startsWith("v3|")) return decodeV3(text)
+        if (text.startsWith("v4|")) return decodeV4(text)
 
         val parts = text.split('|')
-        if (parts.size < 2 || parts[0] != VERSION) return null
+        if (parts[0] != VERSION) return null
+        // A layout with no surfaces is a choice somebody made — every
+        // toolbar rubbed out — and not a corrupt string. Reading it as a
+        // failure would hand the starter layout back to the one user who
+        // had most deliberately got rid of it.
+        if (parts.size == 1) return DockLayout.EMPTY
 
         val surfaces = ArrayList<Surface>()
-        val seen = HashSet<String>()
         for (segment in parts.drop(1)) {
-            val surface = parseSurface(segment) ?: continue
-            // Later segments naming the same surface lose, so a duplicate is
-            // the same non-event as a duplicated cell: first one wins.
-            if (!seen.add(surface.id)) continue
-            surfaces += surface
+            surfaces += parseSurface(segment) ?: continue
         }
         // Not one readable surface in a string that claimed to be a layout:
         // that is a corrupt preference and not an empty toolbar, and the
@@ -120,27 +135,44 @@ object DockCodec {
     }
 
     // -----------------------------------------------------------------------
-    // v4
+    // v5
     // -----------------------------------------------------------------------
 
-    /** `left:R0,0,1,12:down_right:…`, or null when it is not a surface. */
+    /** `s1:R0,4,1,7:down_right:…`, or null when it is not a surface. */
     private fun parseSurface(segment: String): Surface? {
         val head = segment.substringBefore(':', missingDelimiterValue = "")
         if (head.isEmpty()) return null
         val rest = segment.substring(head.length + 1).split(':')
         if (rest.size != 3) return null
 
-        val anchor = parseAnchor(head) ?: return null
+        val caret = head.indexOf('^')
+        val id = (if (caret < 0) head else head.substring(0, caret)).trim()
+        if (id.isEmpty()) return null
+        // An anchor that will not parse drops the anchor, not the surface: the
+        // surface is what somebody built, and losing a hint is cheaper than
+        // losing the contents.
+        val anchor = if (caret < 0) null else parseAnchor(head.substring(caret + 1))
+
         val region = parseRegion(rest[0]) ?: return null
         if (region.isEmpty) return null
-        val flow = FlowOrder.byId(rest[1]) ?: anchor.dock.defaultFlow()
+        val flow = FlowOrder.byId(rest[1]) ?: FlowOrder.along(region.stripAxis ?: Axis.HORIZONTAL)
         return Surface(
-            id = anchor.id,
-            dock = anchor.dock,
-            spot = anchor.spot,
+            id = id,
             flow = flow,
             slots = SurfaceLayout.of(region, parseCells(rest[2], region)),
+            anchor = anchor,
         )
+    }
+
+    /** `left`, or `@0.32,0.45`. Null when it is neither. */
+    private fun parseAnchor(text: String): Anchor? {
+        if (!text.startsWith('@')) return Anchor.edge(text)
+        val comma = text.indexOf(',')
+        if (comma <= 1) return null
+        val x = text.substring(1, comma).toFloatOrNull() ?: return null
+        val y = text.substring(comma + 1).toFloatOrNull() ?: return null
+        if (!x.isFinite() || !y.isFinite()) return null
+        return Anchor.Spot(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
     }
 
     /** `R0,0,1,12+0,11,5,1`, or null. */
@@ -224,44 +256,6 @@ object DockCodec {
         return out
     }
 
-    // -----------------------------------------------------------------------
-    // shared
-    // -----------------------------------------------------------------------
-
-    private class Anchor(val id: String, val dock: Dock, val spot: BarSpot?)
-
-    /** `left`, or `f1@0.3,0.4`. Null when it names no dock. */
-    private fun parseAnchor(head: String): Anchor? {
-        val at = head.indexOf('@')
-        val id = if (at < 0) head else head.substring(0, at)
-        val dock = Dock.byId(id) ?: if (id.startsWith(DockLayout.FLOAT_PREFIX)) {
-            Dock.FLOATING
-        } else {
-            return null
-        }
-        if (dock.isEdge && id != dock.id) return null
-        // An edge writes no position and a floating surface always does. A
-        // position on an edge is ignored rather than refused; a floating one
-        // without a position is placed by DockLayout.of, which is the same
-        // fallback a surface that was never given one gets.
-        // A position that will not parse drops the position, not the surface:
-        // the surface is what somebody built, and losing two numbers is cheaper
-        // than losing the contents.
-        val spot = if (at < 0 || dock.isEdge) {
-            null
-        } else {
-            val comma = head.indexOf(',', at)
-            if (comma <= at) {
-                null
-            } else {
-                val x = head.substring(at + 1, comma).toFloatOrNull()
-                val y = head.substring(comma + 1).toFloatOrNull()
-                if (x == null || y == null) null else BarSpot.of(x, y)
-            }
-        }
-        return Anchor(id, dock, spot)
-    }
-
     /** `6x11`, or null. */
     private fun sizeOf(text: String): Pair<Int, Int>? {
         val x = text.indexOf('x')
@@ -273,8 +267,75 @@ object DockCodec {
     }
 
     // -----------------------------------------------------------------------
-    // the older formats
+    // the older formats: every one of them had docks, and every one of them
+    // comes back anchored
     // -----------------------------------------------------------------------
+
+    /** A dock id, as the four older formats wrote it. */
+    private class Dock(val id: String, val side: Side?, val axis: Axis, val slots: Int)
+
+    private val DOCKS = listOf(
+        Dock("left", Side.LEFT, Axis.VERTICAL, 12),
+        Dock("top", Side.TOP, Axis.HORIZONTAL, 24),
+        Dock("right", Side.RIGHT, Axis.VERTICAL, 12),
+        Dock("bottom", Side.BOTTOM, Axis.HORIZONTAL, 24),
+        Dock(LEGACY_FLOAT, null, Axis.HORIZONTAL, 8),
+    )
+
+    private fun dockById(id: String): Dock? = DOCKS.firstOrNull { it.id == id }
+
+    /** `left`, or `f1@0.3,0.4`. Null when it names no dock. */
+    private class Legacy(val id: String, val dock: Dock, val anchor: Anchor?)
+
+    private fun parseLegacyHead(head: String): Legacy? {
+        val at = head.indexOf('@')
+        val id = if (at < 0) head else head.substring(0, at)
+        val named = dockById(id)
+        val dock = named
+            ?: (if (id.startsWith(FLOAT_PREFIX)) dockById(LEGACY_FLOAT) else null)
+            ?: return null
+        if (dock.side != null && id != dock.id) return null
+        // A floating surface's fraction becomes an Anchor.Spot; an edge becomes
+        // an Anchor.Edge, and a position written on one is ignored rather than
+        // refused.
+        val side = dock.side
+        if (side != null) return Legacy(id, dock, Anchor.Edge(side))
+        val spot = if (at < 0) null else {
+            val comma = head.indexOf(',', at)
+            if (comma <= at) null else {
+                val x = head.substring(at + 1, comma).toFloatOrNull()
+                val y = head.substring(comma + 1).toFloatOrNull()
+                if (x == null || y == null || !x.isFinite() || !y.isFinite()) null
+                else Anchor.Spot(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+            }
+        }
+        return Legacy(id, dock, spot ?: Anchor.Spot(DEFAULT_X, DEFAULT_Y))
+    }
+
+    /** The shaped format. Regions were relative to the surface's own corner. */
+    private fun decodeV4(text: String): DockLayout? {
+        val parts = text.split('|')
+        if (parts.size < 2) return null
+        val surfaces = ArrayList<Surface>()
+        for (segment in parts.drop(1)) {
+            val head = segment.substringBefore(':', missingDelimiterValue = "")
+            if (head.isEmpty()) continue
+            val rest = segment.substring(head.length + 1).split(':')
+            if (rest.size != 3) continue
+            val legacy = parseLegacyHead(head) ?: continue
+            val region = parseRegion(rest[0]) ?: continue
+            if (region.isEmpty) continue
+            val flow = FlowOrder.byId(rest[1]) ?: FlowOrder.along(legacy.dock.axis)
+            surfaces += Surface(
+                id = legacy.id,
+                flow = flow,
+                slots = SurfaceLayout.of(region, parseCells(rest[2], region)),
+                anchor = legacy.anchor,
+            ).trimmedToContents() ?: continue
+        }
+        if (surfaces.isEmpty()) return null
+        return DockLayout.of(surfaces)
+    }
 
     /**
      * The slot-count format. A bar of `n` slots is a strip `n` cells long along
@@ -284,7 +345,6 @@ object DockCodec {
         val parts = text.split('|')
         if (parts.size < 2) return null
         val surfaces = ArrayList<Surface>()
-        val seen = HashSet<String>()
         for (segment in parts.drop(1)) {
             val head = segment.substringBefore(':', missingDelimiterValue = "")
             if (head.isEmpty()) continue
@@ -292,27 +352,20 @@ object DockCodec {
             if (rest.size != 2) continue
             val slots = rest[0].toIntOrNull() ?: continue
             if (slots < 1 || slots > MAX_SLOTS) continue
-            val anchor = parseAnchor(head) ?: continue
-            if (!seen.add(anchor.id)) continue
-            val region = CellRegion.strip(slots, anchor.dock.axis)
+            val legacy = parseLegacyHead(head) ?: continue
+            val region = CellRegion.strip(slots, legacy.dock.axis)
             surfaces += Surface(
-                id = anchor.id,
-                dock = anchor.dock,
-                spot = anchor.spot,
-                flow = anchor.dock.defaultFlow(),
-                slots = SurfaceLayout.of(region, parseSlots(rest[1], region, anchor.dock.axis)),
-            )
+                id = legacy.id,
+                flow = FlowOrder.along(legacy.dock.axis),
+                slots = SurfaceLayout.of(region, parseSlots(rest[1], region, legacy.dock.axis)),
+                anchor = legacy.anchor,
+            ).trimmedToContents() ?: continue
         }
         if (surfaces.isEmpty()) return null
         return DockLayout.of(surfaces)
     }
 
-    /**
-     * The five-dock format. Its `float` segment becomes the first floating
-     * surface, positioned by the caller — `DockStore` still holds the two
-     * preference keys that used to carry that position, precisely so this can
-     * use them.
-     */
+    /** The five-dock format. Its `float` segment becomes the first drawn surface. */
     private fun decodeV2(text: String): DockLayout? {
         val parts = text.split('|')
         if (parts.size < 2) return null
@@ -320,41 +373,40 @@ object DockCodec {
         for (segment in parts.drop(1)) {
             val fields = segment.split(':')
             if (fields.size != 3) continue
-            val dock = Dock.byId(fields[0]) ?: continue
+            val dock = dockById(fields[0]) ?: continue
             val slots = fields[1].toIntOrNull() ?: continue
             if (slots < 1 || slots > MAX_SLOTS) continue
-            val id = if (dock.isEdge) dock.id else "${DockLayout.FLOAT_PREFIX}1"
+            val id = if (dock.side != null) dock.id else "${FLOAT_PREFIX}1"
             if (surfaces.any { it.id == id }) continue
             val region = CellRegion.strip(slots, dock.axis)
             val layout = SurfaceLayout.of(region, parseSlots(fields[2], region, dock.axis))
             // An empty floating bar in a v2 string is the dock that always
             // existed rather than one somebody made, so it is not carried over.
-            if (!dock.isEdge && layout.isEmpty) continue
-            surfaces += Surface(id, dock, null, dock.defaultFlow(), layout)
+            if (dock.side == null && layout.isEmpty) continue
+            surfaces += Surface(
+                id = id,
+                flow = FlowOrder.along(dock.axis),
+                slots = layout,
+                anchor = dock.side?.let { Anchor.Edge(it) } ?: Anchor.Spot(DEFAULT_X, DEFAULT_Y),
+            ).trimmedToContents() ?: continue
         }
         if (surfaces.isEmpty()) return null
         return DockLayout.of(surfaces)
     }
 
-    /**
-     * A single pre-docking bar, put where that bar used to be.
-     *
-     * Widened to the top edge's own default length rather than kept at the saved
-     * one, for the reason `DockStore` widens and never shortens: the saved bar
-     * may be exactly full, and a migration that preserves *full* is one after
-     * which no new control can ever appear.
-     */
+    /** A single pre-docking bar, put where that bar used to be. */
     private fun decodeV1(text: String): DockLayout? {
         val parts = text.split('|')
         if (parts.size != 3 || parts[0] != "v1") return null
         val slots = parts[1].toIntOrNull() ?: return null
         if (slots < 1 || slots > MAX_SLOTS) return null
-        val dock = V1_DOCK
-        val region = CellRegion.strip(maxOf(slots, dock.defaultSlots), dock.axis)
+        val dock = dockById(V1_SIDE.id) ?: return null
+        val region = CellRegion.strip(slots, dock.axis)
         val layout = SurfaceLayout.of(region, parseSlots(parts[2], region, dock.axis))
-        return DockLayout.of(
-            listOf(Surface(dock.id, dock, null, dock.defaultFlow(), layout))
-        )
+        val bar = Surface(dock.id, FlowOrder.along(dock.axis), layout, Anchor.Edge(V1_SIDE))
+            .trimmedToContents()
+            ?: return null
+        return DockLayout.of(listOf(bar))
     }
 
     /** `0=pen,4=size` — the one-dimensional entry list every old format used. */
@@ -382,6 +434,16 @@ object DockCodec {
 
     /** Three places. A surface positioned to a thousandth of a screen is exact enough. */
     private fun fmt(v: Float): String = ((v * 1000f).toInt() / 1000f).toString()
+
+    /** What a floating surface was called in every format that had one. */
+    private const val FLOAT_PREFIX = "f"
+
+    /** What every older format called the dock that was not on an edge. */
+    private const val LEGACY_FLOAT = "float"
+
+    /** Clear of the left tools and above the bottom sliders. */
+    private const val DEFAULT_X = 0.32f
+    private const val DEFAULT_Y = 0.42f
 
     /**
      * Ceilings on what comes off disk, because these numbers size allocations.

@@ -1,6 +1,6 @@
 {
-  "artiest_workspace": 1,
-  "catalogue": 1,
+  "artiest_workspace": 2,
+  "catalogue": 2,
   "id": "everything",
   "name": "Everything",
   "description": "Every control there is, arranged the way it starts.",
@@ -10,49 +10,55 @@
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {
-      "id": "left",
-      "dock": "left",
-      "rects": [[0, 0, 1, 12]],
+      "id": "s1",
+      "anchor": "left",
+      "rects": [[0, 0, 1, 7]],
       "flow": "down_right",
       "tools": [
         {"id": "pen", "at": [0, 0]},
         {"id": "pencil", "at": [0, 1]},
-        {"id": "eraser", "at": [0, 2]},
-        {"id": "colour", "at": [0, 4]}
+        {"id": "marker", "at": [0, 2]},
+        {"id": "eraser", "at": [0, 3]},
+        {"id": "colour", "at": [0, 5]},
+        {"id": "marquee", "at": [0, 6]}
       ]
     },
     {
-      "id": "top",
-      "dock": "top",
-      "rects": [[0, 0, 24, 1]],
+      "id": "s2",
+      "anchor": "top",
+      "rects": [[0, 0, 6, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "undo", "at": [0, 0]},
         {"id": "redo", "at": [1, 0]},
-        {"id": "export", "at": [3, 0]},
-        {"id": "stats", "at": [4, 0]}
+        {"id": "import", "at": [3, 0]},
+        {"id": "export", "at": [4, 0]},
+        {"id": "stats", "at": [5, 0]}
       ]
     },
     {
-      "id": "right",
-      "dock": "right",
-      "rects": [[0, 0, 1, 12]],
+      "id": "s3",
+      "anchor": "right",
+      "rects": [[0, 0, 1, 5]],
       "flow": "down_right",
       "tools": [
         {"id": "zoom_in", "at": [0, 0]},
         {"id": "zoom_out", "at": [0, 1]},
-        {"id": "fit", "at": [0, 2]}
+        {"id": "fit", "at": [0, 2]},
+        {"id": "layers", "at": [0, 3]},
+        {"id": "selection", "at": [0, 4]}
       ]
     },
     {
-      "id": "bottom",
-      "dock": "bottom",
-      "rects": [[0, 0, 24, 1]],
+      "id": "s4",
+      "anchor": "bottom",
+      "rects": [[0, 0, 16, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "size", "at": [0, 0]},
         {"id": "smoothing", "at": [4, 0]},
-        {"id": "grain", "at": [8, 0]}
+        {"id": "grain", "at": [8, 0]},
+        {"id": "eraser_size", "at": [12, 0]}
       ]
     }
   ]

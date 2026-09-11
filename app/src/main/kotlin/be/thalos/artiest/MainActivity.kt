@@ -76,7 +76,7 @@ import be.thalos.artiest.canvas.setDocToView
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
-import be.thalos.artiest.ui.BarSpot
+import be.thalos.artiest.ui.Cell
 import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.SelectionButton
 import be.thalos.artiest.ui.SelectionPanelCard
@@ -1013,14 +1013,14 @@ private fun CanvasScreen(
                     ink = ink,
                     recentInks = recentInks,
                     onInkCommitted = { recentInks = store.pushRecentColour(it) },
-                    onFixate = { panel, spot ->
-                        // Three ordinary operations and no new idea: make a
-                        // floating bar, put the panel on it, and turn on
-                        // arrange mode so the next thing the hand does is move
-                        // it somewhere better. Every panel is fixated through
+                    onFixate = { panel, at ->
+                        // Three ordinary operations and no new idea: draw a
+                        // surface, put the panel on it, and turn on arrange
+                        // mode so the next thing the hand does is move it
+                        // somewhere better. Every panel is fixated through
                         // this one path, which is what makes adding the next
                         // one a catalogue entry rather than a feature.
-                        val (next, _) = docks.addFloating(panel, spot)
+                        val (next, _) = docks.addSurface(panel, at)
                         keep(next)
                         arranging = true
                     },
@@ -1185,7 +1185,7 @@ private fun ToolSlot(
     onInk: (Int) -> Unit,
     recentInks: List<Int>,
     onInkCommitted: (Int) -> Unit,
-    onFixate: (ToolItem, BarSpot) -> Unit,
+    onFixate: (ToolItem, Cell) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
     eraserSize: Float,

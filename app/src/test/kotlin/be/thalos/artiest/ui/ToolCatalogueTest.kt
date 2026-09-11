@@ -27,12 +27,11 @@ class ToolCatalogueTest {
     }
 
     @Test
-    fun `every group, kind, flow, shape and dock is named`() {
+    fun `every group, kind, flow and anchor is named`() {
         for (g in ToolGroup.entries) assertTrue("\"${g.name.lowercase()}\"" in json, g.name)
         for (k in ToolKind.entries) assertTrue("\"${k.name.lowercase()}\"" in json, k.name)
         for (f in FlowOrder.entries) assertTrue("\"${f.id}\"" in json, f.id)
-        for (s in SurfaceShape.entries) assertTrue("\"${s.name.lowercase()}\"" in json, s.name)
-        for (d in Dock.entries) assertTrue("\"${d.id}\"" in json, d.id)
+        for (a in Side.entries) assertTrue("\"${a.id}\"" in json, a.id)
     }
 
     @Test

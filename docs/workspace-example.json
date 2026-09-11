@@ -1,6 +1,6 @@
 {
-  "artiest_workspace": 1,
-  "catalogue": 1,
+  "artiest_workspace": 2,
+  "catalogue": 2,
   "id": "example",
   "name": "Example",
   "description": "Every field in the reference, in one file.",
@@ -10,8 +10,8 @@
   "defaults": {"brush": null, "shelf": [], "stabilisation": 0.35},
   "surfaces": [
     {
-      "id": "left",
-      "dock": "left",
+      "id": "s1",
+      "at": [0, 6],
       "rects": [[0, 0, 1, 9], [0, 9, 5, 1]],
       "flow": "down_right",
       "tools": [
@@ -23,9 +23,9 @@
       ]
     },
     {
-      "id": "top",
-      "dock": "top",
-      "rects": [[0, 0, 24, 1]],
+      "id": "s2",
+      "at": [2, 0],
+      "rects": [[0, 0, 2, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "undo", "at": [0, 0]},
@@ -33,24 +33,9 @@
       ]
     },
     {
-      "id": "right",
-      "dock": "right",
-      "rects": [[0, 0, 1, 12]],
-      "flow": "down_right",
-      "tools": []
-    },
-    {
-      "id": "bottom",
-      "dock": "bottom",
-      "rects": [[0, 0, 24, 1]],
-      "flow": "right_down",
-      "tools": []
-    },
-    {
-      "id": "f1",
-      "dock": "float",
-      "at": [0.72, 0.18],
-      "rects": [[0, 0, 8, 1]],
+      "id": "s3",
+      "at": [18, 3],
+      "rects": [[0, 0, 3, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "layers_panel", "at": [0, 0], "size": [8, 9]}

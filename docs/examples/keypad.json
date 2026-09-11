@@ -1,16 +1,16 @@
 {
-  "artiest_workspace": 1,
+  "artiest_workspace": 2,
   "id": "keypad",
   "name": "Keypad",
-  "description": "A block of buttons that floats where you put it, and one thin strip for the brushes.",
+  "description": "A block of buttons out in the middle of the paper, and one thin strip for the brushes.",
   "author": "artiest examples",
   "revision": 1,
   "filter": {"groups": null, "hide": [], "show": []},
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {
-      "id": "left",
-      "dock": "left",
+      "id": "s1",
+      "anchor": "left",
       "rects": [[0, 0, 1, 6]],
       "flow": "down_right",
       "tools": [
@@ -22,9 +22,8 @@
       ]
     },
     {
-      "id": "f1",
-      "dock": "float",
-      "at": [0.86, 0.22],
+      "id": "s2",
+      "at": [18, 2],
       "rects": [[0, 0, 3, 3]],
       "flow": "right_down",
       "tools": [

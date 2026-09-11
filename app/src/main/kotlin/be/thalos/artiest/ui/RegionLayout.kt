@@ -42,7 +42,7 @@ object RegionLayout {
         companion object {
             /** What the catalogue says about [item]. */
             fun of(item: ToolItem): Footprint =
-                Footprint(item, item.cellsWide, item.cellsTall, item.turnsWithDock)
+                Footprint(item, item.cellsWide, item.cellsTall, item.turns)
         }
     }
 
@@ -82,8 +82,8 @@ object RegionLayout {
         val overflow = ArrayList<ToolItem>()
         val taken = HashSet<Cell>()
 
-        fun free(x: Int, y: Int, w: Int, h: Int): Boolean {
-            if (!region.accepts(x, y, w, h)) return false
+        fun free(x: Int, y: Int, w: Int, h: Int, hangs: Boolean): Boolean {
+            if (!region.accepts(x, y, w, h, hangs)) return false
             for (cy in y until y + h) for (cx in x until x + w) if (Cell(cx, cy) in taken) return false
             return true
         }
@@ -94,14 +94,14 @@ object RegionLayout {
         }
 
         for (p in fixed) {
-            if (free(p.x, p.y, p.w, p.h)) occupy(p) else overflow += p.item
+            if (free(p.x, p.y, p.w, p.h, p.hangs)) occupy(p) else overflow += p.item
         }
 
         for (f in flowing) {
             var landed: CellPlacement? = null
             for (cell in region.cells(flow)) {
                 for ((w, h) in orientations(f, region, cell)) {
-                    if (!free(cell.x, cell.y, w, h)) continue
+                    if (!free(cell.x, cell.y, w, h, f.item.hangs)) continue
                     landed = CellPlacement(f.item, cell.x, cell.y, w, h)
                     break
                 }
@@ -129,23 +129,26 @@ object RegionLayout {
      * The sizes to try at [cell], best first.
      *
      * A turning item lies along the shape: upright in an L's arm, flat along
-     * its foot. In a shape it is tried the other way round as well, because a
-     * four-cell slider in a two-cell foot would otherwise overflow when
-     * standing up would have fitted it, and a slider the wrong way round is
-     * still a slider.
+     * its foot, and [CellRegion.localAxis] is what knows which is which. The
+     * other way round is tried second, because a four-cell slider in a
+     * two-cell foot would otherwise overflow when standing up would have fitted
+     * it, and a slider the wrong way round is still a slider.
      *
-     * **On a bar there is no second chance**, and that is not a detail. A bar
-     * grows across itself to hold a deep item — see [CellRegion.accepts] — so a
-     * four-cell slider offered the upright orientation on a horizontal bar
-     * would be accepted as one slot wide and four cells *deep*, hanging off the
-     * bar like a panel. That is not a slider, it is a mistake with a rendering,
-     * and it is what the old engine refused by never having the option.
+     * There used to be a special case here for a plain bar, which had to be
+     * offered exactly one orientation: a bar grew across itself to hold a deep
+     * item, so an upright slider on a horizontal bar was accepted as one cell
+     * wide and four cells *deep*, hanging off it like a panel. Nothing grows
+     * any more — see [CellRegion.accepts] — so the upright option simply does
+     * not fit, and the case that needed guarding guards itself.
      */
     private fun orientations(f: Footprint, region: CellRegion, cell: Cell): List<Pair<Int, Int>> {
         if (!f.turns || f.w == f.h) return listOf(f.w to f.h)
         val flat = f.w to f.h
         val upright = f.h to f.w
-        region.stripAxis?.let { return listOf(if (it == Axis.VERTICAL) upright else flat) }
-        return if (region.localAxis(cell) == Axis.VERTICAL) listOf(upright, flat) else listOf(flat, upright)
+        return if (region.localAxis(cell) == Axis.VERTICAL) {
+            listOf(upright, flat)
+        } else {
+            listOf(flat, upright)
+        }
     }
 }

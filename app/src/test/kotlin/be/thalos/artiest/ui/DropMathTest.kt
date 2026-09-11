@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The drop arithmetic, and the identity it inverts.
@@ -20,63 +21,49 @@ import kotlin.test.assertNull
 class DropMathTest {
 
     private val slot = 44f
+    private val gridW = 28
+    private val gridH = 18
 
     private fun at(x: Float, y: Float) = Offset(x, y)
 
+    private fun cellAt(p: Offset) = DropMath.cellAt(p, slot, gridW, gridH)
+
     @Test
     fun `a cell and its origin are inverses of each other`() {
-        val region = CellRegion.l(arm = 6, foot = 5)
-        for (cell in region.cells(FlowOrder.RIGHT_THEN_DOWN)) {
-            val origin = DropMath.originOf(region, cell, slot)
-            assertEquals(cell, DropMath.cellAt(region, origin, slot), "top-left of $cell")
+        for (cell in CellRegion.l(arm = 6, foot = 5).cells(FlowOrder.RIGHT_THEN_DOWN)) {
+            val origin = DropMath.originOf(cell, slot)
+            assertEquals(cell, cellAt(origin), "top-left of $cell")
             assertEquals(
                 cell,
-                DropMath.cellAt(region, origin + at(slot - 1f, slot - 1f), slot),
+                cellAt(origin + at(slot - 1f, slot - 1f)),
                 "bottom-right of $cell",
             )
         }
     }
 
     @Test
-    fun `a bar reads only the distance along it`() {
-        val bottom = CellRegion.strip(24, Axis.HORIZONTAL)
-        assertEquals(Cell(0, 0), DropMath.cellAt(bottom, at(0f, 0f), slot))
-        assertEquals(Cell(3, 0), DropMath.cellAt(bottom, at(3.5f * slot, 0f), slot))
-        // Halfway down a bar carrying a colour wheel is still that bar's fourth
-        // cell. A bar is a line; across it there is nothing to say.
-        assertEquals(Cell(3, 0), DropMath.cellAt(bottom, at(3.5f * slot, 7f * slot), slot))
-
-        val left = CellRegion.strip(12, Axis.VERTICAL)
-        assertEquals(Cell(0, 5), DropMath.cellAt(left, at(0f, 5.2f * slot), slot))
-        assertEquals(Cell(0, 5), DropMath.cellAt(left, at(4f * slot, 5.2f * slot), slot))
+    fun `every cell of the grid is the cell it is drawn at`() {
+        // The whole of what the grid bought: there is one frame, and a cell is
+        // where the renderer puts it. There used to be a per-surface run origin
+        // reported by the layout pass, and every term in it was a chance to be
+        // a few cells out.
+        for (y in 0 until gridH) {
+            for (x in 0 until gridW) {
+                val cell = Cell(x, y)
+                assertEquals(cell, cellAt(DropMath.originOf(cell, slot) + at(1f, 1f)))
+            }
+        }
     }
 
     @Test
-    fun `a point past the end of a bar is the caller's problem, not this one's`() {
-        // Clamped at nought and not at the far end: past the end, `firstFit` has
-        // a better answer than the nearest cell does, and it is the one the drop
-        // path already falls back to.
-        val bar = CellRegion.strip(6, Axis.HORIZONTAL)
-        assertEquals(Cell(0, 0), DropMath.cellAt(bar, at(-90f, 0f), slot))
-        assertEquals(Cell(9, 0), DropMath.cellAt(bar, at(9.5f * slot, 0f), slot))
-    }
-
-    @Test
-    fun `the notch of an L is not on the L`() {
-        val l = CellRegion.l(arm = 6, foot = 5)
-        // Cell 3,2 is in the bounding box and in the hollow of the shape.
-        assertNull(DropMath.cellAt(l, at(3.5f * slot, 2.5f * slot), slot))
-        assertEquals(Cell(0, 2), DropMath.cellAt(l, at(0.5f * slot, 2.5f * slot), slot))
-        assertEquals(Cell(3, 5), DropMath.cellAt(l, at(3.5f * slot, 5.5f * slot), slot))
-    }
-
-    @Test
-    fun `a shape reads from its own bounds, not from the origin of the grid`() {
-        // A shape whose top-left cell is 4,3. Its first cell is at pixel nought.
-        val away = CellRegion.of(CellRect(4, 3, 2, 2))
-        assertEquals(Offset.Zero, DropMath.originOf(away, Cell(4, 3), slot))
-        assertEquals(Cell(4, 3), DropMath.cellAt(away, at(1f, 1f), slot))
-        assertEquals(Cell(5, 4), DropMath.cellAt(away, at(1.5f * slot, 1.5f * slot), slot))
+    fun `a point off the grid is not the nearest cell`() {
+        // Null rather than clamped: a point past the last column is not in the
+        // last column, and answering with it invents a target nobody can see.
+        assertNull(cellAt(at(-1f, 0f)))
+        assertNull(cellAt(at(0f, -1f)))
+        assertNull(cellAt(at(gridW * slot, 0f)))
+        assertNull(cellAt(at(0f, gridH * slot)))
+        assertEquals(Cell(gridW - 1, gridH - 1), cellAt(at(gridW * slot - 1f, gridH * slot - 1f)))
     }
 
     @Test
@@ -87,8 +74,35 @@ class DropMathTest {
 
     @Test
     fun `nothing is answered before the first layout pass`() {
-        val bar = CellRegion.strip(6, Axis.HORIZONTAL)
-        assertNull(DropMath.cellAt(bar, Offset.Zero, 0f), "no density yet")
-        assertNull(DropMath.cellAt(CellRegion.EMPTY, Offset.Zero, slot))
+        assertNull(DropMath.cellAt(Offset.Zero, 0f, gridW, gridH), "no density yet")
+    }
+
+    // ---- fixate -------------------------------------------------------------
+
+    @Test
+    fun `a fixated panel lands clear of the toolbar its button is on`() {
+        val w = (gridW * slot).toInt()
+        val h = (gridH * slot).toInt()
+        // A button on the left of the screen: the card goes to its right.
+        val fromLeft = DropMath.cellBeside(at(slot, 6 * slot), w, h, slot)
+        assertTrue(fromLeft.x > 1, "it landed back on the toolbar at $fromLeft")
+
+        // A button on the right: towards the middle, because further right is
+        // off the screen and clamps back onto the bar it came from.
+        val fromRight = DropMath.cellBeside(at(w - slot, 6 * slot), w, h, slot)
+        assertTrue(fromRight.x < gridW - 2, "it landed back on the toolbar at $fromRight")
+    }
+
+    @Test
+    fun `a fixated panel is never off the grid`() {
+        val w = (gridW * slot).toInt()
+        val h = (gridH * slot).toInt()
+        for (x in 0..gridW) {
+            for (y in 0..gridH) {
+                val cell = DropMath.cellBeside(at(x * slot, y * slot), w, h, slot)
+                assertTrue(cell.x in 0 until gridW && cell.y in 0 until gridH, "$cell")
+            }
+        }
+        assertEquals(Cell(0, 0), DropMath.cellBeside(Offset.Zero, 0, 0, slot), "no window yet")
     }
 }

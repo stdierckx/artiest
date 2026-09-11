@@ -57,9 +57,16 @@ class SurfaceLayout private constructor(
      * replacing, and the chooser would grey out the entire catalogue on exactly
      * the gesture that exists to change an item.
      */
-    fun fits(w: Int, h: Int, x: Int, y: Int, ignoring: Cell? = null): Boolean {
+    fun fits(
+        w: Int,
+        h: Int,
+        x: Int,
+        y: Int,
+        ignoring: Cell? = null,
+        hangs: Boolean = false,
+    ): Boolean {
         if (w < 1 || h < 1) return false
-        if (!region.accepts(x, y, w, h)) return false
+        if (!region.accepts(x, y, w, h, hangs)) return false
         val ignored = ignoring?.let { covering(it) }
         return placements.none { p ->
             p !== ignored && p.x < x + w && x < p.right && p.y < y + h && y < p.bottom
@@ -67,7 +74,7 @@ class SurfaceLayout private constructor(
     }
 
     fun fits(p: CellPlacement, ignoring: Cell? = null): Boolean =
-        fits(p.w, p.h, p.x, p.y, ignoring)
+        fits(p.w, p.h, p.x, p.y, ignoring, p.hangs)
 
     /**
      * Put [placement] in, replacing whatever was covering its top-left cell.
@@ -95,8 +102,8 @@ class SurfaceLayout private constructor(
     fun remove(cell: Cell): SurfaceLayout = remove(cell.x, cell.y)
 
     /** The first cell in [flow] order a [w] by [h] footprint would fit in, or null. */
-    fun firstFit(w: Int, h: Int, flow: FlowOrder): Cell? =
-        region.cells(flow).firstOrNull { fits(w, h, it.x, it.y) }
+    fun firstFit(w: Int, h: Int, flow: FlowOrder, hangs: Boolean = false): Cell? =
+        region.cells(flow).firstOrNull { fits(w, h, it.x, it.y, hangs = hangs) }
 
     /** A surface of the same shape with nothing on it. */
     fun cleared(): SurfaceLayout = SurfaceLayout(region, emptyList())
@@ -132,7 +139,7 @@ class SurfaceLayout private constructor(
         fun of(region: CellRegion, placements: List<CellPlacement>): SurfaceLayout {
             val kept = ArrayList<CellPlacement>(placements.size)
             for (p in placements) {
-                if (!region.accepts(p.x, p.y, p.w, p.h)) continue
+                if (!region.accepts(p.x, p.y, p.w, p.h, p.hangs)) continue
                 if (kept.any { it.overlaps(p) }) continue
                 kept += p
             }

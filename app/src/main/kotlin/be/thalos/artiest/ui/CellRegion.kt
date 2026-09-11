@@ -186,30 +186,25 @@ class CellRegion private constructor(
     /**
      * May a [w] by [h] footprint stand with its corner at [x], [y]?
      *
-     * **A bar grows and a shape does not**, and that one sentence is the whole
-     * difference between them.
+     * **A shape is a shape somebody drew, so the footprint has to be inside
+     * it** — corner to corner, every cell. Growing a surface to hold something
+     * dropped on it would redraw their toolbar for them, and there is no longer
+     * any such thing as a bar that is allowed to grow: since
+     * `docs/ui-grid-plan.md` a bar is a shape one cell thick and nothing else.
      *
-     * A bar is one-dimensional: it has a length and it is as thick as the
-     * thickest thing on it. Dropping a colour wheel eleven cells deep onto the
-     * left edge makes the left edge eleven cells deep, which is what every
-     * program with a docked palette does and what this app already did before
-     * shapes existed. So on a strip only the length is checked, and the depth
-     * is the item's business.
+     * [hangs] is the one exception and it belongs to panels. A colour wheel is
+     * six cells by eleven and a toolbar that had to be six by eleven to hold one
+     * would be a wall; `ToolKind.PANEL` has always said the card *overhangs* the
+     * thing it is anchored to. So a hanging item needs the cell it is anchored
+     * to and nothing else, and what it overhangs is the drawing.
      *
-     * A shape is two-dimensional and it is a shape somebody *drew*. Growing it
-     * to hold a panel would redraw their toolbar for them, so the footprint has
-     * to be inside it, corner to corner, and if it is not then it does not go
-     * there. That is [fits].
+     * The overhang is still reserved against everything else on the same
+     * surface — that is [SurfaceLayout]'s rectangle test, not this one — so a
+     * panel and a button cannot be drawn on top of each other.
      */
-    fun accepts(x: Int, y: Int, w: Int, h: Int): Boolean {
+    fun accepts(x: Int, y: Int, w: Int, h: Int, hangs: Boolean = false): Boolean {
         if (w < 1 || h < 1 || isEmpty) return false
-        val axis = stripAxis ?: return fits(x, y, w, h)
-        val b = bounds
-        return if (axis == Axis.HORIZONTAL) {
-            y == b.y && x >= b.x && x + w <= b.right
-        } else {
-            x == b.x && y >= b.y && y + h <= b.bottom
-        }
+        return if (hangs) contains(x, y) else fits(x, y, w, h)
     }
 
     /** Every cell, in [flow] order. The order a packer tries them in. */
@@ -270,7 +265,7 @@ class CellRegion private constructor(
      * Which way a control at [x], [y] should lie.
      *
      * The longest free run through the cell wins, and horizontal wins a tie.
-     * This is what [ToolItem.turnsWithDock] has always meant and has never had
+     * This is what [ToolItem.turns] has always meant and has never had
      * a way to say: in an L it is vertical up the arm and horizontal along the
      * foot, so one slider stands and the next lies flat, which is what a person
      * would have done by hand.
