@@ -451,18 +451,23 @@ class DockLayoutTest {
     @Test
     fun `the starter layout survives its own normalisation`() {
         val starter = DockLayout.STARTER
-        assertEquals(21, starter.all().size)
+        assertEquals(22, starter.all().size)
         assertEquals(starter.all().size, starter.all().map { it.item }.toSet().size)
         assertTrue(starter.hasAnchors, "it has not met a screen yet")
 
         // The grouping is the feature, so it is pinned rather than left to
         // whatever the constant happens to say next month.
+        // The left column is what the pen is: the three favourites, the shelf
+        // that holds the rest, the eraser, and the ink. The marquee left it for
+        // the right bar when the shelf arrived -- it belongs beside the
+        // selection panel, which is the panel that says what it does.
         for (item in listOf(
-            ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.ERASER,
-            ToolItem.COLOUR, ToolItem.MARQUEE,
+            ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.BRUSHES,
+            ToolItem.ERASER, ToolItem.COLOUR,
         )) {
             assertEquals("s1", starter.on(item), item.id)
         }
+        assertEquals("s3", starter.on(ToolItem.MARQUEE))
         for (item in listOf(
             ToolItem.UNDO, ToolItem.REDO, ToolItem.IMPORT, ToolItem.EXPORT, ToolItem.STATS,
         )) {
@@ -484,9 +489,12 @@ class DockLayoutTest {
     @Test
     fun `the starter layout leaves a gap between groups`() {
         // The separators are load-bearing: they are the only thing saying that
-        // the eraser and the colour are two ideas rather than a run of four.
+        // the ink tools and the colour are two ideas rather than one run. The
+        // left one moved down a cell when the brush shelf joined the tools
+        // above it; what is pinned here is that there is still a gap, not which
+        // cell it happens to fall in.
         val starter = DockLayout.STARTER
-        assertNull(starter.surface("s1")!!.slots.covering(Cell(0, 4)))
+        assertNull(starter.surface("s1")!!.slots.covering(Cell(0, 5)))
         assertNull(starter.surface("s2")!!.slots.covering(Cell(2, 0)))
     }
 

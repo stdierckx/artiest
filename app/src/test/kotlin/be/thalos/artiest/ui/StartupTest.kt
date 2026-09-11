@@ -145,7 +145,7 @@ class StartupTest {
         val workspaces = WorkspaceStore(context)
         workspaces.switchTo(ShippedWorkspaces.SKETCHER)
         assertEquals(
-            listOf("pen", "pencil", "marker", "eraser", "colour"),
+            listOf("pen", "pencil", "marker", "brushes", "eraser", "colour"),
             workspaces.current().layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
 
@@ -200,7 +200,7 @@ class StartupTest {
         val sketcher = assertNotNull(workspaces.current())
         assertEquals("sketcher", sketcher.id)
         assertEquals(
-            listOf("pen", "pencil", "marker", "eraser", "colour"),
+            listOf("pen", "pencil", "marker", "brushes", "eraser", "colour"),
             sketcher.layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
     }

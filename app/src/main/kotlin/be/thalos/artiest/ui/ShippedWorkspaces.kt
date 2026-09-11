@@ -74,6 +74,10 @@ object ShippedWorkspaces {
                     ToolItem.PEN to Cell(0, 0),
                     ToolItem.PENCIL to Cell(0, 1),
                     ToolItem.MARKER to Cell(0, 2),
+                    // The shelf, in the free cell under the three favourites.
+                    // A sketcher tunes a pencil more than anybody, so this is
+                    // the workspace that most wants somewhere to keep one.
+                    ToolItem.BRUSHES to Cell(0, 3),
                     ToolItem.ERASER to Cell(0, 4),
                     ToolItem.COLOUR to Cell(0, 6),
                 ),

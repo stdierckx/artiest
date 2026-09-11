@@ -1,9 +1,11 @@
 # Wb1 — The brush shelf
 
-> Authored 2026-09-10, as the first item of `docs/brushes-plan.md`. Nothing here
-> is built yet. It is the item that has to land before importing brushes means
-> anything, and it is worth having on its own: a user who tunes a pencil they
-> like currently has nowhere to put it.
+> Authored 2026-09-10, as the first item of `docs/brushes-plan.md`. **Built on
+> 2026-09-11** — Wb1a to Wb1f, all six. It is the item that has to land before
+> importing brushes means anything, and it is worth having on its own: a user
+> who tunes a pencil they like had nowhere to put it.
+>
+> What the tablet showed, and what changed on the way, is at the end.
 
 ## The problem, stated exactly
 
@@ -180,3 +182,68 @@ is what will make it necessary.
 - **Saved brushes are files now**, so the app acquires a small directory it must
   survive being corrupted in. `BrushCodec`'s "decoding never throws" rule already
   covers the file contents; the directory listing needs the same discipline.
+
+
+## What was built, and what the tablet showed
+
+All six items, on 2026-09-11, in three commits.
+
+| # | Where it lives |
+|---|---|
+| **Wb1a** | `engine/…/brush/BrushLibrary.kt` — `BrushEntry`, `BrushOrigin`, `BrushLibrary`, `adoptBrush`, `copyWiringOnto`; `BrushPreset.id` |
+| **Wb1b** | `BrushCodec.encodeFile` / `decodeFile`, `VERSION = 2` |
+| **Wb1c** | `ui/BrushStore.kt` on ids, `ui/BrushFiles.kt` as the directory |
+| **Wb1d** | `ink/BrushSwatch.kt` and `ink/BrushSwatches.kt` |
+| **Wb1e** | `ui/BrushShelf.kt`, `ToolItem.BRUSHES` and `BRUSH_SHELF` |
+| **Wb1f** | Save / rename / delete / revert, and the modified dot |
+
+Tests: `BrushLibraryTest` (10), `BrushFileTest` (7), `BrushFilesTest` (9),
+`BrushSwatchTest` (7, Robolectric NATIVE).
+
+### Verified on the DTH-A116
+
+Every line of Wb1f's "done when", with the app installed and the shelf opened
+from the left column:
+
+- **The three read apart at a glance.** The pen is a thin crisp S, the pencil a
+  soft grainy one that tapers, the marker a broad flat band. The swatch is the
+  real stroke, so it also told the truth about something a glyph could not: the
+  pencil on that tablet has its size slider at 15, and the saved copy's swatch
+  is visibly thinner than the built-in pencil's beside it.
+- **A tuned pencil saved, survived a force-stop, and was deleted.**
+  `files/brushes/sketch-2b.brush` is 746 bytes of version 2 text with `id`,
+  `label` and `origin` lines. Renaming it to "2B soft" changed the label and
+  **kept the id**, which is what `BrushEntry.id` is for.
+- **Deleting the brush in the hand fell back to the pen**, the toolbar's Pen
+  button lit, the sliders moved to the pen's numbers and `brush.preset` in the
+  preferences read `pen`. Nothing arranged that at the call site; it is
+  `BrushLibrary.entryFor` answering for an id that no longer exists.
+- **The modified dot** appeared on the selected row as soon as the brush
+  differed from the entry, and went out when it was saved. Revert is greyed
+  until there is something to revert.
+
+### What changed from the plan
+
+- **The row is a name over a full-width swatch**, not a swatch beside a name.
+  The plan's "swatch, name and a small origin mark" in a 264 dp row left the
+  picture about 130 dp wide, and the picture is the part that does the work.
+  Origin is shown by *having a menu* rather than by a mark: a built-in row has
+  no `⋮` because there is nothing you may do to it.
+- **The panel is six by eleven as planned**, and the popup holds three rows
+  before it scrolls rather than five. A row here is 88 dp of name plus picture.
+- **Rename joined save, revert and delete.** It is one call into the same file
+  writer and `NameDialog` already existed; a shelf where a typo is permanent
+  would have been a strange place to stop.
+- **The starter layout was rearranged to make room.** `DockStore` marks an item
+  as offered whether or not it found a cell, and every bar of the shipped
+  starter was full — so the shelf would have been invisible on a fresh install.
+  The left column now runs pen, pencil, marker, **brushes**, eraser, gap,
+  colour, and the marquee moved to the right bar beside the selection panel,
+  where it always belonged. Growing the column to eight cells instead was tried
+  and reverted: at 12x8 cells it reaches the bottom bar, and
+  `the starter layout does not overlap itself on any screen worth having`
+  caught it.
+- **The stop condition about thirty rows is not yet answered.** Three rows is
+  not a scroll test. It is the same test as before — fill the shelf with thirty
+  copies of the pencil and scroll it with the pen in hand — and it is now one
+  loop to run, because a brush is a file.
