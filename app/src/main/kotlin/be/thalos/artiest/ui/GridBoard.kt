@@ -84,9 +84,13 @@ internal fun GridBoard(
         modifier
             .fillMaxSize()
             .drawBehind {
-                // Faint, but not invisible: it is the ruler everything is
-                // measured against, and it is what says arrange mode is on.
-                val line = scheme.onSurface.copy(alpha = if (painting) 0.16f else 0.07f)
+                // The primary, and not `onSurface`. The grid is drawn over the
+                // *drawing*, which is white paper today and could be anything
+                // tomorrow; `onSurface` is picked to read against the chrome,
+                // which in a dark theme means it is nearly white and invisible
+                // on a blank page. A saturated hue reads on both, and it also
+                // says out loud that a mode is on.
+                val line = scheme.primary.copy(alpha = if (painting) 0.34f else 0.20f)
                 for (i in 0..gridW) {
                     drawLine(line, Offset(i * slotPx, 0f), Offset(i * slotPx, gridH * slotPx))
                 }

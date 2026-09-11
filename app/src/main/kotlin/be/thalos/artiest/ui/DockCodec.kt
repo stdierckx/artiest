@@ -52,6 +52,11 @@ package be.thalos.artiest.ui
  * screen, and then forgotten. That is the only thing in the app that knows a
  * dock ever existed.
  *
+ * They also come back **trimmed**. A bar was as long as its dock said and the
+ * renderer drew only as far as the last control on it; nothing hides a tail any
+ * more, so a twelve-cell left edge holding five buttons would migrate as seven
+ * cells of grey. See [Surface.trimmedToContents].
+ *
  * `v1` was one bar, before there were docks, and it sat across the top. `v2`
  * had five fixed docks, one of them a single floating bar. `v3` was the same
  * five-plus-N model with a slot count instead of a shape. `v4` had shapes, and
@@ -326,7 +331,7 @@ object DockCodec {
                 flow = flow,
                 slots = SurfaceLayout.of(region, parseCells(rest[2], region)),
                 anchor = legacy.anchor,
-            )
+            ).trimmedToContents() ?: continue
         }
         if (surfaces.isEmpty()) return null
         return DockLayout.of(surfaces)
@@ -354,7 +359,7 @@ object DockCodec {
                 flow = FlowOrder.along(legacy.dock.axis),
                 slots = SurfaceLayout.of(region, parseSlots(rest[1], region, legacy.dock.axis)),
                 anchor = legacy.anchor,
-            )
+            ).trimmedToContents() ?: continue
         }
         if (surfaces.isEmpty()) return null
         return DockLayout.of(surfaces)
@@ -383,7 +388,7 @@ object DockCodec {
                 flow = FlowOrder.along(dock.axis),
                 slots = layout,
                 anchor = dock.side?.let { Anchor.Edge(it) } ?: Anchor.Spot(DEFAULT_X, DEFAULT_Y),
-            )
+            ).trimmedToContents() ?: continue
         }
         if (surfaces.isEmpty()) return null
         return DockLayout.of(surfaces)
@@ -398,11 +403,10 @@ object DockCodec {
         val dock = dockById(V1_SIDE.id) ?: return null
         val region = CellRegion.strip(slots, dock.axis)
         val layout = SurfaceLayout.of(region, parseSlots(parts[2], region, dock.axis))
-        return DockLayout.of(
-            listOf(
-                Surface(dock.id, FlowOrder.along(dock.axis), layout, Anchor.Edge(V1_SIDE))
-            )
-        )
+        val bar = Surface(dock.id, FlowOrder.along(dock.axis), layout, Anchor.Edge(V1_SIDE))
+            .trimmedToContents()
+            ?: return null
+        return DockLayout.of(listOf(bar))
     }
 
     /** `0=pen,4=size` — the one-dimensional entry list every old format used. */

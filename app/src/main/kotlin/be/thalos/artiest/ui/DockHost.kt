@@ -193,15 +193,15 @@ fun DockHost(
                 ChromeCounters.cells = shown.all().size
             }
 
-            if (arranging) {
-                GridBoard(
-                    layout = shown,
-                    onLayout = onLayout,
-                    gridW = gridW,
-                    gridH = gridH,
-                    painting = shaping,
-                    subtract = subtract,
-                )
+            // Under the toolbars while they are the targets, and over them while
+            // the pen is. It is the same board either way: a surface's own cells
+            // answer a pointer in arrange mode — a chip is dragged, an empty one
+            // is tapped — so a board underneath them could never rub one out,
+            // and a board over them while nothing is being painted would swallow
+            // both gestures. It is still below the arrange bar and the Done
+            // button, which have to stay reachable from inside the mode.
+            if (arranging && !shaping) {
+                GridBoard(shown, onLayout, gridW, gridH, painting = false, subtract = false)
             }
 
             for (surface in shown.surfaces) {
@@ -219,6 +219,10 @@ fun DockHost(
                     gridH = gridH,
                     slotContent = slotContent,
                 )
+            }
+
+            if (arranging && shaping) {
+                GridBoard(shown, onLayout, gridW, gridH, painting = true, subtract = subtract)
             }
 
             // Above the bottom of the screen and centred, which is where the

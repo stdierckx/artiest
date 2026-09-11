@@ -153,6 +153,30 @@ class Surface(
         return with(slots = SurfaceLayout.of(region, moved))
     }
 
+    /**
+     * A plain bar cut back to its last item, or null when there is no last item.
+     *
+     * **Only for a layout that came from a build with docks.** A bar was as long
+     * as its dock said, whether or not anything stood on the end of it, and the
+     * renderer hid the tail by drawing only as far as the last control. Nothing
+     * hides a tail any more — a shape is what you drew, all of it — so a
+     * twelve-cell bar holding five buttons migrates as seven cells of grey
+     * hanging off the bottom. The user never drew those cells; a default did.
+     *
+     * A shape is left alone, because a shape *was* drawn. An empty bar answers
+     * null, because an empty bar was a dock rather than a toolbar.
+     */
+    fun trimmedToContents(): Surface? {
+        if (slots.isEmpty) return null
+        val axis = region.stripAxis ?: return this
+        val b = region.bounds
+        val end = slots.placements.maxOf {
+            if (axis == Axis.HORIZONTAL) it.right - b.x else it.bottom - b.y
+        }
+        if (end >= region.lengthAlong(axis)) return this
+        return reshaped(CellRegion.strip(end, axis).translated(b.x, b.y))
+    }
+
     /** The same surface with its top-left corner at [cell]. */
     fun movedTo(cell: Cell): Surface = translated(cell.x - origin.x, cell.y - origin.y)
 

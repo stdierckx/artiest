@@ -323,7 +323,11 @@ class WorkspaceJsonTest {
     fun `a rectangle that is not a rectangle is dropped and the shape keeps the rest`() {
         val decoded = WorkspaceJson.decode(corpus("negative-rects.json"))
         val ws = assertNotNull(decoded.workspace)
-        assertEquals(CellRegion.strip(6, Axis.VERTICAL), ws.layout.surface("left")?.region)
+        assertEquals(
+            CellRegion.strip(1, Axis.VERTICAL),
+            ws.layout.surface("left")?.region,
+            "the usable rectangle survived, cut back to the one control on it",
+        )
         assertEquals(3, decoded.dropped.count { "off the screen" in it })
     }
 

@@ -180,13 +180,15 @@ class DockCodecTest {
         )
         val left = assertNotNull(layout.surface("left"))
         assertEquals(Anchor.Edge(Side.LEFT), left.anchor)
-        assertEquals(CellRegion.strip(12, Axis.VERTICAL), left.region)
+        // Two cells, not twelve: a bar was as long as its dock said, and the
+        // renderer of the day drew only as far as the last control on it.
+        assertEquals(CellRegion.strip(2, Axis.VERTICAL), left.region)
         assertEquals(Cell(0, 1), layout.locate(ToolItem.PENCIL)?.cell)
 
-        // And the whole way through: on a twenty-by-ten screen the left edge is
-        // column nought, and the bar is as tall as it always was.
+        // And the whole way through: on a twenty-by-ten screen it is against the
+        // left, centred down it, and it is cells from then on.
         val settled = layout.settled(20, 10)
-        assertEquals(Cell(0, 0), assertNotNull(settled.surface("left")).origin)
+        assertEquals(Cell(0, 4), assertNotNull(settled.surface("left")).origin)
     }
 
     @Test
@@ -203,8 +205,8 @@ class DockCodecTest {
     fun `a slot count becomes the strip it always drew`() {
         val layout = assertNotNull(DockCodec.decode("v3|left:12:0=pen,1=pencil|top:24:0=undo"))
 
-        assertEquals(CellRegion.strip(12, Axis.VERTICAL), layout.surface("left")?.region)
-        assertEquals(CellRegion.strip(24, Axis.HORIZONTAL), layout.surface("top")?.region)
+        assertEquals(CellRegion.strip(2, Axis.VERTICAL), layout.surface("left")?.region)
+        assertEquals(CellRegion.strip(1, Axis.HORIZONTAL), layout.surface("top")?.region)
         assertEquals(Anchor.Edge(Side.TOP), layout.surface("top")?.anchor)
         assertEquals(Cell(0, 0), layout.locate(ToolItem.PEN)?.cell)
         assertEquals(Cell(0, 1), layout.locate(ToolItem.PENCIL)?.cell, "down the left edge")
@@ -256,7 +258,7 @@ class DockCodecTest {
         assertEquals("left", layout.locate(ToolItem.PEN)?.surface?.id)
         assertEquals(3, layout.surfaces.size)
         assertEquals(ToolItem.STATS, layout.surface("f1")?.at(Cell(0, 0))?.item)
-        assertEquals(CellRegion.strip(8, Axis.HORIZONTAL), layout.surface("f1")?.region)
+        assertEquals(CellRegion.strip(1, Axis.HORIZONTAL), layout.surface("f1")?.region)
     }
 
     @Test
@@ -291,10 +293,11 @@ class DockCodecTest {
     }
 
     @Test
-    fun `a surface nobody mentioned simply is not there`() {
-        val layout = assertNotNull(DockCodec.decode("v3|left:12:0=pen"))
+    fun `a surface nobody mentioned simply is not there, and nor is an empty one`() {
+        val layout = assertNotNull(DockCodec.decode("v3|left:12:0=pen|right:12:"))
         assertEquals(1, layout.surfaces.size)
         assertNull(layout.surface("bottom"))
+        assertNull(layout.surface("right"), "an empty dock was a dock, not a toolbar")
     }
 
     @Test

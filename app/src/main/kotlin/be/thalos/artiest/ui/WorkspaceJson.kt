@@ -322,7 +322,12 @@ object WorkspaceJson {
                 ?: FlowOrder.along(region.stripAxis ?: Axis.HORIZONTAL)
 
             val slots = decodeTools(tools, region, flow, id, placed, dropped)
-            out += Surface(id, flow, slots, anchor).movedTo(corner)
+            val surface = Surface(id, flow, slots, anchor).movedTo(corner)
+            // A format 1 file's shapes were as long as the dock they hung on,
+            // and the renderer of the day drew only as far as the last control.
+            // Nothing hides a tail now, so they are cut back to what is on them
+            // — see Surface.trimmedToContents.
+            out += if (format >= 2) surface else surface.trimmedToContents() ?: continue
         }
         return DockLayout.of(out)
     }

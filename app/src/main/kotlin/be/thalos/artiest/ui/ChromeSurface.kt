@@ -11,18 +11,12 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -52,10 +46,9 @@ import kotlin.math.roundToInt
  * `CornerPathEffect` rounds every corner of that outline — the outer ones and,
  * which is the point, the inner one at the notch. An L then has the same radius
  * everywhere, which is what makes it look drawn rather than assembled.
- * `getFillPath` bakes the effect into a real path, so the same outline both
- * fills the ground and clips the contents; without it the ground would be
- * rounded and the clip would not, and a panel overhanging the corner would give
- * the game away. Both APIs are API 19 and `minSdk` is 29.
+ * `getFillPath` bakes the effect into a real path, so what is drawn is a real
+ * path rather than a stroke with an effect on it. Both APIs are API 19 and
+ * `minSdk` is 29.
  *
  * ## The pen must still reach the paper
  *
@@ -104,7 +97,20 @@ internal fun ChromeSurface(
     // Rebuilt when the shape changes and never per frame. A shape changes while
     // the user is editing it, which is the one moment nobody is drawing.
     val ground = remember(region, slotPx, radiusPx) { groundPath(region, slotPx, radiusPx) }
-    val shape = remember(ground) { PathShape(ground) }
+
+    // How far the contents reach, which is not the shape when a panel is on it.
+    // A panel is anchored to one cell and hangs off — see CellRegion.accepts —
+    // so the node has to be big enough to draw the card, while the ground stays
+    // the shape somebody drew.
+    val extent = remember(surface) {
+        var right = bounds.right
+        var bottom = bounds.bottom
+        for (p in surface.slots.placements) {
+            right = maxOf(right, p.right)
+            bottom = maxOf(bottom, p.bottom)
+        }
+        CellRect(bounds.x, bounds.y, right - bounds.x, bottom - bounds.y)
+    }
 
     val scheme = MaterialTheme.colorScheme
     val hovered = drag.hover == surface.id
@@ -148,7 +154,12 @@ internal fun ChromeSurface(
             }
         },
         modifier = modifier
-            .clip(shape)
+            // **No clip.** There was one, and it cut the overhang off every
+            // panel: a colour wheel eleven cells deep anchored to a one-cell
+            // bar was drawn as one cell of colour wheel. A panel hangs off on
+            // purpose now, so the shape is what is *painted* and never what is
+            // allowed through. Nothing is lost by it — `SlotSurface` rounds its
+            // own corners, and a clip never affected hit testing either way.
             // The rule the user asked for, for shapes: the toolbar is
             // translucent and the buttons on it are not. `SlotSurface` is the
             // opaque half; these two lines are the other one, and they share
@@ -159,8 +170,8 @@ internal fun ChromeSurface(
                 drawPath(outline, edge, style = Stroke(width = strokePx))
             },
     ) { measurables, _ ->
-        val width = (bounds.w * slotPx).roundToInt()
-        val height = (bounds.h * slotPx).roundToInt()
+        val width = (extent.w * slotPx).roundToInt()
+        val height = (extent.h * slotPx).roundToInt()
         layout(width, height) {
             measurables.forEachIndexed { i, measurable ->
                 val (cell, placed) = cells[i]
@@ -274,17 +285,6 @@ internal fun groundPath(
         .apply { pathEffect = CornerPathEffect(radiusPx) }
         .getFillPath(union, rounded)
     return rounded
-}
-
-/** A [Shape] that is one fixed path. Its size is the shape's, so nothing scales. */
-private class PathShape(path: android.graphics.Path) : Shape {
-    private val outline = Outline.Generic(path.asComposePath())
-
-    override fun createOutline(
-        size: Size,
-        layoutDirection: LayoutDirection,
-        density: Density,
-    ): Outline = outline
 }
 
 /** How round every corner of a shaped surface is. The same radius `barSkin` uses. */
