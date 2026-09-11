@@ -37,16 +37,43 @@ thing.
 That is an L: one cell wide and nine tall, with a foot five cells across the
 bottom. Thirteen cells in all.
 
-Where the shape sits on the glass is the **anchor's** business, not the file's.
-An edge toolbar is pinned to its edge; you choose the shape and the edge chooses
-where it goes. A floating one carries `at`.
+Where the shape sits is one more pair of numbers, and there are no docks: the
+whole screen is one grid, and a toolbar is at the cells it was drawn on.
+
+```
+"at": [0, 11]
+```
+
+That puts the corner of the shape in column nought, row eleven. Everything
+inside the toolbar — the rectangles, and each tool's own `at` — is measured
+from that corner, so moving a toolbar changes two numbers rather than all of
+them.
+
+### Or let it choose: `anchor`
+
+A toolbar that has never been on a screen does not know how many rows there are,
+and counting them is exactly what you do not want to do by hand. So instead of
+`at` a toolbar may say where it would *like* to be:
+
+```
+"anchor": "bottom"        a side, centred along it
+"anchor": [0.0, 1.0]      a fraction of the screen in each axis: here, the bottom-left corner
+```
+
+The first time the workspace is opened the anchor is turned into real cells and
+**thrown away**. From then on the toolbar is at those cells like any other, and
+saving writes `at`. An anchor is a starting position, not an attachment: nothing
+keeps a toolbar against an edge afterwards, and dragging it away is a drag.
+
+Use a side when you mean *down the left*; use two fractions when you mean a
+corner, which a side cannot say — `"left"` is the middle of the left-hand edge.
 
 ## The file
 
 ```json
 {
-  "artiest_workspace": 1,
-  "catalogue": 1,
+  "artiest_workspace": 2,
+  "catalogue": 2,
   "id": "example",
   "name": "Example",
   "description": "Every field in the reference, in one file.",
@@ -56,8 +83,8 @@ where it goes. A floating one carries `at`.
   "defaults": {"brush": null, "shelf": [], "stabilisation": 0.35},
   "surfaces": [
     {
-      "id": "left",
-      "dock": "left",
+      "id": "s1",
+      "at": [0, 6],
       "rects": [[0, 0, 1, 9], [0, 9, 5, 1]],
       "flow": "down_right",
       "tools": [
@@ -69,10 +96,9 @@ where it goes. A floating one carries `at`.
       ]
     },
     {
-      "id": "f1",
-      "dock": "float",
-      "at": [0.72, 0.18],
-      "rects": [[0, 0, 8, 1]],
+      "id": "s3",
+      "at": [18, 3],
+      "rects": [[0, 0, 3, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "layers_panel", "at": [0, 0], "size": [8, 9]}
@@ -82,7 +108,10 @@ where it goes. A floating one carries `at`.
 }
 ```
 
-`docs/workspace-example.json` is that file in full, with all four edges.
+`docs/workspace-example.json` is that file in full. `docs/examples/` has four
+more, each showing one thing: an L in a corner, a bracket round the bottom, a
+block out in the middle of the paper, and one written without a single position
+in it.
 
 ## The fields
 
@@ -129,23 +158,35 @@ list is short and honest rather than long and aspirational.
 
 | Field | Type | What it is |
 |---|---|---|
-| `dock` | string | `left`, `top`, `right`, `bottom` or `float`. |
-| `id` | string | `left`…`bottom` for the edges; `f1`, `f2`, … for floating ones. |
-| `at` | `[x, y]` | Floating only. Fractions of the window, nought to one. Ignored on an edge. |
-| `rects` | array | The shape, `[x, y, w, h]` per rectangle, up to 32. Absent means the plain bar for that edge. |
-| `flow` | string | Which way it fills. See `flows` in the catalogue. Absent means along the edge. |
+| `id` | string | What this toolbar is called. Any short name; the app writes `s1`, `s2`, … |
+| `at` | `[x, y]` | Where its corner is, in cells. Absent means the origin. |
+| `anchor` | string or `[x, y]` | Instead of `at`: a side by name, or two fractions. Resolved once, then gone. |
+| `rects` | array | The shape, `[x, y, w, h]` per rectangle from the toolbar's own corner, up to 32. |
+| `flow` | string | Which way it fills. See `flows` in the catalogue. Absent means along the shape. |
 | `tools` | array | What is on it, up to 256. |
 
-The four edges always exist. One that is not in the file is an empty bar, not a
-missing one.
+**`rects` is optional too.** A toolbar without one gets a plain bar long enough
+for what is on it, standing upright if it is anchored to the left or the right
+and lying flat otherwise.
+So this is a whole toolbar:
+
+```json
+{"anchor": "left", "tools": ["pen", "pencil", "eraser", "colour"]}
+```
+
+There are no compulsory toolbars. A workspace with one has one, and a workspace
+with none opens on a blank screen — which is a thing somebody may well want.
 
 ### `surfaces[].tools[]`
 
 | Field | Type | What it is |
 |---|---|---|
 | `id` | string | A tool id from the catalogue. |
-| `at` | `[x, y]` | **Optional.** The cell its top-left corner sits in. |
+| `at` | `[x, y]` | **Optional.** The cell its corner sits in, from the toolbar's corner. |
 | `size` | `[w, h]` | **Panels only.** A size the user chose. Ignored on anything else. |
+
+An entry may also be the bare id as a string — `"pen"` is the same as
+`{"id": "pen"}`.
 
 **`at` is optional, and that is the field that makes this format writable by
 hand.** A tool that says where it is goes exactly there. A tool that says
@@ -156,6 +197,10 @@ complete, valid toolbar:
 ```json
 "tools": [{"id": "pen"}, {"id": "pencil"}, {"id": "eraser"}, {"id": "colour"}]
 ```
+
+A panel is the one thing that may stick out past the shape it is on: it needs
+the cell it is anchored to and hangs off the rest, over the drawing. Everything
+else has to be inside the shape, corner to corner.
 
 **There are no other sizes anywhere.** How many cells a slider takes follows
 from the catalogue and from the shape it lands in, both known when the file is
@@ -176,7 +221,8 @@ you a list before it applies anything.
 | A field this build does not know | Dropped, and named. |
 | `artiest_workspace` newer than this build's | Read anyway, with a note. |
 | A rectangle that is not four numbers, or is off the grid | Dropped. The shape keeps the rest. |
-| A toolbar with no usable rectangles | Given the plain bar for its edge. |
+| A toolbar with no usable rectangles | Given a plain bar long enough for what is on it. |
+| An `anchor` that names no side | Dropped. The toolbar goes at `at`, or at the origin. |
 | The same toolbar twice | The first one is kept. |
 | The same tool on two toolbars | The first one is kept. |
 | A tool with nowhere to fit | Reported. It is not on the bar, and you are told. |
@@ -223,9 +269,10 @@ foot, undo and redo top left, nothing else."*
 Two things worth telling it, because they are the mistakes a first attempt
 makes:
 
-- **Leave `at` out unless the position matters.** A list of ids in the right
-  order is usually the better file: it packs itself, and it survives a screen
-  that is a different size.
+- **Leave `at` out unless the position matters** — on the tools and on the
+  toolbars both. A list of ids under an `anchor` is usually the better file: it
+  packs itself, it sizes itself, and it survives a screen that is a different
+  size.
 - **Every id must be in the catalogue.** Inventing `perspective_ruler` produces
   a file that opens and quietly has one fewer tool than intended — which the
   importer will say, in that many words.
@@ -234,5 +281,7 @@ makes:
 
 - `docs/workspace-plan.md` — why any of this exists
 - `docs/ui-expansion-plan.md` — how it was built, item by item
+- `docs/ui-grid-plan.md` — why the docks went, and what replaced them
+- `docs/examples/` — four workspaces to copy from
 - `docs/catalogue.json`, `docs/workspace-example.json` — generated by
   `./gradlew :app:catalogueJson`

@@ -9,6 +9,21 @@
 > work items, **45–62 days**, each one landable on its own and each one leaving
 > the app working.
 
+## Superseded in part
+
+**Everything below about docks, edges, floating surfaces and shape presets is
+history.** The user used what this built and asked for the frame round it to
+go: no docking, no floaters, no Bar/L/T/U/Block menu, one grid and a pen.
+`docs/ui-grid-plan.md` is what replaced it, and it is the document to read for
+how the system works today. This one is kept because the parts underneath —
+`CellRegion`, `RegionLayout`, `SurfaceLayout`, the renderer, the filter, the
+file format — are the same parts, and the reasoning that put them there did not
+stop being true.
+
+One of the three things owed below is now paid by that change rather than by
+this one: **two surfaces can no longer overlap**, because a surface's position
+is cells and the pen will not paint over a cell another one owns.
+
 ## What was built
 
 | # | Item | State |
@@ -33,10 +48,9 @@ Three things are owed, and they are written here rather than left to be found:
    argues why a stroke started in the hollow of an L reaches the canvas — no
    pointer modifier on the container, no child in the notch — and a pointer path
    is not something to be sure of from reading. Same document, last section.
-3. **Two surfaces may still overlap.** U4 wanted that refused at shape time. The
-   shape board is anchored and capped at half the screen, which keeps the
-   ordinary cases apart, but a real check needs every surface's position in
-   screen cells, and nothing computes that yet.
+3. ~~**Two surfaces may still overlap.**~~ Paid by `docs/ui-grid-plan.md`: a
+   surface's position is screen cells now, so the check U4 wanted is one
+   lookup, and the pen does it as it paints.
 
 Two deliberate departures from what is written below, both argued in their
 commits: the compact string went to `v4` in U2 rather than U7, because U4 lets

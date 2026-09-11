@@ -24,6 +24,13 @@ import kotlin.test.assertTrue
  */
 class WorkspaceJsonTest {
 
+    private fun exampleFiles(): List<File> {
+        val dir = generateSequence(File(".").absoluteFile) { it.parentFile }
+            .map { File(it, "docs/examples") }
+            .firstOrNull { it.isDirectory }
+        return assertNotNull(dir, "docs/examples is missing").listFiles().orEmpty().sorted()
+    }
+
     private fun corpus(name: String): String {
         val file = generateSequence(File(".").absoluteFile) { it.parentFile }
             .map { File(it, "app/src/test/resources/workspaces/$name") }
@@ -161,10 +168,7 @@ class WorkspaceJsonTest {
         // half-works teaches the half that does not. Each one has to open with
         // an empty complaint list — no unknown tool, no rectangle off the grid,
         // nothing with nowhere to go.
-        val dir = generateSequence(File(".").absoluteFile) { it.parentFile }
-            .map { File(it, "docs/examples") }
-            .firstOrNull { it.isDirectory }
-        val files = assertNotNull(dir, "docs/examples is missing").listFiles().orEmpty().sorted()
+        val files = exampleFiles()
         assertTrue(files.size >= 4, "the examples are thinner than they were")
 
         for (file in files) {
@@ -188,6 +192,42 @@ class WorkspaceJsonTest {
                 assertTrue(docked.item in ws.filter, "${file.name} hides its own ${docked.item.id}")
             }
         }
+    }
+
+    @Test
+    fun `an example never draws two toolbars on the same cell`() {
+        // Tolerated in a file, because deleting half of somebody's workspace
+        // because two rectangles touch is the worse answer — and never in one
+        // of these, because an example is what people copy.
+        for (file in exampleFiles()) {
+            val ws = assertNotNull(WorkspaceJson.decode(file.readText()).workspace, file.name)
+            for ((w, h) in listOf(12 to 8, 24 to 12, 28 to 18)) {
+                val settled = ws.layout.settled(w, h).fittedTo(w, h).layout
+                val claimed = HashSet<Cell>()
+                for (surface in settled.surfaces) {
+                    for (cell in surface.region.cells(FlowOrder.RIGHT_THEN_DOWN)) {
+                        assertTrue(claimed.add(cell), "${file.name} on ${w}x$h: two claim $cell")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a tool may be a bare name, because a list of names is a toolbar`() {
+        val decoded = WorkspaceJson.decode(
+            """{"artiest_workspace": 2, "name": "x", "surfaces": [
+                {"anchor": "left", "tools": ["pen", "pencil", "size"]}]}"""
+        )
+        val ws = assertNotNull(decoded.workspace)
+        assertEquals(emptyList(), decoded.dropped)
+        assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.PEN)?.cell)
+        assertEquals(Cell(0, 1), ws.layout.locate(ToolItem.PENCIL)?.cell)
+        // The bar was sized to what is on it: two buttons and a four-cell
+        // slider is six cells, upright because the anchor is a side.
+        assertEquals(Cell(0, 2), ws.layout.locate(ToolItem.SIZE)?.cell)
+        assertEquals(1 to 4, ws.layout.locate(ToolItem.SIZE)?.placement?.let { it.w to it.h })
+        assertEquals(6, ws.layout.surfaces.single().region.cellCount)
     }
 
     @Test

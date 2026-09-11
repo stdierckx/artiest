@@ -1,37 +1,24 @@
 {
-  "artiest_workspace": 1,
+  "artiest_workspace": 2,
   "id": "minimal",
   "name": "Minimal",
-  "description": "Written without a single position. The packer decides, and it decides the same way every time.",
+  "description": "Three lists of names. No shapes, no positions, and it is still a whole workspace.",
   "author": "artiest examples",
   "revision": 1,
   "filter": {"groups": ["draw", "edit"], "hide": ["grain", "opacity", "flow"], "show": []},
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {
-      "dock": "left",
-      "tools": [
-        {"id": "pen"},
-        {"id": "pencil"},
-        {"id": "marker"},
-        {"id": "eraser"},
-        {"id": "colour"}
-      ]
+      "anchor": "left",
+      "tools": ["pen", "pencil", "marker", "eraser", "colour"]
     },
     {
-      "dock": "top",
-      "tools": [
-        {"id": "undo"},
-        {"id": "redo"}
-      ]
+      "anchor": "top",
+      "tools": ["undo", "redo"]
     },
     {
-      "dock": "bottom",
-      "tools": [
-        {"id": "size"},
-        {"id": "smoothing"},
-        {"id": "eraser_size"}
-      ]
+      "anchor": "bottom",
+      "tools": ["size", "smoothing", "eraser_size"]
     }
   ]
 }

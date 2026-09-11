@@ -1,16 +1,16 @@
 {
-  "artiest_workspace": 1,
+  "artiest_workspace": 2,
   "id": "thumb",
   "name": "Thumb",
-  "description": "A bracket round the bottom corner, for the hand that is not holding the pen.",
+  "description": "A bracket round the bottom of the screen, for the hand that is not holding the pen.",
   "author": "artiest examples",
   "revision": 1,
   "filter": {"groups": ["draw", "edit", "canvas"], "hide": ["opacity", "flow", "grain"], "show": []},
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {
-      "id": "bottom",
-      "dock": "bottom",
+      "id": "s1",
+      "anchor": "bottom",
       "rects": [[0, 0, 1, 4], [8, 0, 1, 4], [0, 4, 9, 1]],
       "flow": "down_right",
       "tools": [
