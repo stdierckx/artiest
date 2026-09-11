@@ -171,6 +171,29 @@ class DockCodecTest {
         assertEquals(DockLayout.EMPTY, DockCodec.decode(DockCodec.encode(DockLayout.EMPTY)))
     }
 
+    @Test
+    fun `the string a real tablet wrote after migrating reads back whole`() {
+        // Copied off the DTH-A116 the first time the grid build opened a v4
+        // preference. It is here because the failure mode is silent: a string
+        // that will not decode is replaced by the starter layout, and the only
+        // sign is that somebody's toolbars are suddenly the factory ones.
+        val stored =
+            "v5|left:R0,5,1,7:down_right:0,5=pen,0,6=pencil,0,7=marker,0,9=eraser,0,11=colour" +
+                "|top:R13,0,2,1:right_down:13,0=undo,14,0=redo" +
+                "|right:R27,7,1,2:down_right:27,7=layers,27,8=fit" +
+                "|bottom:R7,16,14,1:right_down:7,16=size,12,16=smoothing,17,16=eraser_size" +
+                "|f1:R24,8,4,1:right_down:24,8=layers_panel@4x12"
+        val layout = assertNotNull(DockCodec.decode(stored), "it fell back to the starter")
+
+        assertEquals(5, layout.surfaces.size)
+        assertEquals(13, layout.all().size)
+        assertEquals(Cell(0, 5), layout.locate(ToolItem.PEN)?.cell)
+        assertEquals(Cell(24, 8), layout.locate(ToolItem.LAYERS_PANEL)?.cell)
+        assertEquals(4 to 12, layout.locate(ToolItem.LAYERS_PANEL)?.placement?.let { it.w to it.h })
+        assertTrue(!layout.hasAnchors, "it had already been on a screen")
+        assertEquals(stored, DockCodec.encode(layout), "and it goes back out unchanged")
+    }
+
     // ---- the four older formats -------------------------------------------
 
     @Test
