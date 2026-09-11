@@ -75,7 +75,7 @@ object ProjectLoader {
         // The files on disk are already a picture of these sheets, so the first
         // save after an open writes nothing. Without this it would re-encode the
         // whole drawing to produce bytes that are already there.
-        saver.seed(ok.sheets.map { it.layer })
+        saver.seed(project, ok.sheets.map { it.layer })
 
         // The UI thread's half of the swap: the stroke bookkeeping is its list.
         // The undo history is the render thread's and is cleared as the
@@ -191,7 +191,23 @@ sealed interface OpenResult {
         val sheets: Int,
         val notes: List<String>,
         val ms: Long,
-    ) : OpenResult
+    ) : OpenResult {
+        /**
+         * Whether what is now in the document is the whole drawing.
+         *
+         * **What this is for: it is the permission to write the file back.** A
+         * sheet that came back empty because its PNG would not decode is an
+         * empty sheet in the document, and the next autosave would encode that
+         * emptiness over the one copy of somebody's drawing. Same for a page
+         * that was too small to hold it: what did not fit is still in the file
+         * until a save writes only what did.
+         *
+         * So a project that did not open whole is opened and shown and **not
+         * saved**, and the reason is put where the user can read it. A drawing
+         * they can see but not accidentally destroy beats both alternatives.
+         */
+        val whole: Boolean get() = notes.isEmpty()
+    }
 
     data class Failed(val reason: String) : OpenResult
 }

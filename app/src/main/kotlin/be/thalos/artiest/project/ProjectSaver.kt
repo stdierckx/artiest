@@ -82,6 +82,18 @@ class ProjectSaver(private val files: ProjectFiles) {
     private var written: List<Pair<Layer, Long>> = emptyList()
 
     /**
+     * What the manifest last said, so that [dirty] can tell when the manifest
+     * is the only thing that has changed.
+     *
+     * Renaming a sheet, hiding one, or moving the pen to another moves no
+     * pixels and therefore no [Layer.revision]. Without this, the autosave
+     * would not notice any of them until the next stroke.
+     */
+    private var described: List<ProjectSheet> = emptyList()
+
+    private var describedActive: Int = -1
+
+    /**
      * Take these sheets, at these revisions, as already on disk.
      *
      * Called by `ProjectLoader` with the layers it has just built from the
@@ -89,14 +101,52 @@ class ProjectSaver(private val files: ProjectFiles) {
      * open re-encodes the whole drawing to produce the bytes that are already
      * there — eight sheets, several seconds, for nothing.
      */
-    fun seed(layers: List<Layer>) {
+    fun seed(project: Project, layers: List<Layer>) {
         written = layers.map { it to it.revision }
+        described = project.sheets
+        describedActive = project.active
     }
 
     /** Nothing on disk belongs to what is in the document. After a New. */
     fun forget() {
         written = emptyList()
+        described = emptyList()
+        describedActive = -1
     }
+
+    /**
+     * Is there anything a save would write?
+     *
+     * **This is how the autosave is triggered**, and it is a poll rather than a
+     * hook on every path that changes something. Every alternative means
+     * remembering to call something from a stroke, a clear, an undo, a layer
+     * operation, an import and whatever the next feature adds — and the failure
+     * when somebody forgets is a drawing that is not saved, discovered by
+     * losing it. Comparing eight longs every few seconds cannot be forgotten.
+     *
+     * Cheap on purpose: no pixels are read and no files are touched.
+     */
+    fun dirty(document: Document): Boolean {
+        val stack = document.layers
+        val count = stack.size
+        if (count == 0) return false
+        if (count != written.size || count != described.size) return true
+        if (stack.activePosition != describedActive) return true
+        for (i in 0 until count) {
+            val entry = stack.entryAt(i)
+            if (!clean(i, entry.layer, entry.layer.revision)) return true
+            if (described[i] != describe(entry, i)) return true
+        }
+        return false
+    }
+
+    private fun describe(entry: be.thalos.artiest.doc.LayerStack.Entry, index: Int) = ProjectSheet(
+        file = Project.fileFor(index),
+        name = entry.name,
+        opacity = entry.opacity,
+        visible = entry.visible,
+        blend = entry.blend,
+    )
 
     /**
      * Write [document] into [project]'s directory and return what it is now.
@@ -132,13 +182,7 @@ class ProjectSaver(private val files: ProjectFiles) {
                 val entry = stack.entryAt(i)
                 val layer = entry.layer
                 val revision = layer.revision
-                sheets += ProjectSheet(
-                    file = Project.fileFor(i),
-                    name = entry.name,
-                    opacity = entry.opacity,
-                    visible = entry.visible,
-                    blend = entry.blend,
-                )
+                sheets += describe(entry, i)
                 nowWritten += layer to revision
 
                 if (clean(i, layer, revision) && files.sheetOf(project.id, i).isFile) continue
@@ -161,6 +205,8 @@ class ProjectSaver(private val files: ProjectFiles) {
             // Only now: these are the files the manifest no longer names.
             files.pruneSheets(project.id, keep = count)
             written = nowWritten
+            described = sheets
+            describedActive = saved.active
 
             thumbnail(project, document)
 

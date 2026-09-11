@@ -37,6 +37,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,8 +105,15 @@ import be.thalos.artiest.input.clockSkewNanos
 import be.thalos.artiest.io.ExportResult
 import be.thalos.artiest.io.ImportResult
 import be.thalos.artiest.io.PictureImporter
+import androidx.lifecycle.lifecycleScope
 import be.thalos.artiest.io.PngExporter
+import be.thalos.artiest.project.OpenResult
+import be.thalos.artiest.project.ProjectLoader
+import be.thalos.artiest.project.ProjectSaver
+import be.thalos.artiest.project.ProjectStore
+import be.thalos.artiest.project.SaveResult
 import be.thalos.artiest.ui.ToolItem
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -137,6 +145,12 @@ class MainActivity : ComponentActivity() {
     private var document: Document? = null
 
     private var view: InkSurfaceView? = null
+
+    /**
+     * How to write the drawing, handed over by the screen. Null before the
+     * first composition and after the last one.
+     */
+    private var saveNow: (suspend () -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -173,6 +187,7 @@ class MainActivity : ComponentActivity() {
                         onRefreshPolicy = ::applyRefreshPolicy,
                         onForceNinety = { done -> holdAndCheck(90f, done) },
                         onView = { view = it },
+                        onSaveHook = { saveNow = it },
                     )
                 }
             }
@@ -187,6 +202,16 @@ class MainActivity : ComponentActivity() {
      */
     override fun onPause() {
         view?.abandonStroke()
+        // The one save that is not on a timer, because this may be the last
+        // thing that happens: the process can be killed from here without
+        // coming back. In the activity's scope and not the composition's, so
+        // the write outlives the window going away, and safe to be killed
+        // halfway because every file is written through a rename -- see
+        // ProjectFiles.
+        //
+        // After abandonStroke, deliberately: an abandoned stroke is one the
+        // user did not finish, and saving it would be inventing a mark.
+        saveNow?.let { save -> lifecycleScope.launch { save() } }
         super.onPause()
     }
 
@@ -195,6 +220,7 @@ class MainActivity : ComponentActivity() {
      * thread that writes them, and the view's detach is what joins that thread.
      */
     override fun onDestroy() {
+        saveNow = null
         view = null
         document?.close()
         document = null
@@ -331,6 +357,15 @@ private fun CanvasScreen(
     onRefreshPolicy: (RefreshPolicy) -> Unit,
     onForceNinety: ((String) -> Unit) -> Unit,
     onView: (InkSurfaceView) -> Unit,
+    /**
+     * Hands the activity a way to write the drawing, or null on the way out.
+     *
+     * A hook rather than a lifecycle observer in here, because the save has to
+     * outlive the pause that triggered it: `onPause` may be the last thing that
+     * happens before the process is killed, and a coroutine scoped to the
+     * composition would be torn down with the window.
+     */
+    onSaveHook: ((suspend () -> Unit)?) -> Unit = {},
 ) {
     var generation by remember { mutableIntStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
@@ -504,6 +539,100 @@ private fun CanvasScreen(
         docks = next.layout
         store.save(next.layout)
         entries = workspaces.list()
+    }
+
+    // ---- the drawing that is being kept ------------------------------------
+
+    // Three stores now and each one holds a different kind of thing: the
+    // arrangement is preferences, the workspace is a small file, and the
+    // project is a directory with the pixels in it. See docs/projects-plan.md.
+    val projects = remember { ProjectStore(context) }
+    val saver = remember { ProjectSaver(projects.files) }
+    var project by remember { mutableStateOf(projects.current(document.widthPx, document.heightPx)) }
+
+    /** The last thing the saver or the loader said that the user has to see. */
+    var projectNote by remember { mutableStateOf("") }
+
+    /** The last save, for the instruments. See `readout`. */
+    var lastSave by remember { mutableStateOf<SaveResult.Saved?>(null) }
+
+    /**
+     * Write the drawing, now, and take what the saver says the project is.
+     *
+     * The returned project carries the revision, the modified time and the
+     * sheet list the file now holds, so it has to be kept -- a stale one would
+     * write the next save against a description of the drawing as it was two
+     * saves ago.
+     */
+    suspend fun saveNow() {
+        when (val result = saver.save(project, document, System.currentTimeMillis())) {
+            // Nothing to say. A save that worked is the ordinary case, and a
+            // line that appeared every three seconds is a line nobody reads on
+            // the day it says something. The numbers go to the instruments --
+            // see the `project` line in the readout.
+            is SaveResult.Saved -> {
+                project = result.project
+                lastSave = result
+                projectNote = ""
+            }
+
+            is SaveResult.Failed -> projectNote = "could not save: ${result.reason}"
+        }
+    }
+
+    /**
+     * Whether the drawing on screen is the whole of what is in the file.
+     *
+     * **Nothing is written until this is true**, and it is the guard on the one
+     * unrecoverable thing this feature can do. Found on the tablet the first
+     * time it ran: the open put its sheets in the queue and nothing asked for a
+     * frame, so the document stayed empty, so three seconds later the autosave
+     * encoded that emptiness over a drawing. The file was blank and there was
+     * nothing to undo.
+     */
+    var attached by remember { mutableStateOf(false) }
+
+    // The project the app was last in, back into the document that was
+    // allocated in onCreate -- and then a frame, which is the half that was
+    // missing. A queued operation sits there until something renders: a stroke
+    // asks for its own frame and an open has nothing that would, exactly as
+    // `onLayerOp` says about a layer operation. So this waits for the surface
+    // rather than running on the first composition, because the thing that has
+    // to be asked does not exist yet then.
+    LaunchedEffect(surface) {
+        val v = surface ?: return@LaunchedEffect
+        if (attached) return@LaunchedEffect
+        when (val opened = ProjectLoader.open(projects.files, project, document, saver)) {
+            is OpenResult.Opened -> {
+                attached = opened.whole
+                projectNote = if (opened.whole) "" else
+                    opened.notes.first() + " — it is not being saved over"
+            }
+
+            is OpenResult.Failed -> projectNote = "could not open ${project.name}: ${opened.reason}"
+        }
+        v.redrawDry()
+    }
+
+    // The autosave. A poll and not a hook on every path that changes something
+    // -- see ProjectSaver.dirty: every alternative means remembering to call
+    // something from a stroke, a clear, an undo, a layer operation and whatever
+    // the next feature adds, and the failure when somebody forgets is a drawing
+    // that is not saved, discovered by losing it.
+    LaunchedEffect(project.id, attached) {
+        if (!attached) return@LaunchedEffect
+        while (true) {
+            delay(ProjectStore.AUTOSAVE_MS)
+            if (saver.dirty(document)) saveNow()
+        }
+    }
+
+    // And at the door, because the process may not come back. The hook is
+    // handed to the activity rather than observed here, so that the save runs
+    // in the activity's scope and survives the composition being paused.
+    DisposableEffect(attached) {
+        onSaveHook(if (attached) ({ saveNow() }) else null)
+        onDispose { onSaveHook(null) }
     }
 
     // The colours mixed on the wheel. Pushed when the panel closes rather than
@@ -863,6 +992,23 @@ private fun CanvasScreen(
                 .padding(start = READOUT_INSET, top = READOUT_TOP, end = READOUT_INSET),
         ) {
             ExportStatus(export, exporting)
+            // What the saver and the loader had to say. Usually nothing: a save
+            // that wrote the drawing has no news, and a line that appeared
+            // every three seconds would be a line nobody reads on the day it
+            // says something.
+            if (projectNote.isNotEmpty()) {
+                Text(
+                    text = projectNote,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
             if (importNote.isNotEmpty()) {
                 Text(
                     text = importNote,
@@ -882,6 +1028,7 @@ private fun CanvasScreen(
                         surface, document, report, refreshHzNow(), policy,
                         reject, export, exporting, generation,
                         stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
+                        project, lastSave,
                     ),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -1583,6 +1730,8 @@ private fun readout(
     exporting: Boolean,
     generation: Int,
     strokeTimes: String,
+    project: be.thalos.artiest.project.Project,
+    lastSave: SaveResult.Saved?,
 ): String {
     if (surface == null) return "surface  -"
     val p = surface.batches
@@ -1594,6 +1743,14 @@ private fun readout(
             "drag ${s.dragBytes} B over ${s.dragSamples}   commit ${s.commitBytes} B"
     }
     return deviceLines(report, refreshHz, policy) +
+        // What is being kept, and what the last save cost. The second half is
+        // Pj7's gate: the save has to be off the pen's thread and it has to
+        // write one sheet rather than the whole drawing -- see
+        // docs/projects-plan.md.
+        "project  ${project.name}   r${project.revision}   " +
+        "${project.sheets.size} sheet(s)   " +
+        (lastSave?.let { "last save ${it.sheetsWritten} in ${it.ms} ms" } ?: "not saved yet") +
+        "\n" +
         "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
         // The undo budget, which is the number that decides whether a long

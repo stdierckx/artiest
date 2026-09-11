@@ -157,12 +157,39 @@ class ProjectSaverTest {
     }
 
     @Test
+    fun `dirty is what the autosave asks, and it notices all four kinds of change`() {
+        val p = project()
+        paint(0, Color.RED)
+        assertTrue(saver.dirty(document), "a drawing that has never been saved is dirty")
+
+        val saved = save(p)
+        assertFalse(saver.dirty(document), "and clean the moment it is on disk")
+
+        paint(0, Color.BLUE)
+        assertTrue(saver.dirty(document), "pixels")
+        save(saved.project, now = 3_000L)
+
+        document.layers.apply(LayerOp.SetName(document.layers.entryAt(0).id, "Sketch"))
+        assertTrue(saver.dirty(document), "a name, which moves no pixels at all")
+        val named = save(saved.project, now = 4_000L)
+
+        addSheet("Ink")
+        assertTrue(saver.dirty(document), "a sheet")
+        val grown = save(named.project, now = 5_000L)
+
+        document.layers.apply(LayerOp.SetActive(document.layers.entryAt(0).id))
+        assertTrue(saver.dirty(document), "and which sheet the pen is on")
+        save(grown.project, now = 6_000L)
+        assertFalse(saver.dirty(document))
+    }
+
+    @Test
     fun `seeded sheets are taken as already written`() {
         val p = project()
         paint(0, Color.RED)
         // What the loader does: it built these layers from the files, so the
         // files are already a picture of them.
-        saver.seed(listOf(document.layers.entryAt(0).layer))
+        saver.seed(p, listOf(document.layers.entryAt(0).layer))
         // The file has to exist for the claim to be believed -- see `clean`.
         files.sheetOf(p.id, 0).also { it.parentFile?.mkdirs() }.writeText("pretend pixels")
 
@@ -173,7 +200,7 @@ class ProjectSaverTest {
     fun `a sheet the saver has no file for is written even if it looks clean`() {
         val p = project()
         paint(0, Color.RED)
-        saver.seed(listOf(document.layers.entryAt(0).layer))
+        saver.seed(p, listOf(document.layers.entryAt(0).layer))
 
         // The claim is that the file is on disk. It is not, and a save that
         // believed the bookkeeping over the filesystem would leave a project
