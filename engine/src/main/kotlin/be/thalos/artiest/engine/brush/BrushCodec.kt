@@ -25,7 +25,18 @@ package be.thalos.artiest.engine.brush
 object BrushCodec {
 
     const val MAGIC = "artiest-brush"
-    const val VERSION = 1
+
+    /**
+     * 1. The brush's parameters, and nothing else.
+     * 2. An optional header — `id`, `label`, `origin`, `tags` — so that a file
+     *    can say *which* brush it is rather than only how it draws.
+     *
+     * **Version 1 files still load**, and that is the point of the bump rather
+     * than a concession: the decoder skips lines it does not understand, so the
+     * only thing a version tells a reader here is what it may expect to find.
+     * `BrushCodecTest` reads a hand-written version 1 file and asserts it.
+     */
+    const val VERSION = 2
 
     fun encode(brush: Brush): String {
         val b = StringBuilder()
@@ -71,6 +82,103 @@ object BrushCodec {
         appendOption(b, "sizeJitter", brush.sizeJitter)
         return b.toString()
     }
+
+    /**
+     * One shelf entry as a file: the header, then the brush.
+     *
+     * A separate function from [encode] rather than a flag on it, because the
+     * two have different jobs. [encode] writes *the brush in the hand* for
+     * `BrushStore`, which already knows which entry it came from and would only
+     * have to ignore a header; this writes a brush that has to be recognisable
+     * on its own, after a restart, in a directory full of others.
+     */
+    fun encodeFile(entry: BrushEntry): String {
+        val b = StringBuilder()
+        val body = encode(entry.create())
+        val head = body.indexOf('\n')
+        b.append(body, 0, head + 1)
+        b.append("id ").append(word(entry.id)).append('\n')
+        b.append("label ").append(line(entry.label)).append('\n')
+        b.append("origin ").append(entry.origin.name).append('\n')
+        if (entry.tags.isNotEmpty()) {
+            b.append("tags")
+            for (t in entry.tags) b.append(' ').append(word(t))
+            b.append('\n')
+        }
+        b.append(body, head + 1, body.length)
+        return b.toString()
+    }
+
+    /**
+     * The entry [text] describes, or null if it is not a brush at all.
+     *
+     * A file with no `id` is not refused — it gets one from its label, or from
+     * [fallbackId] — because a brush somebody hand-wrote is exactly the case
+     * this format's "decoding never throws" rule is for. What it cannot do
+     * without is a body that parses.
+     */
+    fun decodeFile(text: String?, fallbackId: String = "brush"): BrushEntry? {
+        val brush = decode(text) ?: return null
+        var id: String? = null
+        var label: String? = null
+        var origin = BrushOrigin.SAVED
+        var tags = emptyList<String>()
+        for (line in (text ?: "").split('\n')) {
+            val trimmed = line.trim()
+            val space = trimmed.indexOf(' ')
+            if (space <= 0) continue
+            val value = trimmed.substring(space + 1).trim()
+            when (trimmed.substring(0, space)) {
+                "id" -> id = value.take(BrushEntry.MAX_ID)
+                "label" -> label = value.take(BrushEntry.MAX_LABEL)
+                "origin" -> origin =
+                    BrushOrigin.entries.firstOrNull { it.name == value } ?: BrushOrigin.SAVED
+                "tags" -> tags = value.split(' ').filter { it.isNotEmpty() }.take(MAX_TAGS)
+            }
+        }
+        val name = label ?: id ?: fallbackId
+        // A built-in origin in a file would be a file claiming to be the
+        // pencil, which `BrushLibrary` drops anyway. Read as saved instead, so
+        // the brush arrives rather than disappearing.
+        if (origin == BrushOrigin.BUILT_IN) origin = BrushOrigin.SAVED
+        return BrushEntry(
+            id = (id ?: BrushEntry.slug(name)).ifEmpty { fallbackId },
+            label = name,
+            origin = origin,
+            tags = tags,
+            text = encodeEntryBody(brush),
+        )
+    }
+
+    /**
+     * The brush alone, re-encoded.
+     *
+     * The entry keeps the *parsed* brush rather than the file's own bytes, so a
+     * file with a line this build cannot read does not carry that line forward
+     * into everything the entry is later saved as. What loaded is what is held.
+     */
+    private fun encodeEntryBody(brush: Brush): String = encode(brush)
+
+    /**
+     * A value that has to be one token: an id, or a tag.
+     *
+     * A space in an id would be a second field, and a newline would be a second
+     * line — both of which turn a name the user typed into a file the reader
+     * misparses, which is the one thing a hand-editable format must not let a
+     * name do.
+     */
+    private fun word(text: String): String =
+        text.map { if (it.isWhitespace() || it < ' ') '_' else it }.joinToString("")
+
+    /**
+     * A value that is the whole rest of its line, which is only the label.
+     *
+     * Spaces are kept — "Soft 2B" is a name and not two — and every other kind
+     * of whitespace becomes one, because a newline is the only character that
+     * can end the line early.
+     */
+    private fun line(text: String): String =
+        text.map { if (it < ' ' || it.isWhitespace()) ' ' else it }.joinToString("").trim()
 
     /** The brush [text] describes, or null if it is not a brush at all. */
     fun decode(text: String?): Brush? {
@@ -220,4 +328,7 @@ object BrushCodec {
     private fun f(s: String): Float? = s.toFloatOrNull()?.takeIf { it.isFinite() }
 
     private fun f(p: List<String>, i: Int): Float? = p.getOrNull(i)?.let { f(it) }
+
+    /** Enough to describe a brush, few enough that a file cannot be a word list. */
+    private const val MAX_TAGS = 16
 }

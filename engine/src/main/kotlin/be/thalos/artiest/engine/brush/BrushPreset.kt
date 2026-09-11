@@ -16,7 +16,18 @@ package be.thalos.artiest.engine.brush
  * pass that darkens where strokes cross, and no paper tooth at all. None of
  * those is something the pencil can be talked into doing.
  */
-enum class BrushPreset(val label: String) {
+enum class BrushPreset(
+    /**
+     * The name this preset is stored under, and it is not [name].
+     *
+     * `ToolItem`'s rule, applied to a brush: renaming a Kotlin constant is a
+     * refactor, renaming a persisted identifier empties somebody's shelf. It is
+     * also the id a built-in [BrushEntry] carries, so a saved brush and a
+     * shipped one are told apart by where they came from rather than by type.
+     */
+    val id: String,
+    val label: String,
+) {
 
     /**
      * Phase 1's brush, unchanged and still on the fast path.
@@ -27,7 +38,7 @@ enum class BrushPreset(val label: String) {
      * started. That is deliberate: the phase adds a pencil, it does not tax the
      * pen to do it.
      */
-    PEN("Pen") {
+    PEN("pen", "Pen") {
         override fun applyTo(brush: Brush) {
             reset(brush)
         }
@@ -65,7 +76,7 @@ enum class BrushPreset(val label: String) {
      * Bigger than the pen at 32 doc px, and smoothed less at 0.10: sketching
      * wants the hand's own wobble, which is exactly what a stabilizer removes.
      */
-    PENCIL("Pencil") {
+    PENCIL("pencil", "Pencil") {
         override fun applyTo(brush: Brush) {
             reset(brush)
             brush.sizeMin = 1.5f
@@ -231,7 +242,7 @@ enum class BrushPreset(val label: String) {
      * 84 doc px is about 6.2 mm across the long axis of the wedge and 2 mm
      * across the short one at a fitted page, which is a broad marker.
      */
-    MARKER("Marker") {
+    MARKER("marker", "Marker") {
         override fun applyTo(brush: Brush) {
             reset(brush)
             // Not 1.5. A marker has no point: the lightest touch that registers
@@ -296,32 +307,7 @@ enum class BrushPreset(val label: String) {
      * wrong, because the preset is what the wiring is *for*.
      */
     fun applyToShapeOnly(brush: Brush) {
-        val fresh = create()
-        for ((from, to) in listOf(
-            fresh.aspect to brush.aspect,
-            fresh.rotation to brush.rotation,
-            fresh.scatter to brush.scatter,
-            fresh.sizeJitter to brush.sizeJitter,
-        )) {
-            if (to.inputCount > 0) continue
-            to.min = from.min
-            to.max = from.max
-            to.combine = from.combine
-            for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
-        }
-        // Size and flow get the wiring back but keep their numbers, and the
-        // difference matters: `sizeMax` and `flow` are what two sliders on the
-        // toolbar hold, so copying the preset's values over them would undo the
-        // user's last drag every time the app started.
-        for ((from, to) in listOf(
-            fresh.size to brush.size,
-            fresh.flowOption to brush.flowOption,
-        )) {
-            if (to.inputCount > 0) continue
-            if (from.inputCount == 0) continue
-            to.combine = from.combine
-            for (i in 0 until from.inputCount) to.drive(from.sensorAt(i), from.curveAt(i))
-        }
+        copyWiringOnto(create(), brush)
     }
 
     companion object {
