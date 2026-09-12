@@ -256,6 +256,16 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     /** Where [item] currently is, or null if it is on no surface. */
     fun locate(item: ToolItem): DockedItem? = all().firstOrNull { it.item == item }
 
+    /**
+     * Where this exact control is, an argument included.
+     *
+     * The arg-aware form of [locate], and the one every placement path uses:
+     * two brush buttons are two controls, and looking one up by item alone
+     * would make placing the second move the first. See [CellPlacement.arg].
+     */
+    fun locate(item: ToolItem, arg: String?): DockedItem? =
+        all().firstOrNull { it.item == item && it.placement.arg == arg }
+
     /** True if [item] is on some surface. What the chooser ticks. */
     operator fun contains(item: ToolItem): Boolean = locate(item) != null
 
@@ -293,10 +303,16 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
      * cells along its own bar is exactly that case, and it is the one a hand
      * tries first.
      */
-    fun fits(surfaceId: String, item: ToolItem, cell: Cell, ignoring: Cell? = null): Boolean {
+    fun fits(
+        surfaceId: String,
+        item: ToolItem,
+        cell: Cell,
+        ignoring: Cell? = null,
+        arg: String? = null,
+    ): Boolean {
         val s = surface(surfaceId) ?: return false
         val (w, h) = s.footprintOf(item, cell)
-        return without(s, item).fits(w, h, cell.x, cell.y, ignoring, item.hangs)
+        return without(s, item, arg).fits(w, h, cell.x, cell.y, ignoring, item.hangs)
     }
 
     /**
@@ -306,9 +322,9 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
      * the same reason: a control that silently declines to appear cannot be
      * told apart from one that is broken.
      */
-    fun place(surfaceId: String, item: ToolItem, cell: Cell): DockLayout {
+    fun place(surfaceId: String, item: ToolItem, cell: Cell, arg: String? = null): DockLayout {
         val target = surface(surfaceId) ?: return this
-        val was = locate(item)
+        val was = locate(item, arg)
         val cleared = was
             ?.let { withSurface(it.surface.with(slots = it.surface.slots.remove(it.cell))) }
             ?: this
@@ -328,6 +344,7 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
                         y = cell.y,
                         w = kept?.w ?: natural.first,
                         h = kept?.h ?: natural.second,
+                        arg = arg,
                     )
                 )
             )
@@ -373,16 +390,20 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     fun move(from: String, cell: Cell, to: String, toCell: Cell? = null): DockLayout? {
         val source = surface(from) ?: return null
         val moving = source.slots.covering(cell) ?: return null
-        val target = toCell?.takeIf { fits(to, moving.item, it) }
-            ?: firstFit(to, moving.item)
+        // The argument travels with the placement, so a brush button that is
+        // dragged is still the brush it was. Without it the drop would land a
+        // `BRUSH` with nothing behind it, which reads as the button breaking
+        // when you move it.
+        val target = toCell?.takeIf { fits(to, moving.item, it, arg = moving.arg) }
+            ?: firstFit(to, moving.item, moving.arg)
             ?: return null
-        return place(to, moving.item, target)
+        return place(to, moving.item, target, moving.arg)
     }
 
     /** The first cell on [surfaceId] that [item] would fit in, or null. */
-    fun firstFit(surfaceId: String, item: ToolItem): Cell? {
+    fun firstFit(surfaceId: String, item: ToolItem, arg: String? = null): Cell? {
         val s = surface(surfaceId) ?: return null
-        val free = without(s, item)
+        val free = without(s, item, arg)
         return s.region.cells(s.flow).firstOrNull { cell ->
             val (w, h) = s.footprintOf(item, cell)
             free.fits(w, h, cell.x, cell.y, hangs = item.hangs)
@@ -415,11 +436,11 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
      * it is as big as it has to be and no bigger, and the spare cells are there
      * so that something else can be dropped in beside it.
      */
-    fun addSurface(item: ToolItem, at: Cell): Pair<DockLayout, String> {
+    fun addSurface(item: ToolItem, at: Cell, arg: String? = null): Pair<DockLayout, String> {
         val span = if (item.hangs) 1 else item.cellsWide
         val region = CellRegion.strip(span + SPARE_CELLS, Axis.HORIZONTAL).translated(at.x, at.y)
         val (next, id) = addSurface(region)
-        return next.place(id, item, Cell(region.bounds.x, region.bounds.y)) to id
+        return next.place(id, item, Cell(region.bounds.x, region.bounds.y), arg) to id
     }
 
     /**
@@ -526,7 +547,7 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     fun fittedTo(gridW: Int, gridH: Int): Fitted {
         if (gridW < 1 || gridH < 1) return Fitted(this, emptyMap())
         var cut = false
-        val overflow = LinkedHashMap<String, List<ToolItem>>()
+        val overflow = LinkedHashMap<String, List<CellPlacement>>()
         val out = ArrayList<Surface>(surfaces.size)
         for (surface in surfaces) {
             val b = surface.region.bounds
@@ -542,10 +563,13 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
             val fits = shifted.slots.placements.filter {
                 region.accepts(it.x, it.y, it.w, it.h, it.hangs)
             }
+            // Whole placements and not just their items, because a brush
+            // button is its item *and* its argument -- see `CellPlacement.arg`.
+            // Listing it by item alone would put a nameless brush in the
+            // chevron, which is a control that cannot say what it loads.
             val lost = shifted.slots.placements
                 .filter { it !in fits }
                 .sortedWith(compareBy({ it.y }, { it.x }))
-                .map { it.item }
             if (lost.isNotEmpty()) overflow[surface.id] = lost
             out += shifted.with(slots = SurfaceLayout.of(region, fits))
         }
@@ -556,13 +580,13 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
     data class Fitted(
         val layout: DockLayout,
         /** By surface id, in flow order. What the overflow chevron lists. */
-        val overflow: Map<String, List<ToolItem>>,
+        val overflow: Map<String, List<CellPlacement>>,
     ) {
         val isWhole: Boolean get() = overflow.isEmpty()
     }
 
-    private fun without(surface: Surface, item: ToolItem): SurfaceLayout {
-        val here = locate(item) ?: return surface.slots
+    private fun without(surface: Surface, item: ToolItem, arg: String? = null): SurfaceLayout {
+        val here = locate(item, arg) ?: return surface.slots
         return if (here.surface.id == surface.id) surface.slots.remove(here.cell) else surface.slots
     }
 
@@ -616,12 +640,17 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
          * them both. The later one is on top.
          */
         fun of(surfaces: List<Surface>): DockLayout {
-            val seen = HashSet<ToolItem>()
+            // Keyed on the *identity* and not the item, which is rule 3 as it
+            // now stands: a brush button is its entry plus the brush it loads,
+            // so two of them are two controls. Keyed on the item alone, the
+            // second brush button silently vanished on every read — the layout
+            // held both and the codec round trip came back with one.
+            val seen = HashSet<Pair<ToolItem, String?>>()
             val ids = HashSet<String>()
             val out = ArrayList<Surface>(surfaces.size)
             for (surface in surfaces) {
                 if (!ids.add(surface.id)) continue
-                val kept = surface.slots.placements.filter { seen.add(it.item) }
+                val kept = surface.slots.placements.filter { seen.add(it.identity) }
                 out += if (kept.size == surface.slots.placements.size) {
                     surface
                 } else {

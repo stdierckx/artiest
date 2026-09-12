@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 4,
+  "version": 5,
   "cell_dp": 44,
   "groups": [
     {
@@ -28,6 +28,16 @@
   "flows": ["right_down", "left_down", "right_up", "left_up", "down_right", "down_left", "up_right", "up_left"],
   "anchors": ["left", "top", "right", "bottom"],
   "tools": [
+    {
+      "id": "brush",
+      "label": "Brush",
+      "short": "Brush",
+      "group": "draw",
+      "kind": "swatch",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
     {
       "id": "brush_shelf",
       "label": "Brush shelf",

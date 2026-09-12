@@ -271,3 +271,78 @@ row being on screen. The renders themselves are on `Dispatchers.Default`, which
 is the plan's own stop condition about not touching the pen's thread.
 
 The thirty test files were removed from the tablet afterwards.
+
+
+## Wb1g — a brush as a button, and the eraser's own brush
+
+> 2026-09-12, both asked for by name after the shelf landed. Neither was in the
+> plan above; both follow from it, which is what a shelf being *data* buys.
+
+### The eraser gets a brush
+
+Krita ships a soft eraser and a hard one. This app could only erase with the
+brush already in your hand — a good default, and still the default, because the
+pencil rubbing out with the pencil's tilt is what `ToolItem.ERASER`'s "a toggle,
+not a third tool" has always meant. What it could not do is keep a soft rubber
+*and* a hard one without changing the brush you draw with.
+
+`Brush.eraseSizeMax` already gave the rubber its own width. This gives it the
+rest of its shape, by the same argument, and `InkSurfaceView` now holds three
+brushes instead of one:
+
+| | |
+|---|---|
+| `ink` | what the toolbar configures |
+| `rubber` | what the eraser uses, or **null** for `ink`'s own shape |
+| `pen` | what the stroke in flight is drawn with, chosen at pen-down |
+
+`pen` used to be both the first and the third, and it stopped being able to be
+the moment the rubber got a shape: something has to hold the pencil's numbers
+while the rubber is on the glass. The copy at pen-down is also the thread
+safety — a slider dragged mid-stroke cannot change the stroke being drawn.
+
+Picked from the shelf's row menu, on every row including the built-ins, because
+the pen's hard edge and the pencil's soft one are the two most obvious rubbers
+this app ships. It is a toggle: *erase with the brush in my hand* is a state you
+have to be able to get back to.
+
+### A brush as a toolbar button
+
+> *"I would like to be able to drag a brush out of the brush selector window and
+> have it as a tool button on the toolbar… so the artist can have 2 pencil
+> buttons, with different qualities, right next to each other."*
+
+`ToolItem.BRUSH`, and it is **the only entry in the catalogue that carries an
+argument**. `CellPlacement.arg` holds the brush id, and the rule that an item
+lives in exactly one place is unchanged — of an *item*. What stands on a bar is
+an item plus what it is for, so two brush buttons are two controls.
+
+That one field is the whole feature, and it reaches further than brushes: the
+layout carries a string it has no opinion about and hands it back to whoever
+knows, which is the same discipline that keeps `Dock.kt` free of Compose. The
+next control that wants an argument costs nothing.
+
+Its face is the mark it makes, for `ColourButton`'s reason — and it is the only
+face that could tell two pencils apart, which is the point of being allowed two.
+
+**Not a drag, and that is a real limitation.** The shelf is a `Popup`, which is
+its own window: a gesture begun inside it cannot be handed to the chrome's drag,
+whose coordinates are the main window's. What shipped is a row-menu action that
+places the button on the first bar with room — a new one beside the shelf only
+when every bar is full — and turns arrange mode on, so the next thing the hand
+does is drag it where it belongs. The *result* is the request; the gesture is
+one tap rather than a drag, and making the drag itself work means either
+converting through screen coordinates or rendering panels inside the chrome.
+
+### The version that did not move
+
+`DockCodec` stays at `v5`. `~arg` is a suffix a v5 string never carries, so
+everything ever saved parses unchanged; bumping would have meant writing a v5
+reader to avoid emptying every toolbar on upgrade, to buy nothing. An older
+build reading a newer string drops that one entry — a button missing rather
+than a bar.
+
+`DockLayout.of` was the bug this feature nearly shipped with: it deduplicated
+placements by `ToolItem`, so the second brush button vanished on every read. The
+layout held both and the codec round trip came back with one. It keys on
+`CellPlacement.identity` now.

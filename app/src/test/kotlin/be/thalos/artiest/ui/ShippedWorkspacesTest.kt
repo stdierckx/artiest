@@ -143,7 +143,7 @@ class ShippedWorkspacesTest {
             for ((id, lost) in phone.overflow) {
                 assertEquals(
                     listOf(ToolItem.ERASER_SIZE),
-                    lost,
+                    lost.map { it.item },
                     "${ws.id}/$id loses more on a phone than the last slider",
                 )
             }

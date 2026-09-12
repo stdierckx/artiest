@@ -175,6 +175,28 @@ enum class ToolItem(
     MARKER("marker", "Marker", "Marker", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
+     * One brush of your own, as a button.
+     *
+     * **The only entry in this catalogue that carries an argument**, and the
+     * only one that can appear twice. `CellPlacement.arg` holds the brush id,
+     * so two of these side by side are two different controls that happen to
+     * share a catalogue entry — which is rule 3 above still holding, of an
+     * *item*, while the thing on the bar is an item plus what it is for.
+     *
+     * It exists because a shelf is a list and a favourite is a button. The
+     * three shipped toggles are exactly that argument made once, in code, for
+     * the three brushes we authored; this is the same bargain offered to the
+     * brushes the artist makes. Two pencils tuned differently, side by side, is
+     * the thing that could not be expressed before.
+     *
+     * [ToolKind.SWATCH], for [COLOUR]'s reason: its face is the mark it makes,
+     * and a brush glyph beside it would be a label for something already
+     * visible. The chooser lists these separately from the catalogue, because
+     * an entry with no argument is not a control.
+     */
+    BRUSH("brush", "Brush", "Brush", 1, ToolGroup.DRAW, ToolKind.SWATCH),
+
+    /**
      * The shelf, as a button that opens it.
      *
      * **The three toggles above stay**, and that is the design rather than an

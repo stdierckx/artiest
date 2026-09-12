@@ -33,7 +33,13 @@ class ToolIconsTest {
         setOf("layers", "layers_panel"),
         setOf("selection", "selection_panel"),
         setOf("eraser", "eraser_size"),
+        // Three, pairwise: the button that opens the shelf, the shelf kept,
+        // and one brush placed on a bar. All three are the same idea at
+        // different sizes, and a brush button's real face is its own swatch --
+        // the glyph only ever appears in a chooser that has no swatch to show.
         setOf("brushes", "brush_shelf"),
+        setOf("brushes", "brush"),
+        setOf("brush_shelf", "brush"),
     )
 
     @Test

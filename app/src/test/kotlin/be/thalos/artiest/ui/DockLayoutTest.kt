@@ -520,7 +520,7 @@ class DockLayoutTest {
         // four-slider bar is sixteen cells, so the last one goes to the chevron
         // rather than being left out of the default everywhere.
         val small = DockLayout.STARTER.settled(12, 8).fittedTo(12, 8)
-        assertEquals(listOf(ToolItem.ERASER_SIZE), small.overflow["s4"])
+        assertEquals(listOf(ToolItem.ERASER_SIZE), small.overflow["s4"]?.map { it.item })
         assertEquals(1, small.overflow.size, "and nothing else falls off")
     }
 

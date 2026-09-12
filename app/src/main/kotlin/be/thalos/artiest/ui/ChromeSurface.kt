@@ -91,7 +91,7 @@ internal fun ChromeSurface(
     gridW: Int,
     gridH: Int,
     modifier: Modifier = Modifier,
-    slotContent: @Composable (ToolItem, Axis) -> Unit,
+    slotContent: @Composable (CellPlacement, Axis) -> Unit,
 ) {
     val region = surface.region
     val density = LocalDensity.current
@@ -211,7 +211,7 @@ private fun ShapedCell(
     slotPx: Float,
     gridW: Int,
     gridH: Int,
-    slotContent: @Composable (ToolItem, Axis) -> Unit,
+    slotContent: @Composable (CellPlacement, Axis) -> Unit,
 ) {
     var chooser by remember { mutableStateOf(false) }
 
@@ -223,7 +223,7 @@ private fun ShapedCell(
                     // cell, not the whole surface's. That is what makes one
                     // slider stand up in an L's arm and the next lie flat along
                     // its foot, which no bar could ever say.
-                    slotContent(placed.item, surface.region.localAxis(cell))
+                    slotContent(placed, surface.region.localAxis(cell))
                 }
 
             placed != null ->

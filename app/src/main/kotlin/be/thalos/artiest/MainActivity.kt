@@ -88,6 +88,7 @@ import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
 import be.thalos.artiest.ui.LayersPanelCard
 import be.thalos.artiest.ui.BrushFiles
+import be.thalos.artiest.ui.BrushButton
 import be.thalos.artiest.ui.BrushShelfCard
 import be.thalos.artiest.ui.BrushesButton
 import be.thalos.artiest.ui.BrushStore
@@ -1138,6 +1139,30 @@ private fun CanvasScreen(
         generation++
     }
 
+    /**
+     * Put [entry] on a toolbar as a button of its own.
+     *
+     * The first free cell on a bar you already have, and a new bar beside the
+     * shelf only when every one of them is full. That order is the request read
+     * literally — *"have it as a tool button on the toolbar"* — and it is also
+     * the kinder one: a button that appears on the bar your hand already knows
+     * beats a fresh strip of grey somewhere over the paper.
+     *
+     * Arrange mode goes on either way, because the cell it found is a guess and
+     * the next thing a hand wants to do is move it.
+     */
+    val placeBrushOnBar: (BrushEntry) -> Unit = { entry ->
+        val room = docks.anyFit(ToolItem.BRUSH)
+        val next = if (room != null) {
+            docks.place(room.first, ToolItem.BRUSH, room.second, entry.id)
+        } else {
+            docks.addSurface(ToolItem.BRUSH, Cell(1, 1), entry.id).first
+        }
+        keep(next)
+        arranging = true
+        generation++
+    }
+
     val renameBrush: (BrushEntry, String) -> Unit = { entry, typed ->
         val name = typed.trim().take(BrushEntry.MAX_LABEL)
         // The id is untouched, so the brush in the hand stays the brush in the
@@ -1447,9 +1472,10 @@ private fun CanvasScreen(
                     },
                 )
             },
-        ) { item, axis ->
+        ) { placement, axis ->
                 ToolSlot(
-                    item = item,
+                    item = placement.item,
+                    arg = placement.arg,
                     axis = axis,
                     ink = ink,
                     recentInks = recentInks,
@@ -1553,6 +1579,7 @@ private fun CanvasScreen(
                     brushId = brushId,
                     eraserBrushId = eraserBrushId,
                     onUseAsEraser = useAsEraser,
+                    onPlaceBrush = placeBrushOnBar,
                     brushModified = brushModified,
                     onSaveBrush = saveBrushAs,
                     onRevertBrush = { adopt(brush) },
@@ -1680,6 +1707,8 @@ private fun CanvasScreen(
 @Composable
 private fun ToolSlot(
     item: ToolItem,
+    /** What this instance of [item] is for, or null. See [CellPlacement.arg]. */
+    arg: String?,
     axis: Axis,
     ink: Int,
     onInk: (Int) -> Unit,
@@ -1718,6 +1747,7 @@ private fun ToolSlot(
     brushId: String,
     eraserBrushId: String?,
     onUseAsEraser: (BrushEntry) -> Unit,
+    onPlaceBrush: (BrushEntry) -> Unit,
     brushModified: Boolean,
     onSaveBrush: (String) -> Unit,
     onRevertBrush: () -> Unit,
@@ -1743,6 +1773,21 @@ private fun ToolSlot(
     onExport: () -> Unit,
 ) {
     when (item) {
+        /**
+         * A brush of your own, as a button. See [ToolItem.BRUSH].
+         *
+         * `arg` is the brush id and is the whole of what makes this button
+         * different from the one beside it. An id with nothing behind it — a
+         * brush that has been deleted since it was put here — renders greyed
+         * rather than vanishing.
+         */
+        ToolItem.BRUSH -> BrushButton(
+            entry = arg?.let { library.find(it) },
+            selected = arg != null && arg == brushId,
+            ink = ink,
+            onPick = onBrush,
+        )
+
         // The one control whose face is its own value. See ColourButton.
         ToolItem.COLOUR -> ColourButton(
             ink = ink,
@@ -1909,6 +1954,7 @@ private fun ToolSlot(
             ink = ink,
             onPick = onBrush,
             onUseAsEraser = onUseAsEraser,
+            onPlaceBrush = onPlaceBrush,
             onSaveAs = onSaveBrush,
             onRevert = onRevertBrush,
             onRename = onRenameBrush,
@@ -1925,6 +1971,7 @@ private fun ToolSlot(
             ink = ink,
             onPick = onBrush,
             onUseAsEraser = onUseAsEraser,
+            onPlaceBrush = onPlaceBrush,
             onSaveAs = onSaveBrush,
             onRevert = onRevertBrush,
             onRename = onRenameBrush,

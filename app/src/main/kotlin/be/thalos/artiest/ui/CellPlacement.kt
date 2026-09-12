@@ -14,6 +14,18 @@ package be.thalos.artiest.ui
  * | `span == w` | `span == h` |
  * | `depth == h` | `depth == w` |
  *
+ * **[arg] is what makes two of the same item different.** Rule 3 of `ToolItem`
+ * says an item lives in exactly one place, and that is still true — of an
+ * *item*. A brush button is `BRUSH` plus the id of the brush it loads, and two
+ * of them side by side are two different controls that happen to share a
+ * catalogue entry. Null for everything else, and everything else therefore
+ * behaves exactly as it did.
+ *
+ * It is deliberately a bare `String` rather than a type. The layout has no idea
+ * what a brush is and must not acquire one: it carries the argument and hands
+ * it back to whoever knows, which is the same discipline that keeps this file
+ * free of Compose.
+ *
  * **The size is carried rather than looked up**, for the reason the span always
  * was: a panel can be resized, and once the user has chosen a size it is a
  * property of this placement and not of the catalogue. It also means everything
@@ -26,6 +38,8 @@ data class CellPlacement(
     val y: Int,
     val w: Int,
     val h: Int,
+    /** What this instance of [item] is for, or null. See the class KDoc. */
+    val arg: String? = null,
 ) {
 
     init {
@@ -55,5 +69,9 @@ data class CellPlacement(
     /** The same item and size, moved to [cell]. */
     fun movedTo(cell: Cell): CellPlacement = copy(x = cell.x, y = cell.y)
 
-    override fun toString(): String = "${item.id}@$x,$y(${w}x$h)"
+    /** The pair that identifies this control: two brush buttons differ here. */
+    val identity: Pair<ToolItem, String?> get() = item to arg
+
+    override fun toString(): String =
+        "${item.id}${arg?.let { "~$it" } ?: ""}@$x,$y(${w}x$h)"
 }

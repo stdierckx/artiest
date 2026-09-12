@@ -132,7 +132,7 @@ fun DockHost(
      * lives here, and this file has never heard of a workspace.
      */
     arrangeExtras: @Composable () -> Unit = {},
-    slotContent: @Composable (ToolItem, Axis) -> Unit,
+    slotContent: @Composable (CellPlacement, Axis) -> Unit,
 ) {
     val density = LocalDensity.current
     val drag = remember { DockDrag() }
@@ -281,11 +281,11 @@ private fun SurfaceView(
     drag: DockDrag,
     filter: CatalogueFilter,
     onFilter: (CatalogueFilter) -> Unit,
-    overflow: List<ToolItem>,
+    overflow: List<CellPlacement>,
     slotPx: Float,
     gridW: Int,
     gridH: Int,
-    slotContent: @Composable (ToolItem, Axis) -> Unit,
+    slotContent: @Composable (CellPlacement, Axis) -> Unit,
 ) {
     if (surface.isEmpty && !arranging && overflow.isEmpty()) return
     val b = surface.region.bounds
@@ -952,7 +952,13 @@ internal fun ToolChooser(
         }
 
         Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            for (item in ToolItem.entries.filter { it.group == tab && it in filter }) {
+            // `BRUSH` is skipped, and it is the only entry that ever is: it
+            // needs an argument to mean anything, and a `BRUSH` with none is a
+            // button that loads nothing. It reaches a toolbar from the shelf,
+            // where the brush is what you are pointing at. See `ToolItem.BRUSH`.
+            for (item in ToolItem.entries.filter {
+                it.group == tab && it in filter && it != ToolItem.BRUSH
+            }) {
                 val fits = layout.fits(bar.id, item, cell, ignoring = cell)
                 val already = item == occupant?.item
                 val elsewhere = !already && item in layout
@@ -1136,7 +1142,7 @@ internal class DockDrag {
         clear()
         val cell = cellAt(where) ?: return null
         val target = layout.surfaceAt(cell)
-            ?: return layout.addSurface(held.item, cell).first
+            ?: return layout.addSurface(held.item, cell, held.placement.arg).first
         return layout.move(held.surface.id, held.cell, target.id, cell)
     }
 

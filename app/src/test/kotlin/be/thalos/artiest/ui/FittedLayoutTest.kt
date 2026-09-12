@@ -98,7 +98,7 @@ class FittedLayoutTest {
         )
         assertEquals(
             listOf(ToolItem.ERASER_SIZE, ToolItem.OPACITY),
-            fitted.overflow["a"],
+            fitted.overflow["a"]?.map { it.item },
             "in flow order, so the chevron lists the same things every time",
         )
     }
@@ -127,7 +127,7 @@ class FittedLayoutTest {
             ),
         )
         val fitted = layout.on(phone)
-        assertEquals(listOf(ToolItem.SIZE), fitted.overflow["a"])
+        assertEquals(listOf(ToolItem.SIZE), fitted.overflow["a"]?.map { it.item })
         assertNull(fitted.overflow["b"], "nothing fell off the other one")
     }
 

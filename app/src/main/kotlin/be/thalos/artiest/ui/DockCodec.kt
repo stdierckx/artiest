@@ -75,7 +75,16 @@ package be.thalos.artiest.ui
  */
 object DockCodec {
 
+    // **Still v5 after the argument arrived, and that is the point.** `~arg`
+    // is a suffix a v5 string never has, so every layout ever written parses
+    // unchanged by the reader below; bumping would have meant writing a v5
+    // reader to avoid emptying every toolbar on upgrade, to buy nothing. An
+    // older build reading a newer string does not recognise `brush~pencil-2`
+    // and drops that one entry, which is a button missing rather than a bar.
     private const val VERSION = "v5"
+
+    /** A brush id is 48 characters at most. See `BrushEntry.MAX_ID`. */
+    private const val MAX_ARG = 48
 
     /** Where a pre-docking bar lands. See the class KDoc. */
     internal val V1_SIDE = Side.TOP
@@ -96,10 +105,15 @@ object DockCodec {
                     // A panel carries the size the user gave it; nothing else
                     // does, because nothing else can be resized and a number
                     // that is always derivable is a number that can go stale.
+                    // `x,y=id`, then `~arg` for a control that has one --
+                    // a brush button is the entry plus the brush it loads --
+                    // then `@WxH` for a panel the user has resized. A brush id
+                    // is a slug, so `~` cannot appear inside one.
+                    val arg = p.arg?.let { "~$it" } ?: ""
                     if (p.hangs) {
-                        "${p.x},${p.y}=${p.item.id}@${p.w}x${p.h}"
+                        "${p.x},${p.y}=${p.item.id}$arg@${p.w}x${p.h}"
                     } else {
-                        "${p.x},${p.y}=${p.item.id}"
+                        "${p.x},${p.y}=${p.item.id}$arg"
                     }
                 }
             )
@@ -218,7 +232,13 @@ object DockCodec {
             val y = at[1].toIntOrNull() ?: continue
             val body = entry.substring(eq + 1)
             val sizeAt = body.indexOf('@')
-            val item = ToolItem.byId(if (sizeAt < 0) body else body.substring(0, sizeAt)) ?: continue
+            val named = if (sizeAt < 0) body else body.substring(0, sizeAt)
+            // The size comes off first, then the argument, because `@` can
+            // only be the size and `~` can only be the argument.
+            val argAt = named.indexOf('~')
+            val item = ToolItem.byId(if (argAt < 0) named else named.substring(0, argAt)) ?: continue
+            val arg = if (argAt < 0) null else named.substring(argAt + 1).take(MAX_ARG)
+                .takeIf { it.isNotEmpty() }
             // A size that will not parse falls back to what the shape says,
             // which is a control at the wrong size rather than a control that
             // is gone.
@@ -230,6 +250,7 @@ object DockCodec {
                 y = y,
                 w = size?.first ?: natural.first,
                 h = size?.second ?: natural.second,
+                arg = arg,
             )
             if (out.size >= MAX_ITEMS) break
         }

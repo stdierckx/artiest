@@ -78,6 +78,9 @@ object ToolIcons {
         ToolItem.CLEAR -> trash
         ToolItem.EXPORT -> export
         ToolItem.PROJECTS -> gallery
+        // A brush button's face is its own swatch; the glyph is only for the
+        // chooser, which lists one row per brush and has no swatch to show.
+        ToolItem.BRUSH -> brushes
         ToolItem.BRUSHES -> brushes
         ToolItem.BRUSH_SHELF -> brushes
         ToolItem.IMPORT -> import_

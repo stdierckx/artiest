@@ -49,10 +49,10 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 internal fun OverflowChevron(
-    items: List<ToolItem>,
+    items: List<CellPlacement>,
     axis: Axis,
     modifier: Modifier = Modifier,
-    slotContent: @Composable (ToolItem, Axis) -> Unit,
+    slotContent: @Composable (CellPlacement, Axis) -> Unit,
 ) {
     if (items.isEmpty()) return
     var open by remember { mutableStateOf(false) }
@@ -88,7 +88,8 @@ internal fun OverflowChevron(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 4.dp),
                 )
-                for (item in items) {
+                for (placement in items) {
+                    val item = placement.item
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
@@ -99,7 +100,7 @@ internal fun OverflowChevron(
                                 .width(Chrome.SLOT * item.cellsWide)
                                 .height(Chrome.SLOT),
                         ) {
-                            SlotSurface { slotContent(item, axis) }
+                            SlotSurface { slotContent(placement, axis) }
                         }
                         Text(
                             item.label,

@@ -102,6 +102,7 @@ fun BrushesButton(
     ink: Int,
     onPick: (BrushEntry) -> Unit,
     onUseAsEraser: (BrushEntry) -> Unit,
+    onPlaceBrush: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -147,6 +148,7 @@ fun BrushesButton(
                     // one decision, and the next thing you do is draw.
                     onPick = { open = false; onPick(it) },
                     onUseAsEraser = onUseAsEraser,
+                    onPlaceBrush = { open = false; onPlaceBrush(it) },
                     onSaveAs = onSaveAs,
                     onRevert = onRevert,
                     onRename = onRename,
@@ -199,6 +201,7 @@ fun BrushShelfCard(
     ink: Int,
     onPick: (BrushEntry) -> Unit,
     onUseAsEraser: (BrushEntry) -> Unit,
+    onPlaceBrush: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -213,6 +216,7 @@ fun BrushShelfCard(
             ink = ink,
             onPick = onPick,
             onUseAsEraser = onUseAsEraser,
+            onPlaceBrush = onPlaceBrush,
             onSaveAs = onSaveAs,
             onRevert = onRevert,
             onRename = onRename,
@@ -235,6 +239,7 @@ private fun ShelfBody(
     ink: Int,
     onPick: (BrushEntry) -> Unit,
     onUseAsEraser: (BrushEntry) -> Unit,
+    onPlaceBrush: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -277,6 +282,7 @@ private fun ShelfBody(
                     ink = ink,
                     onPick = { onPick(entry) },
                     onUseAsEraser = { onUseAsEraser(entry) },
+                    onPlaceOnBar = { onPlaceBrush(entry) },
                     onRename = { renaming = entry },
                     onDelete = { deleting = entry },
                 )
@@ -340,6 +346,7 @@ private fun BrushRow(
     ink: Int,
     onPick: () -> Unit,
     onUseAsEraser: () -> Unit,
+    onPlaceOnBar: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -408,6 +415,13 @@ private fun BrushRow(
                             // eraser wants a *shape*, and the pen's hard edge
                             // and the pencil's soft one are the two most
                             // obvious rubbers this app ships.
+                            // First, because it is the one an artist reaches
+                            // for repeatedly: a shelf is a list you go to and a
+                            // favourite is a button you already have.
+                            DropdownMenuItem(
+                                text = { Text("Put on a toolbar", fontSize = 13.sp) },
+                                onClick = { menu = false; onPlaceOnBar() },
+                            )
                             DropdownMenuItem(
                                 text = {
                                     Text(
@@ -569,3 +583,59 @@ private val SWATCH_HEIGHT = 46.dp
  * look like an empty box.
  */
 private val SWATCH_PAPER = Color(0xFFE6E3DC)
+
+
+/**
+ * One brush, as a button on a toolbar.
+ *
+ * **Its face is the mark it makes**, for `ColourButton`'s reason: showing the
+ * thing it sets *is* the icon, and a brush glyph beside it would be a label for
+ * something already visible. It is also the only face that can tell two pencils
+ * apart, which is the whole point of being allowed two.
+ *
+ * The swatch is drawn at the button's own shape rather than the row's three to
+ * one. It is squashed, and that is the right trade at 34 by 22: what separates
+ * two pencils at this size is how wide and how dark the mark is, and both
+ * survive the squash where a correctly-proportioned stroke shrunk to fit would
+ * be a grey smudge.
+ *
+ * [entry] is null when the placement names a brush that has since been deleted.
+ * The button greys out and does nothing rather than disappearing, because a
+ * hole in a toolbar is a thing the user has to diagnose and a dead button is a
+ * thing they can simply remove.
+ */
+@Composable
+fun BrushButton(
+    entry: BrushEntry?,
+    selected: Boolean,
+    ink: Int,
+    onPick: (BrushEntry) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh)
+            .clickable(enabled = entry != null) { entry?.let(onPick) },
+    ) {
+        if (entry == null) {
+            Icon(
+                ToolIcons.brushes,
+                "This brush is gone",
+                Modifier.size(17.dp),
+                tint = scheme.onSurface.copy(alpha = 0.25f),
+            )
+            return@Box
+        }
+        Swatch(
+            entry = entry,
+            ink = ink,
+            modifier = Modifier
+                .size(width = 30.dp, height = 22.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(SWATCH_PAPER),
+        )
+    }
+}
