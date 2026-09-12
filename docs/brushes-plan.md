@@ -2,10 +2,16 @@
 
 > Authored 2026-09-10, after Phase 2 shipped three hand-authored presets (pen,
 > pencil, marker) and the question became "how do we get to thirty without
-> authoring thirty". Nothing here has been measured. Every claim about how a
-> Krita preset maps onto our engine is a **prediction awaiting a render
-> comparison**, and the work plan is arranged so the first refutation arrives
-> before the expensive part starts.
+> authoring thirty". Nothing here had been measured; every claim about how a
+> Krita preset maps onto our engine was a **prediction awaiting a render
+> comparison**, and the work plan was arranged so the first refutation arrived
+> before the expensive part started.
+>
+> **2026-09-12: it has been measured.** Wb1 shipped, and a spike ran Wb2 and
+> Wb3 end to end against Krita's own default bundle on this tablet. The answer
+> is at the bottom, under *"What the first import actually did"*. The short
+> version: 26 of 30 converted brushes read as themselves, which clears Wb4's
+> bar, and the four that do not each name a specific thing to fix.
 
 ## The three questions, answered before anything else
 
@@ -256,6 +262,112 @@ second source or is ruled out cheaply.
 - A brush *editor*. Importing presets and editing them are different features,
   and this one is worth nothing if the shelf is unusable, so the shelf comes
   first.
+
+## What the first import actually did
+
+> 2026-09-12. `tools/krita-brushes.py` and `KritaSheetTool`, against
+> `Krita_4_Default_Resources.bundle` taken from the copy of Krita installed on
+> the DTH-A116. Read-only; nothing from Krita's source.
+
+### Wb2's stop condition is cleared
+
+*"If `meta.xml` licences turn out to be absent or unreliable across real
+bundles, shipping a curated set is off."* The bundle's `meta.xml` carries
+
+```xml
+<meta:meta-userdefined meta:name="license" meta:value="CC-0"/>
+```
+
+alongside the author line — "Deevad with derivations of the brushes of Ramon
+Miranda, Razvanc, Radian, Wolthera, Storm, Scottyp and other." So the licence is
+present, machine-readable and CC-0, and Wb8's curated set is on. **One bundle is
+not "across real bundles"**, and the rule stands: any brush whose licence cannot
+be traced to a sentence in a `meta.xml` is dropped.
+
+### Where the bundle actually is
+
+Not where it looks. Krita's own copy in `/sdcard/Android/data/org.krita/files/`
+is mode 600 and `adb pull` cannot read it — but the bundle ships *inside the
+APK*, at `assets/krita/bundles/`, and the APK is world-readable. That is how the
+files were obtained, and it is worth writing down because the obvious path
+fails.
+
+### What converts, and what does not
+
+Of the bundle's **118 presets**:
+
+| | Count | |
+|---|---|---|
+| `paintbrush` + `auto_brush` | **35** | converts today, no engine change |
+| `paintbrush` + `gbr_brush` / `png_brush` / `svg_brush` | 47 | needs Wb5's bitmap tips |
+| `colorsmudge` | 15 | needs a colour-reading paintop |
+| everything else (spray, deform, sketch, filter, hatching, …) | 21 | paintops this engine does not have |
+
+Of the 35, five are blend-mode brushes — *Adjust Dodge*, *Adjust Multiply* and
+friends — and the converter now **refuses** them. Their `CompositeOp` is not
+`normal` and nothing here carries one, so importing one drew a slab of black
+where Krita draws a glow. That is worse than not importing it, because it looks
+like the converter working.
+
+**30 brushes convert.**
+
+### The judgement pass
+
+Wb4's bar: *"if fewer than half read as their original, the mapping approach is
+wrong."* Rendered side by side with Krita's own preset preview:
+
+**26 of 30 read as themselves.** The pencils are pencils, the inks are thin and
+crisp, the charcoals are grainy, *Marker Chisel Smooth* is a chisel that turns
+with the barrel, *Shapes Square* scatters, *Texture Reptile* is a dense grainy
+band. The approach is sound.
+
+The four that do not, and what each one names:
+
+1. **Airbrush Soft** — a 600 px nib. Correct, and invisible in a 480 px preview.
+   A preview-scale problem, not a conversion one.
+2. **Eraser Soft** — converts correctly to `erase 1`, and the swatch renderer
+   draws erasers as ink, so the row is a black slab. `BrushSwatch` should paint
+   an eraser onto something.
+3. **Pencil-3 Large 4B** — too faint. Krita's 4B leans on its *texture pattern*,
+   which is a bitmap; our grain is procedural and cannot stand in for it.
+   Waiting on Wb5.
+4. **Pixel Art** — a 1 px nib. Right, and unreadable at any preview size.
+
+### The three things that had to be established by rendering
+
+None of these is in Krita's documentation; each came from a preset that came out
+wrong and was chased down.
+
+- **`declination` runs the other way from `Sensor.TILT`.** Krita's declination
+  is 1 with the pen upright; ours is 0. Established from *Marker Chisel Smooth*,
+  whose ratio curve is 0.035 at declination 0 and 1 at declination 1 — a chisel
+  is a thin wedge laid over and a round dot held upright. Every curve on that
+  sensor is mirrored on the way in.
+- **The mask generator matters more than the fade.** `default` fades over the
+  band `hfade` describes, so `1 - fade` is the whole of it — but `gauss` and
+  `soft` are soft *by construction* and both ship at fade 0. Reading `1 - fade`
+  gave them hardness 1 and turned *Eraser Soft* and *Airbrush Soft* into solid
+  black slabs. The generator is now a ceiling on hardness (0.85 for gauss, 0.40
+  for soft) until Wb5 adds a real second falloff.
+- **Krita's dab alpha is not our flow, and the difference is the overlap.**
+  Krita lays `1 / spacing` dabs across a diameter and each carries
+  `opacity × flow`; `StrokeBuilder` already inverts that overlap, so `flow` here
+  *means* the coverage of one pass. Carried straight across, *Pencil-3 Large 4B*
+  painted at 0.05 coverage and its swatch was blank paper. Through the
+  accumulation — `1 - (1 - a)^(1/spacing)` — it is 0.64, and `opacity` goes to 1
+  because the build-up is in the flow and Krita's normal mode has no ceiling of
+  its own.
+
+### What this does not answer
+
+- The spike is Python in `tools/`. Wb2 and Wb3 proper are Kotlin behind the
+  shelf's import button, and `.bundle` reading and the `picks.txt` contact sheet
+  are still to write.
+- **Sizes are carried across 1:1 and that is a guess.** A Krita preset's
+  diameter is in canvas pixels and its canvas is whatever the artist made; ours
+  is a 3300 px page. A 5 px fineliner reads as a fineliner on both, so nothing
+  obviously breaks — but nobody has drawn with one for an hour.
+- Wb6's judgement pass over predefined-tip brushes is untouched, because Wb5 is.
 
 ## Sources
 

@@ -134,6 +134,13 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform {
         includeEngines("junit-jupiter", "junit-vintage")
     }
+    // `-Dartiest.*` reaches the test JVM. Gradle forks its tests, so a property
+    // set on the command line is otherwise invisible to them -- which matters
+    // for the hand-run tools that live in the test source set because that is
+    // where Robolectric's real graphics are. See `KritaSheetTool`.
+    for ((key, value) in providers.systemPropertiesPrefixedBy("artiest.").get()) {
+        systemProperty(key, value)
+    }
 }
 
 // Writes the two generated documents into docs/.
