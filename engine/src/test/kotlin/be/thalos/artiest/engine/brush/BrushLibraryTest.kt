@@ -99,6 +99,24 @@ class BrushLibraryTest {
     }
 
     @Test
+    fun `picking a brush does not turn the eraser on or off`() {
+        // The report that found this: "nothing happens when the stylus touches
+        // the canvas" -- the eraser toggle was on, which is the documented
+        // behaviour of a modifier that survives a tool change. What was wrong
+        // was underneath: `applyTo` wrote `erase` from the file, so a brush
+        // could appear to change a mode that `InkSurfaceView.applyEraseFor`
+        // re-reads from the toolbar at every pen-down. A brush may not have an
+        // opinion about it.
+        val erasing = BrushPreset.PEN.create().also { it.erase = true }
+        BrushLibrary.DEFAULT.entryFor("pencil").applyTo(erasing)
+        assertTrue(erasing.erase, "still erasing, with the pencil's shape")
+
+        val inking = BrushPreset.PEN.create()
+        saved("rubber", brush = Brush().also { it.erase = true }).applyTo(inking)
+        assertFalse(inking.erase, "and a file cannot start the eraser either")
+    }
+
+    @Test
     fun `a name becomes an id that can be a file name`() {
         assertEquals("my-soft-pencil", BrushEntry.slug("My Soft Pencil"))
         assertEquals("2b", BrushEntry.slug("  2B  "))

@@ -277,20 +277,29 @@ def convert(preset, ident, label):
         # honest answer rather than zero, which would read as a shaky import.
         'stabilization 0.1',
         'antialias 1',
-        'erase 1' if composite == 'erase' or truthy(preset.get('EraserMode'), False) else 'erase 0',
+        # Never `erase 1`. Erasing is a mode the toolbar's toggle owns and the
+        # pen re-reads at every stroke, so a brush file claiming it would be a
+        # claim nothing honours. A Krita preset that erases keeps its *shape*,
+        # which is the useful half, and says so in its tags.
+        'erase 0',
         'eraseSize 96.0',
         'onset 0.0 0.0',
         'burnish 0.0',
     ]
 
-    # Krita's texture option is a pattern image; this engine's grain is a
-    # procedural field. Enabling a graphite-like tooth is the closest thing it
-    # can say, and it is marked in the tags rather than claimed as the same.
+    tags = ['krita']
+    if composite == 'erase' or truthy(preset.get('EraserMode'), False):
+        tags.append('eraser')
     if truthy(preset.get('Texture/Pattern/Enabled'), False):
+        # Krita's texture option is a pattern image; this engine's grain is a
+        # procedural field. Enabling a graphite-like tooth is the closest thing
+        # it can say, and it is marked in the tags rather than claimed as the
+        # same.
         lines.append('grain 160.0 0.35 0.22 0.86 11')
-        lines[lines.index('tags krita')] = 'tags krita textured'
+        tags.append('textured')
     else:
         lines.append('grain 1.0 0.0 0.0 1.0 0')
+    lines[lines.index('tags krita')] = 'tags ' + ' '.join(tags)
 
     lines.append('sizeOpt.combine MULTIPLY')
     if size_drive:

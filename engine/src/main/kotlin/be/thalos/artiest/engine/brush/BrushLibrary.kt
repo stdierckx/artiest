@@ -303,7 +303,14 @@ fun adoptBrush(from: Brush, to: Brush) {
     to.onsetPressure = from.onsetPressure
     to.grain = from.grain
     to.burnish = from.burnish
-    to.erase = from.erase
+    // **`erase` is not copied, and that is deliberate.** It is a *mode the pen
+    // is in*, owned by the toolbar's toggle and re-read from it at the start of
+    // every stroke by `InkSurfaceView.applyEraseFor` — so carrying it here
+    // changed a field that the next pen-down overwrote anyway, while making
+    // `applyTo` look as though picking a brush could turn the eraser on or off.
+    // `eraseSizeMax` *is* copied: the rubber's width is a number a brush may
+    // reasonably have an opinion about, and `Brush.eraseSizeMax` says why it is
+    // separate from the nib's.
     to.eraseSizeMax = from.eraseSizeMax
     for ((src, dst) in listOf(
         from.size to to.size,
