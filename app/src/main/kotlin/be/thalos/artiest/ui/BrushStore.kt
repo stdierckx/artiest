@@ -61,6 +61,23 @@ class BrushStore(context: Context) {
     fun loadId(): String = BrushLibrary.idOf(prefs.getString(KEY_PRESET, null))
         ?: BrushPreset.PEN.id
 
+    /**
+     * The id of the brush the eraser uses, or null to erase with the brush in
+     * the hand.
+     *
+     * Null is a real answer and not an empty one — see `InkSurfaceView.rubber`,
+     * where it means "the pencil rubs out with the pencil's tilt". So it is
+     * stored as an absent key rather than as an empty string, and a brush that
+     * has since been deleted comes back as null the same way.
+     */
+    fun loadEraserId(): String? = prefs.getString(KEY_ERASER, null)?.takeIf { it.isNotEmpty() }
+
+    fun saveEraserId(id: String?) {
+        prefs.edit().apply {
+            if (id == null) remove(KEY_ERASER) else putString(KEY_ERASER, id)
+        }.apply()
+    }
+
     fun save(brush: Brush, entry: BrushEntry) {
         prefs.edit()
             .putString(KEY_BRUSH, BrushCodec.encode(brush))
@@ -74,5 +91,6 @@ class BrushStore(context: Context) {
         const val KEY_BRUSH = "brush.current"
         const val KEY_PRESET = "brush.preset"
         const val KEY_TUNING = "brush.tuning"
+        const val KEY_ERASER = "brush.eraser"
     }
 }

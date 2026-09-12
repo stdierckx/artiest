@@ -22,6 +22,7 @@ import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.brush.adoptBrush
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.StrokeBuilder
@@ -92,14 +93,47 @@ class InkSurfaceView(
 ) : SurfaceView(context), InkSurface {
 
     /**
-     * The brush.
+     * The brush the stroke in flight is drawn with. **Render thread only.**
      *
      * A `val` holding a mutable `Brush` rather than a reassignable field:
      * `StrokeBuilder` captures the instance at construction, so replacing it
      * here would leave the builder drawing with the old one and nothing would
-     * fail. `Brush`'s own settings are `var`, so W15's sliders move those.
+     * fail. `Brush`'s own settings are `var`, so the sliders move those.
+     *
+     * **This is no longer the brush the toolbar configures.** It used to be
+     * both, and it stopped being able to be when the eraser got a brush of its
+     * own: something has to hold the pencil's numbers while the rubber is on
+     * the glass. The toolbar writes [ink] and [rubber]; this one is chosen from
+     * those at pen-down by [applyEraseFor] and is a scratch the render thread
+     * owns. Nothing outside the render thread may write it.
      */
     val pen: Brush = Brush()
+
+    /**
+     * The brush the toolbar has in hand for inking. Written from the UI thread.
+     *
+     * Read once per stroke, at pen-down, and copied into [pen]. That copy is
+     * also the whole of the thread safety: a slider dragged mid-stroke cannot
+     * change the stroke being drawn, which is the same guarantee `frozen` gives
+     * the transform and for the same reason.
+     */
+    val ink: Brush = Brush()
+
+    /**
+     * The brush the eraser uses, or **null to erase with [ink]'s own shape**.
+     *
+     * Null is the behaviour this app shipped with, and it is a good default
+     * rather than an absence: erasing with the tool in your hand means the
+     * pencil rubs out with the pencil's tilt and the marker with the marker's
+     * wedge, which is what `ToolItem.ERASER`'s "a toggle, not a third tool"
+     * means. What it could not do is let you keep a *soft* rubber and a *hard*
+     * one and switch between them without changing the brush you draw with —
+     * which is what Krita's eraser presets are for, and what this field adds.
+     *
+     * `eraseSizeMax` already gave the rubber its own width for exactly this
+     * reason. This gives it the rest of its shape.
+     */
+    var rubber: Brush? = null
 
     /** Ink colour. W15 gives it a swatch; until then it is black. */
     var inkColorArgb: Int = Color.BLACK
@@ -1012,8 +1046,33 @@ class InkSurfaceView(
         if (eraseDecided) return
         eraseDecided = true
         val barrel = (sample.buttonState and BARREL_BUTTONS) != 0
-        pen.erase = eraserTool || barrel
+        val erasing = eraserTool || barrel
+        // Re-chosen only when the guess at pen-down was wrong, which is only
+        // ever the barrel: `eraserTool` is a toggle that cannot move between
+        // the two, and `barrelHeld` is a field the same events update a moment
+        // later. No dab has been emitted yet -- this runs before the sample
+        // loop -- so the builder can simply be begun again.
+        if (erasing != assumedErasing) {
+            chooseBrush(erasing)
+            driver.rebegin()
+        }
+        pen.erase = erasing
     }
+
+    /**
+     * Copy [ink] or [rubber] into [pen] for the stroke that is starting.
+     *
+     * The one place the two configurations become the one the engine draws
+     * with. `erase` is set by the caller rather than carried, for the reason
+     * `adoptBrush` gives: it is a mode, not a property of a brush.
+     */
+    private fun chooseBrush(erasing: Boolean) {
+        assumedErasing = erasing
+        adoptBrush(if (erasing) rubber ?: ink else ink, pen)
+    }
+
+    /** What [chooseBrush] was last told, so [applyEraseFor] can tell if it was wrong. */
+    private var assumedErasing = false
 
     /**
      * The grain shader, or null when the brush has none.
@@ -1769,7 +1828,15 @@ class InkSurfaceView(
      * that is exactly the rubbed-out area at a full press.
      */
     val cursorDiameterDocPx: Float
-        get() = if (erasingNow) pen.eraseSizeMax else pen.sizeMax
+        get() = when {
+            // Mid-stroke the live brush is the truth; before one it is stale,
+            // because [pen] is only chosen at pen-down. Hovering is exactly the
+            // "before one" case, and a ring that showed the last stroke's width
+            // would be a ring that lies about the tool you have just picked.
+            strokeOpen -> if (pen.erase) pen.eraseSizeMax else pen.sizeMax
+            erasingNow -> (rubber ?: ink).eraseSizeMax
+            else -> ink.sizeMax
+        }
 
     /**
      * Whether the pen would take ink out if it came down now — or is doing so,
@@ -1806,6 +1873,23 @@ class InkSurfaceView(
 
         private val builder = StrokeBuilder(pen)
         private var emitted = 0
+
+        /**
+         * Start this stroke over with the brush that has just been chosen.
+         *
+         * Called only from [applyEraseFor], and only when the barrel turned out
+         * to disagree with what pen-down assumed. Safe because no dab exists
+         * yet: `StrokeBuilder.begin` resets a count rather than a buffer, and
+         * the front buffer has nothing on it either.
+         */
+        fun rebegin() {
+            if (tailSmoothing.strength != pen.stabilization) {
+                tailSmoothing = Stabilizer(pen.stabilization)
+            }
+            builder.begin(inkColorArgb)
+            beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
+        }
+
         private var seen = 0
         private var strokeTiltMaxRad = 0f
         private var strokePressureMin = Float.MAX_VALUE
@@ -1917,6 +2001,13 @@ class InkSurfaceView(
             strokePointerId = pointerId
             downTimeNanos = 0L
             gate.reset()
+            // The brush first, and everything below reads it: the stabilizer's
+            // time constant, the front buffer's antialias flag and the
+            // builder's own filter all come off `pen`, so choosing it after any
+            // of them would start the stroke with the previous one's numbers.
+            // `barrelHeld` is the guess; `applyEraseFor` corrects it from the
+            // first sample's own buttons if it was wrong.
+            chooseBrush(eraserTool || barrelHeld)
             if (tailSmoothing.strength != pen.stabilization) {
                 tailSmoothing = Stabilizer(pen.stabilization)
             }

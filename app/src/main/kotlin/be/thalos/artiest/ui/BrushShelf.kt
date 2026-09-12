@@ -97,9 +97,11 @@ import kotlinx.coroutines.withContext
 fun BrushesButton(
     entries: List<BrushEntry>,
     currentId: String,
+    eraserId: String?,
     modified: Boolean,
     ink: Int,
     onPick: (BrushEntry) -> Unit,
+    onUseAsEraser: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -137,12 +139,14 @@ fun BrushesButton(
                 ShelfBody(
                     entries = entries,
                     currentId = currentId,
+                    eraserId = eraserId,
                     modified = modified,
                     ink = ink,
                     // Picking a brush closes the shelf. A palette stays open
                     // because mixing is a series of tries; picking a tool is
                     // one decision, and the next thing you do is draw.
                     onPick = { open = false; onPick(it) },
+                    onUseAsEraser = onUseAsEraser,
                     onSaveAs = onSaveAs,
                     onRevert = onRevert,
                     onRename = onRename,
@@ -190,9 +194,11 @@ fun BrushesButton(
 fun BrushShelfCard(
     entries: List<BrushEntry>,
     currentId: String,
+    eraserId: String?,
     modified: Boolean,
     ink: Int,
     onPick: (BrushEntry) -> Unit,
+    onUseAsEraser: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -202,9 +208,11 @@ fun BrushShelfCard(
         ShelfBody(
             entries = entries,
             currentId = currentId,
+            eraserId = eraserId,
             modified = modified,
             ink = ink,
             onPick = onPick,
+            onUseAsEraser = onUseAsEraser,
             onSaveAs = onSaveAs,
             onRevert = onRevert,
             onRename = onRename,
@@ -222,9 +230,11 @@ fun BrushShelfCard(
 private fun ShelfBody(
     entries: List<BrushEntry>,
     currentId: String,
+    eraserId: String?,
     modified: Boolean,
     ink: Int,
     onPick: (BrushEntry) -> Unit,
+    onUseAsEraser: (BrushEntry) -> Unit,
     onSaveAs: (String) -> Unit,
     onRevert: () -> Unit,
     onRename: (BrushEntry, String) -> Unit,
@@ -262,9 +272,11 @@ private fun ShelfBody(
                 BrushRow(
                     entry = entry,
                     selected = entry.id == currentId,
+                    erasing = entry.id == eraserId,
                     modified = modified && entry.id == currentId,
                     ink = ink,
                     onPick = { onPick(entry) },
+                    onUseAsEraser = { onUseAsEraser(entry) },
                     onRename = { renaming = entry },
                     onDelete = { deleting = entry },
                 )
@@ -323,9 +335,11 @@ private fun ShelfBody(
 private fun BrushRow(
     entry: BrushEntry,
     selected: Boolean,
+    erasing: Boolean,
     modified: Boolean,
     ink: Int,
     onPick: () -> Unit,
+    onUseAsEraser: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -359,7 +373,20 @@ private fun BrushRow(
                 )
                 Spacer(Modifier.width(6.dp))
             }
-            if (entry.origin != BrushOrigin.BUILT_IN) {
+            if (erasing) {
+                // A rubber beside the name, because "which brush erases" is a
+                // second current-ness and the lit row already means the first.
+                // Nothing else on the row could carry it: the swatch is the
+                // mark the brush makes, and it makes the same one either way.
+                Icon(
+                    ToolIcons.eraser,
+                    "Erases with this brush",
+                    Modifier.size(14.dp),
+                    tint = scheme.primary,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            run {
                 Box {
                     Box(
                         contentAlignment = Alignment.Center,
@@ -377,14 +404,30 @@ private fun BrushRow(
                     }
                     if (menu) {
                         DropdownMenu(expanded = true, onDismissRequest = { menu = false }) {
+                            // Offered on every row, built-ins included: the
+                            // eraser wants a *shape*, and the pen's hard edge
+                            // and the pencil's soft one are the two most
+                            // obvious rubbers this app ships.
                             DropdownMenuItem(
-                                text = { Text("Rename…", fontSize = 13.sp) },
-                                onClick = { menu = false; onRename() },
+                                text = {
+                                    Text(
+                                        if (erasing) "Stop erasing with this"
+                                        else "Use as eraser",
+                                        fontSize = 13.sp,
+                                    )
+                                },
+                                onClick = { menu = false; onUseAsEraser() },
                             )
-                            DropdownMenuItem(
-                                text = { Text("Delete…", fontSize = 13.sp) },
-                                onClick = { menu = false; onDelete() },
-                            )
+                            if (entry.removable) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename…", fontSize = 13.sp) },
+                                    onClick = { menu = false; onRename() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Delete…", fontSize = 13.sp) },
+                                    onClick = { menu = false; onDelete() },
+                                )
+                            }
                         }
                     }
                 }

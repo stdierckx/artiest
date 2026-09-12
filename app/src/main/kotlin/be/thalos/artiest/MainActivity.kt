@@ -458,6 +458,20 @@ private fun CanvasScreen(
      */
     var brushModified by remember { mutableStateOf(false) }
 
+    /**
+     * Which brush the eraser rubs out with, or **null for the one in the hand**.
+     *
+     * Null is the behaviour the app shipped with and is still the default: the
+     * eraser takes the shape of whatever you are drawing with, so the pencil
+     * rubs out with the pencil's tilt. What it could not do is keep a soft
+     * rubber and a hard one and switch between them without changing the brush
+     * you draw with. See `InkSurfaceView.rubber`.
+     */
+    var eraserBrushId by remember { mutableStateOf(brushStore.loadEraserId()) }
+
+    /** That id's entry, or null. Derived, so deleting it falls back by itself. */
+    val eraserBrush = eraserBrushId?.let { library.find(it) }
+
     /** W11. Whether that tool is currently taking ink out instead of putting it in. */
     var eraser by remember { mutableStateOf(false) }
 
@@ -788,15 +802,15 @@ private fun CanvasScreen(
         // over, which is four to five times bigger. Carrying the old number
         // across would hand the user a pencil a quarter of the size they had.
         if (brushStore.storedTuning() != brush.tuning) {
-            brush.applyTo(v.pen)
-            v.pen.erase = false
-            brushStore.save(v.pen, brush)
-            sizeMax = v.pen.sizeMax
-            eraserSize = v.pen.eraseSizeMax
-            smoothing = v.pen.stabilization
-            opacity = v.pen.opacity
-            flow = v.pen.flow
-            grain = v.pen.grain.strength
+            brush.applyTo(v.ink)
+            v.ink.erase = false
+            brushStore.save(v.ink, brush)
+            sizeMax = v.ink.sizeMax
+            eraserSize = v.ink.eraseSizeMax
+            smoothing = v.ink.stabilization
+            opacity = v.ink.opacity
+            flow = v.ink.flow
+            grain = v.ink.grain.strength
             return@LaunchedEffect
         }
         BrushCodec.decode(BrushCodec.encode(stored))?.let { b ->
@@ -805,7 +819,7 @@ private fun CanvasScreen(
             // variable shadows an implicit receiver's member. Unqualified, this
             // block would assign the sliders to themselves and leave the brush
             // untouched -- and only `grain` would fail to compile.
-            val pen = v.pen
+            val pen = v.ink
             pen.sizeMin = b.sizeMin
             pen.sizeMax = b.sizeMax
             pen.sizeCurve = b.sizeCurve
@@ -828,33 +842,41 @@ private fun CanvasScreen(
             pen.burnish = b.burnish
             pen.erase = b.erase
             pen.eraseSizeMax = b.eraseSizeMax
-            brush.applyShapeOnlyTo(v.pen)
+            brush.applyShapeOnlyTo(v.ink)
         }
-        sizeMax = v.pen.sizeMax
-        eraserSize = v.pen.eraseSizeMax
-        smoothing = v.pen.stabilization
-        opacity = v.pen.opacity
-        flow = v.pen.flow
-        grain = v.pen.grain.strength
+        sizeMax = v.ink.sizeMax
+        eraserSize = v.ink.eraseSizeMax
+        smoothing = v.ink.stabilization
+        opacity = v.ink.opacity
+        flow = v.ink.flow
+        grain = v.ink.grain.strength
+    }
+
+    // The rubber, rebuilt whenever the brush behind it or its width changes.
+    // A fresh `Brush` rather than a reference into the library, because the
+    // view keeps it and the width is this app's number rather than the entry's.
+    LaunchedEffect(surface, eraserBrush, eraserSize) {
+        val v = surface ?: return@LaunchedEffect
+        v.rubber = eraserBrush?.create()?.also { it.eraseSizeMax = eraserSize }
     }
 
     LaunchedEffect(surface, ink, sizeMax, eraserSize, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
-        v.pen.sizeMax = sizeMax
-        v.pen.eraseSizeMax = eraserSize
-        v.pen.stabilization = smoothing
+        v.ink.sizeMax = sizeMax
+        v.ink.eraseSizeMax = eraserSize
+        v.ink.stabilization = smoothing
         // These two are what turn the indirect path on. Both at 1 is Phase 1's
         // opaque nib and takes the direct path; anything less routes the stroke
         // through the scratch buffer, which is the whole of W6.
-        v.pen.opacity = opacity
-        v.pen.flow = flow
-        v.pen.grain = v.pen.grain.copy(strength = grain)
-        brushStore.save(v.pen, brush)
+        v.ink.opacity = opacity
+        v.ink.flow = flow
+        v.ink.grain = v.ink.grain.copy(strength = grain)
+        brushStore.save(v.ink, brush)
         // Two encodes of fifteen lines, once per slider change. Cheap, and it
         // is the only moment the answer can have changed -- the alternative is
         // a panel that asks the question on every recomposition.
-        brushModified = !brush.matches(v.pen)
+        brushModified = !brush.matches(v.ink)
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -1063,14 +1085,14 @@ private fun CanvasScreen(
      */
     val adopt: (BrushEntry) -> Unit = { entry ->
         surface?.let { v ->
-            entry.applyTo(v.pen)
+            entry.applyTo(v.ink)
             brushId = entry.id
-            sizeMax = v.pen.sizeMax
-            eraserSize = v.pen.eraseSizeMax
-            smoothing = v.pen.stabilization
-            opacity = v.pen.opacity
-            flow = v.pen.flow
-            grain = v.pen.grain.strength
+            sizeMax = v.ink.sizeMax
+            eraserSize = v.ink.eraseSizeMax
+            smoothing = v.ink.stabilization
+            opacity = v.ink.opacity
+            flow = v.ink.flow
+            grain = v.ink.grain.strength
             brushModified = false
             generation++
         }
@@ -1087,7 +1109,7 @@ private fun CanvasScreen(
         val v = surface
         val name = typed.trim().take(BrushEntry.MAX_LABEL)
         if (v != null && name.isNotEmpty()) {
-            val copy = BrushCodec.decode(BrushCodec.encode(v.pen))
+            val copy = BrushCodec.decode(BrushCodec.encode(v.ink))
             if (copy != null) {
                 copy.erase = false
                 val id = brushFiles.freeId(name)
@@ -1096,11 +1118,24 @@ private fun CanvasScreen(
                     library = brushFiles.library()
                     brushId = id
                     brushModified = false
-                    brushStore.save(v.pen, library.entryFor(id))
+                    brushStore.save(v.ink, library.entryFor(id))
                     generation++
                 }
             }
         }
+    }
+
+    /**
+     * Make [entry] the eraser, or stop if it already is.
+     *
+     * A toggle rather than a one-way set, because "erase with the brush in my
+     * hand" is a state a user has to be able to get *back* to — it is the
+     * default and it is the one an artist who has never opened this menu is in.
+     */
+    val useAsEraser: (BrushEntry) -> Unit = { entry ->
+        eraserBrushId = if (eraserBrushId == entry.id) null else entry.id
+        brushStore.saveEraserId(eraserBrushId)
+        generation++
     }
 
     val renameBrush: (BrushEntry, String) -> Unit = { entry, typed ->
@@ -1269,6 +1304,7 @@ private fun CanvasScreen(
                         reject, export, exporting, generation,
                         stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
                         project, lastSave,
+                        eraserBrush?.label ?: "the brush in the hand",
                     ),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
@@ -1335,18 +1371,18 @@ private fun CanvasScreen(
                     },
                     onWet = {
                         val v = surface ?: return@DebugRow
-                        val on = v.pen.opacity < 1f
+                        val on = v.ink.opacity < 1f
                         val p = library.entryFor(
                             if (on) BrushPreset.PEN.id else BrushPreset.PENCIL.id,
                         )
-                        p.applyTo(v.pen)
+                        p.applyTo(v.ink)
                         brushId = p.id
-                        sizeMax = v.pen.sizeMax
-                        eraserSize = v.pen.eraseSizeMax
-                        smoothing = v.pen.stabilization
-                        opacity = v.pen.opacity
-                        flow = v.pen.flow
-                        grain = v.pen.grain.strength
+                        sizeMax = v.ink.sizeMax
+                        eraserSize = v.ink.eraseSizeMax
+                        smoothing = v.ink.stabilization
+                        opacity = v.ink.opacity
+                        flow = v.ink.flow
+                        grain = v.ink.grain.strength
                         generation++
                     },
                     onStress = { pressure, path ->
@@ -1515,6 +1551,8 @@ private fun CanvasScreen(
                     },
                     library = library,
                     brushId = brushId,
+                    eraserBrushId = eraserBrushId,
+                    onUseAsEraser = useAsEraser,
                     brushModified = brushModified,
                     onSaveBrush = saveBrushAs,
                     onRevertBrush = { adopt(brush) },
@@ -1527,7 +1565,7 @@ private fun CanvasScreen(
                         // values straight back over the preset it just set,
                         // and switching tools would half work.
                         surface?.let { v ->
-                            p.applyTo(v.pen)
+                            p.applyTo(v.ink)
                             brushId = p.id
                             // Picking a brush turns the marquee off, the mirror
                             // of picking a shape turning it on. Without it the
@@ -1537,12 +1575,12 @@ private fun CanvasScreen(
                             // current, which is worse than either being wrong.
                             // Found on the tablet, not in a test.
                             setSelecting(false)
-                            sizeMax = v.pen.sizeMax
-                            eraserSize = v.pen.eraseSizeMax
-                            smoothing = v.pen.stabilization
-                            opacity = v.pen.opacity
-                            flow = v.pen.flow
-                            grain = v.pen.grain.strength
+                            sizeMax = v.ink.sizeMax
+                            eraserSize = v.ink.eraseSizeMax
+                            smoothing = v.ink.stabilization
+                            opacity = v.ink.opacity
+                            flow = v.ink.flow
+                            grain = v.ink.grain.strength
                             generation++
                         }
                     },
@@ -1678,6 +1716,8 @@ private fun ToolSlot(
     onGrain: (Float) -> Unit,
     library: BrushLibrary,
     brushId: String,
+    eraserBrushId: String?,
+    onUseAsEraser: (BrushEntry) -> Unit,
     brushModified: Boolean,
     onSaveBrush: (String) -> Unit,
     onRevertBrush: () -> Unit,
@@ -1864,9 +1904,11 @@ private fun ToolSlot(
         ToolItem.BRUSHES -> BrushesButton(
             entries = library.entries,
             currentId = brushId,
+            eraserId = eraserBrushId,
             modified = brushModified,
             ink = ink,
             onPick = onBrush,
+            onUseAsEraser = onUseAsEraser,
             onSaveAs = onSaveBrush,
             onRevert = onRevertBrush,
             onRename = onRenameBrush,
@@ -1878,9 +1920,11 @@ private fun ToolSlot(
         ToolItem.BRUSH_SHELF -> BrushShelfCard(
             entries = library.entries,
             currentId = brushId,
+            eraserId = eraserBrushId,
             modified = brushModified,
             ink = ink,
             onPick = onBrush,
+            onUseAsEraser = onUseAsEraser,
             onSaveAs = onSaveBrush,
             onRevert = onRevertBrush,
             onRename = onRenameBrush,
@@ -2028,7 +2072,7 @@ private fun DebugRow(
         // and the tilt-driven dab together -- written straight onto the pen
         // because the point is a repeatable setting, and a slider drag is not.
         TextButton(onClick = onWet) {
-            Text(if ((surface?.pen?.opacity ?: 1f) < 1f) "Pencil ON" else "Pencil off")
+            Text(if ((surface?.ink?.opacity ?: 1f) < 1f) "Pencil ON" else "Pencil off")
         }
         // Two runs, not one. See StrokeStress.start's pressure parameter: the
         // sweep is the worst case and the firm press is what most of a real
@@ -2073,6 +2117,7 @@ private fun readout(
     strokeTimes: String,
     project: Project,
     lastSave: SaveResult.Saved?,
+    eraserLabel: String,
 ): String {
     if (surface == null) return "surface  -"
     val p = surface.batches
@@ -2145,6 +2190,7 @@ private fun readout(
         "last stroke\n" +
         "tilt     ${r(surface.lastStrokeTiltDeg, 1)} deg max last stroke   " +
         "dab ${r(surface.lastStrokeWidthMin, 1)}..${r(surface.lastStrokeWidthMax, 1)} doc px\n" +
+        "eraser   $eraserLabel   ${r(surface.cursorDiameterDocPx, 0)} doc px\n" +
         "brush    ${if (surface.pen.erase) "ERASING" else "painting"}   " +
         "${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
         "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +
