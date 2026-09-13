@@ -385,18 +385,29 @@ enum class BrushPreset(
             // rather than at the edge of it.
             brush.hardness = 0.35f
             // The ceiling for the whole stroke. Below 1, so that one sweep
-            // cannot clear a passage however many times it crosses itself.
-            brush.opacity = 0.85f
+            // cannot quite clear a passage however many times it crosses
+            // itself — there is always a trace left for the next pass to take.
+            brush.opacity = 0.95f
             brush.flowOption.combine = CurveOption.Combine.MULTIPLY
-            brush.flowOption.min = 0.08f
-            brush.flowOption.max = 0.45f
-            // Press harder, take out more. The curve is gentler than the
-            // pencil's because an eraser is not trying to hold a tonal range —
-            // it is trying to be controllable at the light end, where the work
-            // of easing something back actually happens.
+            // **The range is the tool, and the first numbers were too timid.**
+            // 0.45 flow under a 0.85 ceiling took 38% out at a full press,
+            // which needs three sweeps to clear a line and reads on the shelf
+            // as a brush that does nothing. Seen on the tablet, where the soft
+            // eraser's swatch was a nearly uniform grey box.
+            //
+            // 0.84 at a full press and 0.06 at a feather is the range that
+            // makes it *soft* rather than *weak*: leaning on it clears, and
+            // barely touching it lifts a tone. That is the pencil's own
+            // bargain — see PENCIL's flow — read backwards.
+            brush.flowOption.min = 0.06f
+            brush.flowOption.max = 0.88f
+            // Press harder, take out more. Gentler than the pencil's curve,
+            // because an eraser is not trying to hold a tonal range — it is
+            // trying to be controllable at the light end, where the work of
+            // easing something back actually happens.
             brush.flowOption.drive(
                 Sensor.PRESSURE,
-                ResponseCurve.of(0f to 0.18f, 0.5f to 0.62f, 1f to 1f),
+                ResponseCurve.of(0f to 0.05f, 0.5f to 0.55f, 1f to 1f),
             )
             brush.stabilization = 0.25f
         }

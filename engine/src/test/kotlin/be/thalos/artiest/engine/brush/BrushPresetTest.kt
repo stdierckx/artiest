@@ -116,8 +116,14 @@ class BrushPresetTest {
         assertEquals(1f, hard.flow, "and clears in one pass")
 
         assertTrue(soft.hardness < 0.5f, "the soft one does not: ${soft.hardness}")
-        assertTrue(soft.opacity < 1f, "one sweep cannot clear: ${soft.opacity}")
-        assertTrue(soft.flow < 0.6f, "and it builds: ${soft.flow}")
+        assertTrue(soft.opacity < 1f, "one sweep cannot quite clear: ${soft.opacity}")
+        // Soft, not weak. The floor is what makes a feather touch lift a tone
+        // instead of clearing it; the gap between floor and ceiling is what
+        // makes pressure mean something. An eraser whose ceiling is low needs
+        // three sweeps to take a line out and reads as broken — that was the
+        // first draft, and the tablet showed it as a uniform grey swatch.
+        assertTrue(soft.flowOption.min < 0.1f, "a feather touch must barely lift")
+        assertTrue(soft.flow > 0.8f, "and leaning on it must clear: ${soft.flow}")
         assertTrue(soft.sizeMax > hard.sizeMax, "a soft rubber is swept, not aimed")
     }
 

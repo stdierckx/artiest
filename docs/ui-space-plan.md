@@ -198,13 +198,52 @@ give back 63% of theirs.
 
 ### Us5 — the sweep
 
-Whatever is left. Counted, not guessed: the panel heights before and after, in
-dp, in this document.
+**The brush shelf's rows were the last big thing.** A name above a full-width
+swatch was 96dp of card per brush, which is right for a shelf of three and
+wrong for one of twenty — and the tablet has twenty. One line — mark, name,
+menu — is 44dp, and the same popup shows five rows where it showed three while
+a docked card shows ten where it showed five.
+
+The swatch is 112 by 30 rather than full-width by 46, which is *less*
+distorted, not more: 3.7:1 against the sample stroke's own 3:1, where the wide
+strip was 5.2:1. The S-curve is the same curve at a smaller size instead of a
+stretched one.
+
+**The soft eraser was retuned on the evidence of its own swatch.** At 0.45 flow
+under a 0.85 ceiling it took 38% out at a full press — three sweeps to clear a
+line — and the shelf showed it as a nearly uniform grey box, which was an
+honest picture of a tool that was not much good. 0.88 under 0.95 makes it soft
+rather than weak: leaning on it clears, a feather touch lifts a tone, and the
+swatch now reads as a graded gap beside the hard one's clean one.
+
+### What the whole list gave back
+
+| | Before | After |
+|---|---|---|
+| Colour popup | 440dp tall | 302 |
+| Layers panel, opacity and blend | 173dp | 64 |
+| Brush shelf, per row | 96dp | 44 |
+| Bottom slider bar, starter | 16 cells | 12 |
+| Bottom slider bar, Sketcher | 14 cells | 9 |
+| Catalogue entries on the eraser | 2 (a toggle and a slider) | 0 |
+
+The starter layout now fits a 12 by 8 cell screen — a small phone in landscape
+— whole, where the four-slider bar used to push one control into the overflow
+chevron. Nobody was looking for that; it fell out of the eraser's second size
+slider going away.
 
 ## Stop condition
 
 The user draws with it and does not say the chrome is in the way. Short of
-that: the colour panel and the layers panel each give back at least a third of
-their height, the eraser is two rows in the shelf and two buttons on a bar with
-no toggle anywhere, and a brush reaches a toolbar by pressing `+` in the cell it
-should go in.
+that, the four measurable halves of it, and where each stands:
+
+| | Asked | Got |
+|---|---|---|
+| Colour panel gives back a third of its height | 147dp | 138dp, 31% |
+| Layers panel gives back a third of its height | 58dp | 109dp, 63% |
+| The eraser is brushes, with no toggle anywhere | — | two shelf rows, two bar buttons, no toggle |
+| A brush reaches a toolbar from the `+` in its cell | — | the Brushes tab |
+
+The colour panel is nine device-independent pixels short of the third and the
+number is left as it is rather than shaved to meet it: the next dp has to come
+off the disc, and the disc is already smaller than Krita's.

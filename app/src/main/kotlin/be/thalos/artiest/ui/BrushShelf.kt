@@ -330,12 +330,30 @@ private fun ShelfBody(
 }
 
 /**
- * One brush: its mark, its name, and where it came from.
+ * One brush: its mark, its name, and where it came from — **on one line**.
  *
- * The swatch is the width of the row and the name sits above it, rather than
- * the other way round. A row is told apart by its picture, so the picture gets
- * the space — and a name is legible at 12sp in a strip, where a stroke squeezed
- * into a 60dp square is not.
+ * ## Why it stopped being two
+ *
+ * It was a name above a full-width swatch, 96dp of card per brush, which put
+ * five rows in a docked shelf. That was right when the shelf held three
+ * brushes. It holds twenty on the tablet this is written against, and it was
+ * the single biggest piece of chrome left after Us3 and Us4 — the user's fifth
+ * item is *"find ways to save space"*, and this is where the space was.
+ *
+ * 44dp now, and ten rows where there were five.
+ *
+ * ## What the narrower swatch costs, and why it is affordable
+ *
+ * The old argument stands on its own terms: a row is told apart by its picture,
+ * so the picture gets the space, and a stroke squeezed into a small square is
+ * not legible. What changed is that it does not have to be a square. At 112 by
+ * 30dp the swatch keeps very nearly the stroke's own three-to-one shape, so the
+ * S-curve is the same curve at 55% of the width rather than a crop of it — and
+ * the one thing that gets harder to see, the pencil's grain, is the one thing
+ * the *name* is most likely to say out loud.
+ *
+ * The mark goes first and the name second, which is the other half of the same
+ * argument: the eye finds the brush by its stroke and confirms it by reading.
  */
 @Composable
 private fun BrushRow(
@@ -353,117 +371,110 @@ private fun BrushRow(
     val scheme = MaterialTheme.colorScheme
     var menu by remember { mutableStateOf(false) }
 
-    Column(
-        Modifier
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .height(ROW_HEIGHT)
+            .clip(RoundedCornerShape(10.dp))
             .background(if (selected) scheme.secondaryContainer else scheme.surfaceContainer)
             .clickable(onClick = onPick)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 7.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                entry.label,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                color = if (selected) scheme.onSecondaryContainer else scheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            if (modified) {
-                // The whole of "you have moved this since you picked it". A
-                // word would not fit and a warning colour would be a scold;
-                // a dot is the convention every editor with unsaved state uses.
-                Box(
-                    Modifier.size(7.dp).clip(CircleShape).background(scheme.primary),
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            if (erasing) {
-                // A rubber beside the name, because "which brush erases" is a
-                // second current-ness and the lit row already means the first.
-                // Nothing else on the row could carry it: the swatch is the
-                // mark the brush makes, and it makes the same one either way.
-                Icon(
-                    ToolIcons.eraser,
-                    "Erases with this brush",
-                    Modifier.size(14.dp),
-                    tint = scheme.primary,
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            run {
-                Box {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .clickable { menu = true },
-                    ) {
-                        Icon(
-                            ToolIcons.grip,
-                            "More",
-                            Modifier.size(11.dp),
-                            tint = scheme.onSurfaceVariant,
-                        )
-                    }
-                    if (menu) {
-                        DropdownMenu(expanded = true, onDismissRequest = { menu = false }) {
-                            // First, because it is the one an artist reaches
-                            // for repeatedly: a shelf is a list you go to and a
-                            // favourite is a button you already have. The other
-                            // way to the same place is the `+` in arrange
-                            // mode's Brushes tab, which is the one that lets
-                            // you say *where* — see `BrushChoiceList`.
-                            DropdownMenuItem(
-                                text = { Text("Put on a toolbar", fontSize = 13.sp) },
-                                onClick = { menu = false; onPlaceOnBar() },
-                            )
-                            // The **barrel button's** rubber, and nothing else.
-                            // It used to be "the eraser's brush" and it is not
-                            // any more: the eraser is two brushes on this very
-                            // shelf, picked like any other row. What is left is
-                            // the question the toolbar cannot answer — what the
-                            // pen does when it is turned over — and the default
-                            // answer, rubbing out with the brush in your hand,
-                            // is still the good one.
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (erasing) "Stop using for the pen's back"
-                                        else "Use for the pen's back",
-                                        fontSize = 13.sp,
-                                    )
-                                },
-                                onClick = { menu = false; onUseAsEraser() },
-                            )
-                            if (entry.removable) {
-                                DropdownMenuItem(
-                                    text = { Text("Rename…", fontSize = 13.sp) },
-                                    onClick = { menu = false; onRename() },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Delete…", fontSize = 13.sp) },
-                                    onClick = { menu = false; onDelete() },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
         Swatch(
             entry = entry,
             ink = ink,
             modifier = Modifier
-                .fillMaxWidth()
-                .height(SWATCH_HEIGHT)
-                .clip(RoundedCornerShape(6.dp))
+                .size(width = SWATCH_WIDTH, height = SWATCH_HEIGHT)
+                .clip(RoundedCornerShape(5.dp))
                 .background(SWATCH_PAPER),
         )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            entry.label,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) scheme.onSecondaryContainer else scheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (modified) {
+            // The whole of "you have moved this since you picked it". A word
+            // would not fit and a warning colour would be a scold; a dot is the
+            // convention every editor with unsaved state uses.
+            Box(Modifier.size(7.dp).clip(CircleShape).background(scheme.primary))
+            Spacer(Modifier.width(6.dp))
+        }
+        if (erasing) {
+            // A rubber beside the name, because "the pen's back uses this one"
+            // is a second current-ness and the lit row already means the first.
+            // Nothing else on the row could carry it: the swatch is the mark
+            // the brush makes, and it makes the same one either way.
+            Icon(
+                ToolIcons.eraser,
+                "The pen's back rubs out with this",
+                Modifier.size(14.dp),
+                tint = scheme.primary,
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Box {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .clickable { menu = true },
+            ) {
+                Icon(
+                    ToolIcons.grip,
+                    "More",
+                    Modifier.size(11.dp),
+                    tint = scheme.onSurfaceVariant,
+                )
+            }
+            if (menu) {
+                DropdownMenu(expanded = true, onDismissRequest = { menu = false }) {
+                    // First, because it is the one an artist reaches for
+                    // repeatedly: a shelf is a list you go to and a favourite is
+                    // a button you already have. The other way to the same place
+                    // is the `+` in arrange mode's Brushes tab, which is the one
+                    // that lets you say *where* — see `BrushChoiceList`.
+                    DropdownMenuItem(
+                        text = { Text("Put on a toolbar", fontSize = 13.sp) },
+                        onClick = { menu = false; onPlaceOnBar() },
+                    )
+                    // The **barrel button's** rubber, and nothing else. It used
+                    // to be "the eraser's brush" and it is not any more: the
+                    // eraser is two brushes on this very shelf, picked like any
+                    // other row. What is left is the question the toolbar cannot
+                    // answer — what the pen does when it is turned over — and
+                    // the default answer, rubbing out with the brush in your
+                    // hand, is still the good one.
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (erasing) "Stop using for the pen's back"
+                                else "Use for the pen's back",
+                                fontSize = 13.sp,
+                            )
+                        },
+                        onClick = { menu = false; onUseAsEraser() },
+                    )
+                    if (entry.removable) {
+                        DropdownMenuItem(
+                            text = { Text("Rename…", fontSize = 13.sp) },
+                            onClick = { menu = false; onRename() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete…", fontSize = 13.sp) },
+                            onClick = { menu = false; onDelete() },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -576,24 +587,39 @@ private fun nextName(base: String, entries: List<BrushEntry>): String {
 private val PANEL_WIDTH = 264.dp
 
 /**
- * Three rows before it scrolls in the popup. Fewer than the layers panel's
- * four, because a brush row is taller: it is a name and a picture, and the
- * picture is the part that has to be big enough to recognise.
+ * Five rows before it scrolls in the popup, at the same 252dp it was three at.
+ *
+ * The number did not move and what it buys did. A brush row is 44dp now rather
+ * than 96 — see [BrushRow] — so the popup shows nearly twice the shelf without
+ * covering any more of the drawing, which is the shape every part of Us5 takes:
+ * the same panel, more of what is in it.
  */
 private val LIST_MAX_HEIGHT = 252.dp
 
 /** How much of a docked shelf is not the list: the header and the actions. */
 private val CARD_FURNITURE = 104.dp
 
+
 /**
- * A row is two cells tall, and this is the picture's share of it.
+ * One brush, one line. See [BrushRow] for why it stopped being two.
  *
- * `BrushSwatch.ASPECT` is 3:1, so a 240dp strip wants 80dp to be undistorted —
- * more than a row can spend. It is drawn at the strip's own aspect instead and
- * the stroke simply has less height to wander in, which costs nothing that
- * matters: the mark's *width* is what tells two brushes apart.
+ * 44dp is the same number a toolbar cell is, and not by accident: it is the
+ * smallest thing a finger hits reliably, which is the floor a list of things
+ * you tap has to respect however much space it is trying to save.
  */
-private val SWATCH_HEIGHT = 46.dp
+private val ROW_HEIGHT = 44.dp
+
+/**
+ * The picture's share of a row.
+ *
+ * 112 by 30 is 3.7:1 against `BrushSwatch.ASPECT`'s 3:1 — close enough that the
+ * sample stroke is the same S-curve slightly stretched rather than a different
+ * shape. It was a full-width 46dp strip, which was 5.2:1 and a good deal more
+ * distorted; the mark is *less* squashed now as well as smaller.
+ */
+private val SWATCH_WIDTH = 112.dp
+
+private val SWATCH_HEIGHT = 30.dp
 
 /**
  * Paper, near enough, and deliberately not the theme's surface.
