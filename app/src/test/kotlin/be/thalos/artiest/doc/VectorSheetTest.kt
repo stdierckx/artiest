@@ -16,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -54,6 +55,8 @@ class VectorSheetTest {
         len: Float = 60f,
         brush: Brush = Brush(),
         seed: Int = 1,
+        guideText: String? = null,
+        bounds: Bounds? = null,
     ): PendingStroke {
         val log = SampleLog()
         val n = 40
@@ -67,8 +70,107 @@ class VectorSheetTest {
             colorArgb = 0xFF000000.toInt(),
             erase = false,
             brushText = BrushCodec.encode(brush),
-            bounds = Bounds.of(x - 12f, y - 12f, x + len + 12f, y + 12f),
+            guideText = guideText,
+            bounds = bounds ?: Bounds.of(x - 12f, y - 12f, x + len + 12f, y + 12f),
         )
+    }
+
+    // ----------------------------------------------------------- the guides
+
+    @Test
+    fun `a stroke drawn freehand costs the guide table nothing`() {
+        val s = sheet()
+        val r = s.append(pending(), null)
+        assertEquals(StrokeRecord.NO_GUIDE, r.guide)
+        assertEquals(emptyList(), s.guides)
+        assertNull(s.snapAt(r.guide))
+    }
+
+    @Test
+    fun `a sitting against one ruler takes one table entry`() {
+        // The interning argument at its strongest: a ruler is laid down once
+        // and then inked along, so every stroke of a sitting has the same text.
+        val s = sheet()
+        val text = "1.0 0.0|1 ruler 1 0.0,0.0 100.0,0.0"
+        val ids = (0 until 20).map { s.append(pending(y = 100f + it, guideText = text), null).guide }
+        assertEquals(1, s.guides.size)
+        assertTrue(ids.all { it == 0 })
+    }
+
+    @Test
+    fun `two rulers are two entries and each stroke names its own`() {
+        val s = sheet()
+        val a = "1.0 0.0|1 ruler 1 0.0,0.0 100.0,0.0"
+        val b = "1.0 0.0|1 ruler 1 0.0,400.0 100.0,400.0"
+        val first = s.append(pending(guideText = a), null)
+        val second = s.append(pending(y = 140f, guideText = b), null)
+        val third = s.append(pending(y = 180f, guideText = a), null)
+        assertEquals(2, s.guides.size)
+        assertEquals(first.guide, third.guide)
+        assertTrue(second.guide != first.guide)
+    }
+
+    @Test
+    fun `the snap a stroke names is decoded once and kept`() {
+        val s = sheet()
+        val r = s.append(pending(guideText = "1.0 0.0|1 ruler 1 0.0,0.0 100.0,0.0"), null)
+        val snap = assertNotNull(s.snapAt(r.guide))
+        assertSame(snap, s.snapAt(r.guide), "decoded once, like a brush")
+        val out = FloatArray(2)
+        assertTrue(snap.apply(50f, 30f, out))
+        assertEquals(0f, out[1], 1e-3f)
+    }
+
+    @Test
+    fun `a guide index this sheet does not have is nothing, not a crash`() {
+        // `brushAt`'s argument: a drawing that opens with one stroke a few
+        // pixels off its ruler is recoverable, and a crash on the render thread
+        // is not.
+        val s = sheet()
+        assertNull(s.snapAt(0))
+        assertNull(s.snapAt(-1))
+        assertNull(s.snapAt(99))
+    }
+
+    @Test
+    fun `a guide line that will not read is nothing, not a spoiled sheet`() {
+        val s = sheet()
+        assertTrue(s.load(emptyList(), emptyList(), emptyList(), listOf("not a snap")))
+        assertNull(s.snapAt(0))
+        assertTrue(s.intact, "an unreadable ruler is a line that is not quite straight")
+    }
+
+    @Test
+    fun `the guide table comes back off a load`() {
+        val text = "1.0 0.0|1 ruler 1 0.0,0.0 100.0,0.0"
+        val written = sheet().also { it.append(pending(guideText = text), null) }
+        val read = sheet()
+        assertTrue(read.load(written.strokes, written.brushes, written.clips, written.guides))
+        assertEquals(1, read.size)
+        assertEquals(0, read.strokes[0].guide)
+        assertNotNull(read.snapAt(0))
+    }
+
+    @Test
+    fun `a guided stroke is hit where its ink is, not where the hand was`() {
+        // The hand wobbled to y=100; the ruler is at y=0, so that is where the
+        // line is. A hit test against the raw samples would miss it by 100
+        // pixels and find it where there is nothing.
+        // The bounds are the dab loop's, so for a guided stroke they are
+        // already on the ruler -- which is why the grid finds it there. What is
+        // under test is the second half: the exact hit, which walks the
+        // centreline, and the centreline of a ruled stroke is the ruler.
+        val s = sheet()
+        s.append(
+            pending(
+                x = 100f, y = 100f,
+                guideText = "1.0 0.0|1 ruler 1 0.0,0.0 100.0,0.0",
+                bounds = Bounds.of(88f, -12f, 172f, 12f),
+            ),
+            null,
+        )
+        assertNotNull(s.hit(130f, 0f, 4f), "on the ruler, where the ink is")
+        assertNull(s.hit(130f, 100f, 4f), "and not where the samples are")
     }
 
     // ---------------------------------------------------------------- adding

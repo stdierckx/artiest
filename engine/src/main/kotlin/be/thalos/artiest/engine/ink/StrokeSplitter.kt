@@ -108,6 +108,10 @@ object StrokeSplitter {
                     seed = record.seed,
                     dabBase = bases[p],
                     clip = record.clip,
+                    // Both halves of a cut stroke were drawn against the same
+                    // guide, for `dabBase`'s reason one line up: a piece is the
+                    // same hand movement, and it has to re-render as one.
+                    guide = record.guide,
                     bounds = if (l > r) Bounds.EMPTY else Bounds.of(l, t, r, b),
                     packed = log.pack(),
                     sampleCount = log.count,

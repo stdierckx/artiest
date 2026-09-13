@@ -1,7 +1,4 @@
-package be.thalos.artiest.project
-
-import be.thalos.artiest.doc.GuideKind
-import be.thalos.artiest.doc.Guideline
+package be.thalos.artiest.doc
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

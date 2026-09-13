@@ -45,6 +45,10 @@ object StrokeMove {
         if (picked.isEmpty()) return null
         if (StrokeTransform.isIdentity(op.matrix)) return null
         val scale = StrokeTransform.scaleOf(op.matrix)
+        // The same nine floats as an `android.graphics.Matrix`, once, for the
+        // guide table: `StrokeOp.Transform` carries them as an array because it
+        // crosses a thread, and mapping a ruler wants the object.
+        val matrix = android.graphics.Matrix().apply { setValues(op.matrix) }
         val removed = ArrayList<StrokeRecord>(picked.size)
         val added = ArrayList<StrokeRecord>(picked.size)
         for (id in picked) {
@@ -55,7 +59,12 @@ object StrokeMove {
                 old, op.matrix, sheet.nextIds(1)[0], brush, Bounds.EMPTY,
             )
             removed.add(old)
-            added.add(withBounds(moved, sheet.brushAt(brush), old.bounds))
+            // The guide first, because the bounds are measured along the
+            // centreline and the centreline of a ruled stroke is on the ruler.
+            // Measuring against the old ruler would put the rectangle where the
+            // stroke used to be.
+            val guided = withGuide(moved, old, sheet, matrix, scale)
+            added.add(withBounds(guided, sheet.brushAt(brush), old.bounds, sheet.snapAt(guided.guide)))
         }
         if (removed.isEmpty()) return null
         return VectorStep(layerId, added = added, removed = removed)
@@ -68,6 +77,44 @@ object StrokeMove {
         }
         for (r in step.added) sheet.add(r)
         sheet.reorder()
+    }
+
+    /**
+     * The record again, naming a ruler that has moved with it.
+     *
+     * A stroke drawn freehand keeps `NO_GUIDE` and costs nothing, which is
+     * nearly every stroke. One that was drawn against a ruler gets a table
+     * entry describing that ruler where it now is — see `GuideText.mapSnap`
+     * for why leaving it alone would spring the stroke back onto the original
+     * ruler the first time anything repainted it.
+     *
+     * Interned, so dragging forty strokes through one gesture adds one entry.
+     */
+    private fun withGuide(
+        moved: StrokeRecord,
+        old: StrokeRecord,
+        sheet: VectorSheet,
+        matrix: android.graphics.Matrix,
+        scale: Float,
+    ): StrokeRecord {
+        if (old.guide == StrokeRecord.NO_GUIDE) return moved
+        val was = sheet.guides.getOrNull(old.guide) ?: return moved
+        val now = GuideText.mapSnap(was, matrix, scale) ?: return moved
+        val index = sheet.guideIndexOf(now)
+        if (index == moved.guide) return moved
+        return StrokeRecord(
+            id = moved.id,
+            brush = moved.brush,
+            colorArgb = moved.colorArgb,
+            erase = moved.erase,
+            seed = moved.seed,
+            dabBase = moved.dabBase,
+            clip = moved.clip,
+            guide = index,
+            bounds = moved.bounds,
+            packed = moved.copyPackedBytes(),
+            sampleCount = moved.sampleCount,
+        )
     }
 
     /**
@@ -94,8 +141,13 @@ object StrokeMove {
      * Both, for `StrokeRestyle`'s reason: the old rectangle is the ground a
      * rebuild has to clear, and the new one is where the ink is going.
      */
-    private fun withBounds(record: StrokeRecord, pen: Brush, before: Bounds): StrokeRecord {
-        val line = record.polyline(pen)
+    private fun withBounds(
+        record: StrokeRecord,
+        pen: Brush,
+        before: Bounds,
+        snap: be.thalos.artiest.engine.guide.Snap?,
+    ): StrokeRecord {
+        val line = record.polyline(pen, snap)
         var l = Float.MAX_VALUE
         var t = Float.MAX_VALUE
         var r = -Float.MAX_VALUE
@@ -117,6 +169,10 @@ object StrokeMove {
             seed = record.seed,
             dabBase = record.dabBase,
             clip = record.clip,
+            // A moved stroke was drawn against the ruler it was drawn against.
+            // Moving it does not re-ink it, and a rebuild has to lay the same
+            // dabs somewhere else rather than different dabs.
+            guide = record.guide,
             bounds = now,
             packed = record.copyPackedBytes(),
             sampleCount = record.sampleCount,

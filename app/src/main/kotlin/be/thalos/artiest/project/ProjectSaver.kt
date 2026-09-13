@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PaintFlagsDrawFilter
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.GuideText
 import be.thalos.artiest.doc.Layer
 import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.doc.Thumbnails
@@ -178,6 +179,7 @@ class ProjectSaver(private val files: ProjectFiles) {
             // The tables are the sheet's and go in the manifest; the samples go
             // in the `.ink` file. See `ProjectSheet.brushes`.
             clips = vector?.clips.orEmpty().map { PathText.encode(it) },
+            guides = vector?.guides.orEmpty(),
         )
     }
 
@@ -250,7 +252,19 @@ class ProjectSaver(private val files: ProjectFiles) {
             }
 
             // Last, and only once every sheet it names is on disk.
-            val saved = project.revised(now, sheets, stack.activePosition)
+            //
+            // The guides go in here rather than through `describe`, because
+            // they are the *page's* and not a sheet's — see `GuideSet`. They
+            // cost nothing when there are none, which is the usual case, and
+            // they are read off the document rather than diffed for a revision
+            // because there are a handful of them and the list is already being
+            // rebuilt.
+            val guides = document.guides
+            val saved = project.revised(now, sheets, stack.activePosition).copy(
+                guides = GuideText.encodeAll(guides.all()),
+                guideStrength = guides.strength,
+                guideReachDoc = guides.reachDoc,
+            )
             if (!files.save(saved)) return SaveResult.Failed("the project file could not be written")
 
             // Only now: these are the files the manifest no longer names.

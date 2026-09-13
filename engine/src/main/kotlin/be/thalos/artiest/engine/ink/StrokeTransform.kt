@@ -80,6 +80,7 @@ object StrokeTransform {
             seed = record.seed,
             dabBase = record.dabBase,
             clip = record.clip,
+            guide = record.guide,
             bounds = bounds,
             packed = log.pack(),
             sampleCount = log.count,

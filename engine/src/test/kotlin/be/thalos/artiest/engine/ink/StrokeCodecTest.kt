@@ -30,7 +30,10 @@ class StrokeCodecTest {
     fun `every field survives the round trip`() {
         val records = listOf(
             record(id = 7, brush = 2, color = 0x80FF0000.toInt(), erase = false, seed = 9, base = 0),
-            record(id = 8, brush = 0, color = 0xFF00FF00.toInt(), erase = true, seed = -3, base = 41, clip = 1),
+            record(
+                id = 8, brush = 0, color = 0xFF00FF00.toInt(), erase = true, seed = -3,
+                base = 41, clip = 1, guide = 2,
+            ),
         )
         val back = StrokeCodec.decode(StrokeCodec.encode(records))
         assertEquals(2, back.size)
@@ -44,6 +47,7 @@ class StrokeCodecTest {
             assertEquals(a.seed, b.seed)
             assertEquals(a.dabBase, b.dabBase)
             assertEquals(a.clip, b.clip)
+            assertEquals(a.guide, b.guide)
             assertEquals(a.bounds, b.bounds)
             assertEquals(a.sampleCount, b.sampleCount)
             assertContentEquals(a.copyPackedBytes(), b.copyPackedBytes())
@@ -175,6 +179,60 @@ class StrokeCodecTest {
      * short strokes.
      */
     @Test
+    fun `a file from before Ik13 opens, and its strokes were drawn freehand`() {
+        // Version 3 added the guide column. Every drawing saved before it is a
+        // version 2 file with no such column, and every stroke in one really
+        // was drawn freehand — there was no guide to draw against — so this is
+        // not a default standing in for a lost value.
+        val v3 = StrokeCodec.encode(listOf(record(id = 4, clip = 1, guide = 0)))
+        val v2 = downgradeToVersion2(v3)
+        val back = StrokeCodec.decode(v2).single()
+        assertEquals(4L, back.id)
+        assertEquals(1, back.clip, "the columns before the new one still line up")
+        assertEquals(StrokeRecord.NO_GUIDE, back.guide)
+        assertEquals(4, back.sampleCount)
+    }
+
+    /**
+     * The same file as a version 2 one: the version byte down, and the four
+     * bytes of the guide column taken out of each record header.
+     *
+     * Written out rather than checked in as a fixture, because a fixture is a
+     * file nobody can see the shape of — and the point of the test is that the
+     * *shape* of the header before the new column is unchanged.
+     */
+    private fun downgradeToVersion2(v3: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val header = StrokeCodec.MAGIC.length + 2 + 4
+        out.write(v3, 0, header)
+        var at = header
+        // id(8) brush(4) color(4) seed(4) dabBase(4) clip(4) | guide(4) | erase(1)
+        val beforeGuide = 8 + 4 + 4 + 4 + 4 + 4
+        while (at < v3.size) {
+            out.write(v3, at, beforeGuide)
+            at += beforeGuide + 4
+            out.write(v3, at, 1)
+            at += 1
+            val tag = v3[at].toInt()
+            out.write(v3, at, 1)
+            at += 1
+            if (tag == 1) {
+                out.write(v3, at, 16)
+                at += 16
+            }
+            val samples = java.nio.ByteBuffer.wrap(v3, at, 4).int
+            out.write(v3, at, 4)
+            at += 4
+            val bytes = StrokeCodec.ORIGIN_BYTES + samples * StrokeCodec.SAMPLE_BYTES
+            out.write(v3, at, bytes)
+            at += bytes
+        }
+        val bytes = out.toByteArray()
+        bytes[StrokeCodec.MAGIC.length] = 2
+        return bytes
+    }
+
+    @Test
     fun `a three hundred stroke page is under a megabyte on disk`() {
         val records = (0 until 300).map { i -> record(id = i.toLong(), samples = 247) }
         val bytes = StrokeCodec.encode(records)
@@ -191,6 +249,7 @@ class StrokeCodecTest {
         seed: Int = 5,
         base: Int = 0,
         clip: Int = StrokeRecord.NO_CLIP,
+        guide: Int = StrokeRecord.NO_GUIDE,
         bounds: Bounds = Bounds.of(1f, 2f, 30f, 40f),
         samples: Int = 4,
     ): StrokeRecord {
@@ -200,7 +259,7 @@ class StrokeCodecTest {
         }
         return StrokeRecord(
             id = id, brush = brush, colorArgb = color, erase = erase, seed = seed,
-            dabBase = base, clip = clip, bounds = bounds,
+            dabBase = base, clip = clip, guide = guide, bounds = bounds,
             packed = log.pack(), sampleCount = samples,
         )
     }

@@ -59,6 +59,11 @@ object StrokeCodec {
     const val MAGIC: String = "ARTINK"
 
     /**
+     * **3 since Ik13**, which added the guide column to the record header: the
+     * index of the ruler a stroke was drawn against. Without it a stroke
+     * re-rendered off the guide the first time anything repainted the rectangle
+     * it is in, which is an undo three strokes later.
+     *
      * **2 since Ik8**, which widened the origin from eight bytes to twelve so
      * that a sample buffer carries the time its first sample happened at, not
      * only where it was. A split record's samples start part-way through a
@@ -69,8 +74,14 @@ object StrokeCodec {
      * header. Never bumped for a change that only adds an optional trailing
      * field — there are none, and the format has no room for one by design,
      * because "optional" is how a format becomes ambiguous.
+     *
+     * **Older files still open**, and that is a property of the *header* rather
+     * than a general rule: the record header is read field by field, so a
+     * column added at a known version is a branch on the version and nothing
+     * else. The sample buffer is not read that way and never will be, which is
+     * why the paragraph above says what it says.
      */
-    const val VERSION: Int = 2
+    const val VERSION: Int = 3
 
     /**
      * Bytes before the first sample: two int32 origin coordinates and one
@@ -270,6 +281,11 @@ object StrokeCodec {
             out.writeInt(r.seed)
             out.writeInt(r.dabBase)
             out.writeInt(r.clip)
+            // Version 3. Written after the clip because that is where it is on
+            // the record, and read back only when the file says 3 or more --
+            // see `decode`, which is what makes every drawing saved before
+            // Ik13 open unchanged.
+            out.writeInt(r.guide)
             out.writeByte(if (r.erase) 1 else 0)
             if (r.bounds.isEmpty) {
                 out.writeByte(0)
@@ -324,6 +340,11 @@ object StrokeCodec {
                 val seed = input.readInt()
                 val dabBase = input.readInt()
                 val clip = input.readInt()
+                // Every drawing saved before Ik13 is a version 2 file with no
+                // guide column, and every stroke in one was drawn freehand.
+                // That is true by construction and not an assumption: there was
+                // no guide to draw against.
+                val guide = if (version >= 3) input.readInt() else StrokeRecord.NO_GUIDE
                 val erase = input.readUnsignedByte() != 0
                 val bounds = when (val tag = input.readUnsignedByte()) {
                     0 -> Bounds.EMPTY
@@ -356,6 +377,7 @@ object StrokeCodec {
                         seed = seed,
                         dabBase = dabBase,
                         clip = clip,
+                        guide = guide,
                         bounds = bounds,
                         packed = packed,
                         sampleCount = samples,

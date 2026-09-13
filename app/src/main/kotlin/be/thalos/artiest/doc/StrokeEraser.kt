@@ -67,7 +67,7 @@ class StrokeEraser {
         val added = ArrayList<StrokeRecord>()
         for (record in near) {
             val pen = sheet.brushAt(record.brush)
-            val shape = record.polyline(pen)
+            val shape = record.polyline(pen, sheet.snapAt(record.guide))
             if (shape.pointCount == 0) continue
             if (!runsTouching(shape, line, reach)) continue
             removed.add(record)
@@ -243,7 +243,7 @@ class StrokeEraser {
         val all = FloatList()
         for (other in sheet.overlapping(record.bounds)) {
             if (other.id == record.id) continue
-            val line = other.polyline(sheet.brushAt(other.brush))
+            val line = other.polyline(sheet.brushAt(other.brush), sheet.snapAt(other.guide))
             StrokeGeometry.crossings(shape, line, crossings)
             for (k in 0 until crossings.count) all.add(crossings[k])
         }

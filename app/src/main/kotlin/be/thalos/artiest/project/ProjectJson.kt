@@ -45,6 +45,12 @@ object ProjectJson {
     /**
      * The version of the *format*. A file that claims another is still read.
      *
+     * **3 since Ik13**, which added the page's `guides` and the two numbers
+     * that say how hard they pull, plus a fourth optional field per sheet —
+     * the sheet's own guide table, which is what a stroke's `guide` index
+     * names. A version 2 file has none of them, which is right: there were no
+     * guides to draw against, so every stroke in one was drawn freehand.
+     *
      * **2 since Ik6**, which added three optional fields per sheet: `strokes`,
      * `brushes` and `clips`. A version 1 file has none of them and decodes as a
      * drawing of ordinary sheets, which is what it is. A version 2 file read by
@@ -52,7 +58,7 @@ object ProjectJson {
      * pixel, because the PNG is still there and is still what the drawing looks
      * like — see `ProjectSheet.strokes`.
      */
-    const val FORMAT = 2
+    const val FORMAT = 3
 
     /** What was read, and what could not be. */
     data class Decoded(
@@ -78,6 +84,14 @@ object ProjectJson {
         append("  \"height\": ").append(p.heightPx).append(",\n")
         append("  \"paper\": ").append(Json.quote(hex(p.paperColor))).append(",\n")
         append("  \"active\": ").append(p.active).append(",\n")
+        // Version 3, and written only when there is something to say, so a
+        // drawing with no rulers on it encodes to exactly the bytes version 2
+        // wrote. Same bargain as the three sheet fields below.
+        if (p.guides.isNotEmpty()) {
+            append("  \"guides\": ").append(array(p.guides)).append(",\n")
+            append("  \"guide_strength\": ").append(round(p.guideStrength)).append(",\n")
+            append("  \"guide_reach\": ").append(round(p.guideReachDoc)).append(",\n")
+        }
         append("  \"layers\": [\n")
         for ((i, sheet) in p.sheets.withIndex()) {
             append("    ").append(encodeSheet(sheet))
@@ -105,6 +119,9 @@ object ProjectJson {
         }
         if (s.clips.isNotEmpty()) {
             append(", \"clips\": ").append(array(s.clips))
+        }
+        if (s.guides.isNotEmpty()) {
+            append(", \"guides\": ").append(array(s.guides))
         }
         append("}")
     }
@@ -181,6 +198,10 @@ object ProjectJson {
                 paperColor = paperOf(root.str("paper"), dropped),
                 active = active,
                 sheets = sheets,
+                guides = strings(root["guides"], MAX_TABLE),
+                guideStrength = root.float("guide_strength")?.coerceIn(0f, 1f) ?: 1f,
+                guideReachDoc = root.float("guide_reach")
+                    ?.takeIf { it.isFinite() && it >= 0f } ?: 0f,
             ),
             dropped,
         )
@@ -220,6 +241,7 @@ object ProjectJson {
                 strokes = strokes,
                 brushes = strings(obj["brushes"], MAX_TABLE),
                 clips = strings(obj["clips"], MAX_TABLE),
+                guides = strings(obj["guides"], MAX_TABLE),
             )
         }
         return out
@@ -307,5 +329,6 @@ object ProjectJson {
     private val ROOT_KEYS = setOf(
         "artiest_project", "id", "name", "created", "modified", "revision",
         "width", "height", "paper", "active", "layers",
+        "guides", "guide_strength", "guide_reach",
     )
 }

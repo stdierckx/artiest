@@ -1,6 +1,7 @@
 package be.thalos.artiest.engine.ink
 
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.guide.Snap
 
 /**
  * One committed stroke, kept as **the input that made it** rather than as the
@@ -131,6 +132,23 @@ class StrokeRecord(
      */
     val clip: Int,
     /**
+     * Index into the sheet's guide table, or -1 for a stroke drawn freehand.
+     *
+     * Ik13, and it is here for exactly [clip]'s reason. A guide is a filter on
+     * the input, in the same position the stabilizer is: `StrokeBuilder` snaps
+     * each sample onto the ruler **after** smoothing it and before fitting the
+     * curve. The samples stored here are the raw ones, so a record that forgot
+     * which guide was live would re-render off the ruler the first time it was
+     * touched — and what touches it is an undo three strokes later, repainting
+     * a rectangle, silently, long after the fact.
+     *
+     * The stabilizer does not need a field of its own because its parameter is
+     * on the brush and the brush is in the table beside this one. A guide is not
+     * a brush parameter and could not be put there: two strokes drawn with one
+     * nib against two different rulers are one brush and two guides.
+     */
+    val guide: Int = NO_GUIDE,
+    /**
      * What this stroke painted, in document space, as the dab loop accumulated
      * it. Neither smaller nor larger than the ink; see [Bounds].
      */
@@ -203,18 +221,21 @@ class StrokeRecord(
      * Derived and cached, and dropped by [dropDerived] under memory pressure —
      * a few hundred bytes a stroke, against records that are already kilobytes.
      *
-     * [pen] must be the brush this record's [brush] index names. The cache is
-     * keyed on identity rather than trusted, so handing a different brush
-     * rebuilds rather than silently answering with the old shape; that matters
-     * from Ik10, where re-brushing a stroke changes how wide it is and
-     * therefore what a tap on it hits.
+     * [pen] must be the brush this record's [brush] index names, and [snap] the
+     * guide this record's [guide] index names. The cache is keyed on identity
+     * rather than trusted, so handing a different brush rebuilds rather than
+     * silently answering with the old shape; that matters from Ik10, where
+     * re-brushing a stroke changes how wide it is and therefore what a tap on
+     * it hits, and from Ik13, where the ink of a guided stroke is not where its
+     * samples are.
      */
-    fun polyline(pen: Brush): StrokePolyline {
+    fun polyline(pen: Brush, snap: Snap? = null): StrokePolyline {
         val held = derived
-        if (held != null && derivedPen === pen) return held
-        val built = StrokePolyline.of(this, pen)
+        if (held != null && derivedPen === pen && derivedSnap === snap) return held
+        val built = StrokePolyline.of(this, pen, snap)
         derived = built
         derivedPen = pen
+        derivedSnap = snap
         return built
     }
 
@@ -228,13 +249,16 @@ class StrokeRecord(
     fun dropDerived() {
         derived = null
         derivedPen = null
+        derivedSnap = null
     }
 
-    // Not volatile: both fields are written together, the value is a pure
-    // function of the record and the pen, and the worst a race can do is build
-    // the same polyline twice. A lock here would sit on the hit-test path.
+    // Not volatile: the fields are written together, the value is a pure
+    // function of the record, the pen and the guide, and the worst a race can
+    // do is build the same polyline twice. A lock here would sit on the
+    // hit-test path.
     private var derived: StrokePolyline? = null
     private var derivedPen: Brush? = null
+    private var derivedSnap: Snap? = null
 
     override fun toString(): String =
         "StrokeRecord(#$id, brush $brush, $sampleCount samples, $byteCount B, $bounds)"
@@ -250,6 +274,9 @@ class StrokeRecord(
 
         /** No clip. The usual value; see [clip]. */
         const val NO_CLIP: Int = -1
+
+        /** Drawn freehand. The usual value; see [guide]. */
+        const val NO_GUIDE: Int = -1
     }
 }
 

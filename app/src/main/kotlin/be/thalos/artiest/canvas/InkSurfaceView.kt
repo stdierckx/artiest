@@ -41,6 +41,7 @@ import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.MutableBounds
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.SampleLog
+import be.thalos.artiest.engine.guide.Snap
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.ink.StrokeRecord
 import be.thalos.artiest.engine.input.PenSample
@@ -936,7 +937,13 @@ class InkSurfaceView(
                 // being an eraser, and the record is the only thing that
                 // remembers it did. See `compositeAlpha`.
                 borrowedRubber = record.erase && !pen.erase
-                val stroke = replay(record) ?: continue
+                // Ik13. The ruler the stroke was drawn against, out of the
+                // sheet's own table and **not** out of the document: the guides
+                // on the page now are not the ones this stroke was inked
+                // against, and using them would make an undo three strokes
+                // later slide every earlier line onto wherever the ruler has
+                // got to. See `VectorSheet.snapAt`.
+                val stroke = replay(record, sheet.snapAt(record.guide)) ?: continue
                 stampStroke(stroke, into, Confinement(rect, sheet.clipAt(record.clip)))
             }
         } finally {
@@ -1135,15 +1142,22 @@ class InkSurfaceView(
      *
      * The seed and the `dabBase` come off the record, which is the whole of
      * Ik2: without them this would draw a *similar* stroke, and the pencil's
-     * scatter would land somewhere else every time anything was touched.
+     * scatter would land somewhere else every time anything was touched. Ik13
+     * adds [snap] to that list for the same reason, and the caller takes it
+     * from the *sheet's* table rather than from the document.
      *
      * Null for a record with no samples, which a cancelled gesture can leave.
      */
-    private fun replay(record: StrokeRecord): Stroke? {
+    private fun replay(record: StrokeRecord, snap: Snap? = null): Stroke? {
         if (record.sampleCount == 0) return null
         if (replayFloats.size < record.floatCount) replayFloats = FloatArray(record.floatCount)
         val n = record.decodeInto(replayFloats)
         val b = rebuildBuilder
+        // Before `begin`, like everything else this stroke is a function of.
+        // A record stores the raw samples and the guide is applied on the way
+        // to the dabs, so this is not decoration — leave it null for a stroke
+        // that had one and the line comes back off the ruler.
+        b.snap = snap
         b.begin(record.colorArgb, record.seed, record.dabBase)
         for (i in 0 until n) {
             val o = i * StrokeRecord.STRIDE
@@ -2882,7 +2896,9 @@ class InkSurfaceView(
             // The barrel turned out to disagree with what pen-down assumed, so
             // the guide decision is made again from the brush that actually
             // won. See `onStrokeStart`.
-            builder.snap = if (pen.erase) null else document.guides.snap
+            val guides = document.guides
+            builder.snap = if (pen.erase) null else guides.snap
+            strokeGuideText = if (pen.erase) null else guides.snapText
             builder.begin(inkColorArgb)
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
         }
@@ -2965,6 +2981,15 @@ class InkSurfaceView(
 
         /** `BrushCodec.encode(pen)` as of pen-down. See [samples]. */
         private var strokeBrushText: String = ""
+
+        /**
+         * The guides that were live at pen-down, written down, or null.
+         *
+         * Read in the same statement the snap itself is, and kept for the same
+         * reason `strokeBrushText` is kept: the record names what the stroke was
+         * drawn with, and the hand can move a ruler before the next one.
+         */
+        private var strokeGuideText: String? = null
 
         /** The last real sample in document space, for the lead measurement. */
         private var lastRealDocX = 0f
@@ -3049,7 +3074,9 @@ class InkSurfaceView(
             // Not while erasing. A rubber that only rubs along a ruler is a
             // rubber nobody can take a mistake out with, and taking the mistake
             // out is what the ruler made likely.
-            builder.snap = if (pen.erase) null else document.guides.snap
+            val guides = document.guides
+            builder.snap = if (pen.erase) null else guides.snap
+            strokeGuideText = if (pen.erase) null else guides.snapText
             builder.begin(inkColorArgb)
             // Reset, never reallocated: this is filled one sample at a time at
             // 321.75 Hz, and it is the only new per-sample work Ik3 adds.
@@ -3366,6 +3393,7 @@ class InkSurfaceView(
                 colorArgb = inkColorArgb,
                 erase = pen.erase,
                 brushText = strokeBrushText,
+                guideText = strokeGuideText,
                 bounds = stroke.bounds,
             )
         }

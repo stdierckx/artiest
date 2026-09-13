@@ -92,6 +92,19 @@ class GuideSet {
     var snap: Snap? = null
         private set
 
+    /**
+     * The same pull as [snap], written down, or null when there is none.
+     *
+     * A stroke drawn against a guide has to **keep** which guide, or a rebuild
+     * re-renders it off the ruler — see `StrokeRecord.guide`. This is what a
+     * sheet interns, and it is published in the same assignment [snap] is so
+     * that a stroke cannot get one of the two from before an edit and the other
+     * from after it.
+     */
+    @Volatile
+    var snapText: String? = null
+        private set
+
     val size: Int get() = lines.size
 
     val isEmpty: Boolean get() = lines.isEmpty()
@@ -227,6 +240,11 @@ class GuideSet {
         revision++
         val live: List<Guide> = lines.mapNotNull { if (it.live) it.guide else null }
         val composed = NearestGuide.of(live)
+        // The text first and the snap second, and both before anything else can
+        // read either: a stroke that got the snap from after an edit and the
+        // text from before it would be interned under a description of a ruler
+        // it was not drawn against, which is worse than either half being stale.
+        snapText = GuideText.encodeSnap(strength, reachDoc, lines)
         snap = if (composed == null || strength <= 0f) {
             null
         } else {

@@ -3,6 +3,7 @@ package be.thalos.artiest.project
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.GuideText
 import be.thalos.artiest.doc.VectorSheet
 import be.thalos.artiest.engine.ink.StrokeCodec
 import be.thalos.artiest.doc.Layer
@@ -83,6 +84,14 @@ object ProjectLoader {
         // The undo history is the render thread's and is cleared as the
         // operation lands -- see `Document.resetHistory`.
         document.forgetStrokes()
+        // The rulers on the page. Set here, on the UI thread, because that is
+        // where they are edited and drawn; the sheets' own guide tables went in
+        // with the sheets, and the two are deliberately not the same list --
+        // see `VectorSheet.snapAt` for why a stroke keeps the ruler it was
+        // drawn against rather than reading the one on the page now.
+        document.guides.strength = project.guideStrength
+        document.guides.reachDoc = project.guideReachDoc
+        document.guides.load(GuideText.decodeAll(project.guides))
         document.requestLayers(LayerOp.Open(ok.sheets, project.active))
 
         return OpenResult.Opened(
@@ -196,7 +205,14 @@ object ProjectLoader {
             sheet.spoil("a clip could not be read")
             return sheet
         }
-        sheet.load(records, described.brushes, clips)
+        // The guide table is taken whole and **not** validated line by line.
+        // A line that will not decode answers null from `VectorSheet.snapAt`,
+        // which is what a stroke drawn freehand answers, so the stroke comes
+        // back a few pixels off its ruler rather than the sheet being spoiled.
+        // That is the right side of the trade: a clip that will not read means
+        // ink outside a stencil, which is a picture nobody drew; a guide that
+        // will not read means a line that is not quite straight.
+        sheet.load(records, described.brushes, clips, described.guides)
         return sheet
     }
 

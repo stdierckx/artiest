@@ -318,7 +318,7 @@ class StrokePick {
         for (id in ordered) {
             val record: StrokeRecord = sheet.byId(id) ?: continue
             bounds = bounds.unionWith(record.bounds)
-            val line = record.polyline(sheet.brushAt(record.brush))
+            val line = record.polyline(sheet.brushAt(record.brush), sheet.snapAt(record.guide))
             if (line.pointCount == 0) continue
             outline.moveTo(line.x(0), line.y(0))
             for (i in 1 until line.pointCount) outline.lineTo(line.x(i), line.y(i))

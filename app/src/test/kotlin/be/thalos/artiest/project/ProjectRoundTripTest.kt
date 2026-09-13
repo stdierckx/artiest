@@ -299,6 +299,79 @@ class ProjectRoundTripTest {
         assertEquals(b.id, back.hit(14f, 20f, 2f))
     }
 
+    @Test
+    fun `the rulers on the page, and the one each stroke was drawn against`() {
+        // Two lists, deliberately not the same one. The page's guides are where
+        // the rulers are *now*; a sheet's guide table is what each stroke was
+        // inked against, and a rebuild reads the second. Move a ruler after
+        // inking twenty lines and the twenty lines must stay where they are.
+        val made = document()
+        made.guides.put(
+            be.thalos.artiest.doc.Guideline(
+                1, be.thalos.artiest.doc.GuideKind.RULER, floatArrayOf(0f, 8f, 60f, 8f),
+            ),
+        )
+        made.guides.put(
+            be.thalos.artiest.doc.Guideline(
+                2, be.thalos.artiest.doc.GuideKind.RULER, floatArrayOf(4f, 0f, 4f, 40f), on = false,
+            ),
+        )
+        made.guides.strength = 0.75f
+        made.guides.reachDoc = 30f
+        val inked = assertNotNull(made.guides.snapText)
+
+        made.layers.apply(LayerOp.AddVector(made.newLayer(), "Ink"))
+        val sheet = made.layers.active.vector!!
+        val drawn = sheet.append(pending(10f).let {
+            PendingStroke(
+                samples = it.samples, sampleCount = it.sampleCount, seed = it.seed,
+                colorArgb = it.colorArgb, erase = it.erase, brushText = it.brushText,
+                guideText = inked, bounds = it.bounds,
+            )
+        }, null)
+        assertEquals(0, drawn.guide)
+        paint(made, 0, Color.RED)
+
+        val project = assertNotNull(files.create("Ruled", 64, 48, 1_000L))
+        val saved = assertIs<SaveResult.Saved>(
+            runBlocking { ProjectSaver(files).save(project, made, 2_000L) }
+        )
+
+        val opened = document()
+        val stored = assertNotNull(files.load(saved.project.id)).project!!
+        assertIs<OpenResult.Opened>(
+            runBlocking { ProjectLoader.open(files, stored, opened, ProjectSaver(files)) }
+        )
+        opened.render()
+
+        // The page's rulers, including the one that is switched off -- off is
+        // not deleted.
+        assertEquals(2, opened.guides.size)
+        assertEquals(listOf(1L, 2L), opened.guides.all().map { it.id })
+        assertEquals(listOf(true, false), opened.guides.all().map { it.on })
+        assertEquals(0.75f, opened.guides.strength, 1e-3f)
+        assertEquals(30f, opened.guides.reachDoc, 1e-3f)
+        assertEquals(8f, opened.guides[0].yAt(0), 1e-3f)
+
+        // And the sheet's own table, which is what a repaint reads.
+        val back = assertNotNull(opened.layers.entryAt(1).vector)
+        assertEquals(0, back.strokes[0].guide)
+        assertNotNull(back.snapAt(0), "the stroke still knows what it was drawn against")
+    }
+
+    @Test
+    fun `a drawing with no rulers on it says nothing about rulers`() {
+        // The version 3 fields are written only when there is something to say,
+        // so a drawing made without a ruler encodes to what version 2 wrote.
+        val made = document()
+        val project = assertNotNull(files.create("Plain", 64, 48, 1_000L))
+        val saved = assertIs<SaveResult.Saved>(
+            runBlocking { ProjectSaver(files).save(project, made, 2_000L) }
+        )
+        val text = File(files.dirFor(saved.project.id), "project.json").readText()
+        assertFalse(text.contains("guides"), text)
+    }
+
     /**
      * The PNG is what the drawing looks like; the strokes are what it can be
      * edited from. Losing the second must not cost the first — which is

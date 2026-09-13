@@ -6,6 +6,7 @@ import android.graphics.RectF
 import android.graphics.Region
 import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.brush.BrushCodec
+import be.thalos.artiest.engine.guide.Snap
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.IdList
 import be.thalos.artiest.engine.ink.StrokeGrid
@@ -35,6 +36,15 @@ class PendingStroke(
     val erase: Boolean,
     /** `BrushCodec.encode` of the brush as it was at pen-down. */
     val brushText: String,
+    /**
+     * `GuideText.encodeSnap` of the guides that were live at pen-down, or null
+     * for a stroke drawn freehand — which is nearly all of them.
+     *
+     * Read once when the pen lands, like [brushText] and for the same reason:
+     * a ruler dragged while the pen is down must not change what the half-drawn
+     * line was drawn against.
+     */
+    val guideText: String? = null,
     /** What the dab loop accumulated. See [StrokeRecord.bounds]. */
     val bounds: Bounds,
 )
@@ -65,6 +75,12 @@ class PendingStroke(
  *   Usually empty. A stroke drawn into a selection is *clipped pixels*, and a
  *   record that remembered only the samples would re-render outside the stencil
  *   the first time it was touched — silently, and long after the fact.
+ * - **`guides`**, the snap each stroke was drawn against, as `GuideText`.
+ *   Usually empty, and interned whole rather than per ruler, because every
+ *   stroke of a sitting is drawn against the same set. The reason it has to
+ *   exist at all is the clip table's word for word: a record stores the raw
+ *   samples and the snap is applied on the way to the dabs, so a sheet that
+ *   forgot it would re-render the stroke off the ruler.
  * - **A [StrokeGrid]** over the page, so a tap measures a handful of strokes
  *   rather than all of them.
  *
@@ -86,6 +102,8 @@ class VectorSheet(
     private val brushText = ArrayList<String>()
     private val brushCache = ArrayList<Brush?>()
     private val clipPaths = ArrayList<Path>()
+    private val guideText = ArrayList<String>()
+    private val guideCache = ArrayList<Snap?>()
     private val grid = StrokeGrid(widthPx, heightPx, cellPx)
 
     /**
@@ -167,6 +185,9 @@ class VectorSheet(
     /** Deduplicated; usually empty. See the class note. */
     val clips: List<Path> get() = clipPaths
 
+    /** `GuideText.encodeSnap` lines, deduplicated; usually empty. */
+    val guides: List<String> get() = guideText
+
     val size: Int get() = records.size
 
     val isEmpty: Boolean get() = records.isEmpty()
@@ -198,6 +219,7 @@ class VectorSheet(
             seed = pending.seed,
             dabBase = 0,
             clip = internClip(clip),
+            guide = internGuide(pending.guideText),
             bounds = pending.bounds,
             packed = pending.samples,
             sampleCount = pending.sampleCount,
@@ -294,6 +316,8 @@ class VectorSheet(
         brushText.clear()
         brushCache.clear()
         clipPaths.clear()
+        guideText.clear()
+        guideCache.clear()
         position.clear()
         grid.clear()
         nextId = 1L
@@ -317,11 +341,18 @@ class VectorSheet(
      * merging two brush tables is a renumbering of every record that names one,
      * and there is no caller that wants it.
      */
-    fun load(records: List<StrokeRecord>, brushes: List<String>, clips: List<Path>): Boolean {
+    fun load(
+        records: List<StrokeRecord>,
+        brushes: List<String>,
+        clips: List<Path>,
+        guides: List<String> = emptyList(),
+    ): Boolean {
         if (this.records.isNotEmpty()) return false
         brushText.addAll(brushes)
         repeat(brushes.size) { brushCache.add(null) }
         clipPaths.addAll(clips)
+        guideText.addAll(guides)
+        repeat(guides.size) { guideCache.add(null) }
         for (r in records.sortedBy { it.id }) add(r)
         revision++
         return true
@@ -349,6 +380,37 @@ class VectorSheet(
     /** The clip path [index] names, or null. See [brushAt] about the range. */
     fun clipAt(index: Int): Path? =
         if (index < 0 || index >= clipPaths.size) null else clipPaths[index]
+
+    /**
+     * The snap [index] names, decoded once and kept, or null.
+     *
+     * **What a rebuild sets on its builder.** A record stores raw samples and
+     * the snap is applied between the smoothing and the curve fit, so a repaint
+     * that did not set this would re-render the stroke off the ruler it was
+     * drawn along — silently, in whatever rectangle an undo happened to damage.
+     *
+     * Null for an index this sheet does not have, on [brushAt]'s argument: a
+     * drawing that opens with one stroke a few pixels off its ruler is
+     * recoverable, and a crash on the render thread is not.
+     */
+    fun snapAt(index: Int): Snap? {
+        if (index < 0 || index >= guideText.size) return null
+        guideCache[index]?.let { return it }
+        val decoded = GuideText.decodeSnap(guideText[index]) ?: return null
+        guideCache[index] = decoded
+        return decoded
+    }
+
+    /**
+     * Intern a snap description and answer its table index, for a caller that
+     * is about to build records naming it.
+     *
+     * [brushIndexOf]'s counterpart, and it has the same one caller shape: a
+     * split or a transform makes new records out of old ones and has to carry
+     * the guide across, but those keep the *index* they already had. This is
+     * for the path that has the text and not the index.
+     */
+    fun guideIndexOf(text: String?): Int = internGuide(text)
 
     /**
      * Strokes whose bounds meet [damage], in draw order.
@@ -392,7 +454,7 @@ class VectorSheet(
             val at = position[id] ?: continue
             if (at <= bestAt) continue
             val r = records[at]
-            if (r.polyline(brushAt(r.brush)).hits(xDoc, yDoc, slopDoc)) {
+            if (r.polyline(brushAt(r.brush), snapAt(r.guide)).hits(xDoc, yDoc, slopDoc)) {
                 best = id
                 bestAt = at
             }
@@ -430,7 +492,7 @@ class VectorSheet(
         val out = ArrayList<StrokeRecord>()
         for (i in 0 until scratchIds.count) {
             val r = byId(scratchIds.id(i)) ?: continue
-            val line = r.polyline(brushAt(r.brush))
+            val line = r.polyline(brushAt(r.brush), snapAt(r.guide))
             for (p in 0 until line.pointCount) {
                 if (region.contains(line.x(p).toInt(), line.y(p).toInt())) {
                     out.add(r)
@@ -449,7 +511,7 @@ class VectorSheet(
 
     override fun toString(): String =
         "VectorSheet(${records.size} strokes, ${brushText.size} brushes, " +
-            "${clipPaths.size} clips, ${byteCount / 1024} KiB" +
+            "${clipPaths.size} clips, ${guideText.size} guides, ${byteCount / 1024} KiB" +
             (if (intact) ")" else ", spoiled by $spoiledBy)")
 
     // ------------------------------------------------------------- internals
@@ -481,6 +543,25 @@ class VectorSheet(
         brushCache.add(null)
         revision++
         return brushText.size - 1
+    }
+
+    /**
+     * Intern a snap description, scanning from the newest entry.
+     *
+     * [internBrush]'s argument, and the strongest case of the three: a ruler is
+     * laid down once and then inked along, so every stroke of a sitting has the
+     * same text and the newest entry is nearly always the answer. String
+     * equality, because the text is canonical — `GuideText.encodeSnap` writes
+     * the live guides in list order at a fixed precision, so two sittings
+     * against the same ruler produce the same bytes.
+     */
+    private fun internGuide(text: String?): Int {
+        if (text.isNullOrEmpty()) return StrokeRecord.NO_GUIDE
+        for (i in guideText.indices.reversed()) if (guideText[i] == text) return i
+        guideText.add(text)
+        guideCache.add(null)
+        revision++
+        return guideText.size - 1
     }
 
     private fun internClip(clip: Path?): Int {

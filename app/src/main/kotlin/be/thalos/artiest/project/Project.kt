@@ -49,6 +49,17 @@ data class Project(
     val active: Int = 0,
     /** Bottom to top, the order they are composited in. */
     val sheets: List<ProjectSheet> = emptyList(),
+    /**
+     * The rulers and guides on the page, as `GuideText`, and the two numbers
+     * that say how hard they pull.
+     *
+     * On the project and not on a sheet, because that is where they are on the
+     * document: a guide is a property of the drawing, and one that vanished
+     * when a layer was added would be one nobody would set up. See `GuideSet`.
+     */
+    val guides: List<String> = emptyList(),
+    val guideStrength: Float = 1f,
+    val guideReachDoc: Float = 0f,
 ) {
 
     /** The same project, one revision on, with the clock moved. */
@@ -148,4 +159,14 @@ data class ProjectSheet(
      * that stroke outside its stencil.
      */
     val clips: List<String> = emptyList(),
+    /**
+     * The sheet's guide table, as `GuideText.encodeSnap`. Usually empty.
+     *
+     * The clip table's argument word for word. A stroke drawn against a ruler
+     * stores raw samples and the snap is applied on the way to the dabs, so a
+     * guide table that did not survive a save would let the first repaint after
+     * reopening put the line back where the hand wobbled rather than where the
+     * ruler was.
+     */
+    val guides: List<String> = emptyList(),
 )

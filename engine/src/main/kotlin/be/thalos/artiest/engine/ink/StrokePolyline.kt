@@ -1,6 +1,7 @@
 package be.thalos.artiest.engine.ink
 
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.guide.Snap
 import kotlin.math.max
 import kotlin.math.min
 
@@ -155,12 +156,12 @@ class StrokePolyline private constructor(
          * result. Both are transient except the result, which the record then
          * caches.
          */
-        fun of(record: StrokeRecord, pen: Brush): StrokePolyline {
+        fun of(record: StrokeRecord, pen: Brush, snap: Snap? = null): StrokePolyline {
             val n = record.sampleCount
             if (n == 0) return EMPTY
             val raw = FloatArray(n * StrokeRecord.STRIDE)
             record.decodeInto(raw)
-            return of(raw, n, pen)
+            return of(raw, n, pen, snap)
         }
 
         /**
@@ -171,7 +172,27 @@ class StrokePolyline private constructor(
          * would otherwise pack them, hand them to a record, and immediately
          * decode them again.
          */
-        fun of(samples: FloatArray, count: Int, pen: Brush): StrokePolyline {
+        fun of(
+            samples: FloatArray,
+            count: Int,
+            pen: Brush,
+            /**
+             * The guide the stroke was drawn against, or null.
+             *
+             * Applied to each sample before it is kept, because this is meant
+             * to be *where the ink is* and the ink of a guided stroke is on the
+             * guide. Without it a tap on a ruled line misses it by however far
+             * the hand was from the ruler, and Ik7's highlight is drawn beside
+             * the line rather than along it.
+             *
+             * It is not the same arithmetic the dab loop does — that snaps the
+             * *smoothed* point, and this has no smoothing — and it does not
+             * need to be: the band this builds is already wider than the stroke
+             * on purpose, and what it has to get right is which side of the
+             * ruler the line is on rather than the last tenth of a pixel.
+             */
+            snap: Snap? = null,
+        ): StrokePolyline {
             require(count >= 0 && samples.size >= count * StrokeRecord.STRIDE) {
                 "need ${count * StrokeRecord.STRIDE} floats, array holds ${samples.size}"
             }
@@ -200,10 +221,15 @@ class StrokePolyline private constructor(
                 kept++
             }
 
+            val snapped = if (snap == null) null else FloatArray(2)
             for (i in 0 until count) {
                 val s = i * StrokeRecord.STRIDE
-                val x = samples[s]
-                val y = samples[s + 1]
+                var x = samples[s]
+                var y = samples[s + 1]
+                if (snapped != null && snap!!.apply(x, y, snapped)) {
+                    x = snapped[0]
+                    y = snapped[1]
+                }
                 val hw = pen.sizeFor(samples[s + 2], samples[s + 5]) * 0.5f
                 if (kept == 0) {
                     keep(x, y, hw, i)

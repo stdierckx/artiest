@@ -261,6 +261,90 @@ class GuideSetTest {
         assertFalse(path.isEmpty, "the top edge is on the page, not off it")
     }
 
+    // ---- what a stroke keeps -----------------------------------------------
+
+    @Test
+    fun `a snap is written down whole and read back`() {
+        val set = set(ruler(1, 0f, 0f, 100f, 0f), ruler(2, 0f, 400f, 100f, 400f))
+        set.strength = 0.8f
+        set.reachDoc = 40f
+        val text = assertNotNull(set.snapText)
+        val back = assertNotNull(GuideText.decodeSnap(text))
+        // Same answer as the live snap, which is the only property that
+        // matters: a rebuild has to lay the stroke where it was laid.
+        val live = assertNotNull(set.snap)
+        val a = FloatArray(2)
+        val b = FloatArray(2)
+        for (y in intArrayOf(5, 20, 380, 395)) {
+            assertEquals(live.apply(50f, y.toFloat(), a), back.apply(50f, y.toFloat(), b), "y=$y")
+            assertEquals(a[0], b[0], 1e-3f, "y=$y")
+            assertEquals(a[1], b[1], 1e-3f, "y=$y")
+        }
+    }
+
+    @Test
+    fun `a guide that is off is left out of what a stroke keeps`() {
+        // Interned by text, so a guide that did not touch the stroke must not
+        // be in the description: two sittings that drew the same line against
+        // the same ruler would otherwise take two table entries.
+        val set = set(ruler(1, 0f, 0f, 100f, 0f), ruler(2, 0f, 400f, 100f, 400f, on = false))
+        val withOff = assertNotNull(set.snapText)
+        set.remove(2)
+        assertEquals(withOff, set.snapText)
+    }
+
+    @Test
+    fun `no live guide is nothing to write down`() {
+        val set = set(ruler(1, 0f, 0f, 100f, 0f, on = false))
+        assertNull(set.snapText)
+        assertNull(set.snap)
+    }
+
+    @Test
+    fun `the text and the snap are published together`() {
+        // Both or neither, always: a stroke that got one from before an edit
+        // and the other from after it would be interned under a description of
+        // a ruler it was not drawn against.
+        val set = GuideSet()
+        assertNull(set.snap)
+        assertNull(set.snapText)
+        set.put(ruler(1, 0f, 0f, 100f, 0f))
+        assertNotNull(set.snap)
+        assertNotNull(set.snapText)
+        set.clear()
+        assertNull(set.snap)
+        assertNull(set.snapText)
+    }
+
+    @Test
+    fun `a moved stroke's ruler moves with it`() {
+        // The reason GuideText.mapSnap exists. A record stores the raw samples,
+        // so a rebuild computes snap(smooth(M x)) -- which is M snap(smooth(x))
+        // only when the guide is mapped too. Leave it and the stroke springs
+        // back onto the ruler it was drawn along.
+        val set = set(ruler(1, 0f, 0f, 100f, 0f))
+        val text = assertNotNull(set.snapText)
+        val m = android.graphics.Matrix().apply { setTranslate(0f, 250f) }
+        val moved = assertNotNull(GuideText.mapSnap(text, m, 1f))
+        val snap = assertNotNull(GuideText.decodeSnap(moved))
+        assertTrue(snap.apply(50f, 240f, scratch))
+        assertEquals(250f, scratch[1], 1e-3f, "the ruler is 250 lower now")
+    }
+
+    @Test
+    fun `a scaled stroke's reach scales with it`() {
+        val set = set(ruler(1, 0f, 0f, 100f, 0f))
+        set.reachDoc = 40f
+        val text = assertNotNull(set.snapText)
+        val m = android.graphics.Matrix().apply { setScale(2f, 2f) }
+        val moved = assertNotNull(GuideText.mapSnap(text, m, 2f))
+        val snap = assertNotNull(GuideText.decodeSnap(moved))
+        // A reach is a distance in document pixels, so a stroke at twice the
+        // size was drawn against a ruler that now reaches twice as far.
+        assertTrue(snap.apply(10f, 60f, scratch), "60 is inside a reach of 80")
+        assertFalse(snap.apply(10f, 90f, scratch), "and 90 is outside it")
+    }
+
     @Test
     fun `the on and off guides are drawn apart`() {
         val set = set(ruler(1, 0f, 0f, 1000f, 0f), ruler(2, 0f, 400f, 1000f, 400f, on = false))

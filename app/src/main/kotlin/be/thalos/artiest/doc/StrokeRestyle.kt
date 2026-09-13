@@ -68,6 +68,7 @@ object StrokeRestyle {
                     seed = old.seed,
                     dabBase = old.dabBase,
                     clip = old.clip,
+                    guide = old.guide,
                     bounds = boundsFor(old, sheet, nib),
                     packed = old.copyPackedBytes(),
                     sampleCount = old.sampleCount,
@@ -99,9 +100,10 @@ object StrokeRestyle {
         val pen = sheet.brushAt(brush)
         val line = StrokeRecord(
             id = old.id, brush = brush, colorArgb = old.colorArgb, erase = old.erase,
-            seed = old.seed, dabBase = old.dabBase, clip = old.clip, bounds = Bounds.EMPTY,
+            seed = old.seed, dabBase = old.dabBase, clip = old.clip, guide = old.guide,
+            bounds = Bounds.EMPTY,
             packed = old.copyPackedBytes(), sampleCount = old.sampleCount,
-        ).polyline(pen)
+        ).polyline(pen, sheet.snapAt(old.guide))
         if (line.pointCount == 0) return old.bounds
         val reach = pen.scatter.max
         var l = Float.MAX_VALUE
