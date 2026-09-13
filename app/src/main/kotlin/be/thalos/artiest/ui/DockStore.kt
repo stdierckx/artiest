@@ -106,13 +106,21 @@ class DockStore(context: Context) {
      * six of them again. Without this the wheel is a control you use once per
      * colour and then re-aim by eye, which is the difference between a picker
      * and a palette.
+     *
+     * **A fresh install starts with [STARTING_COLOURS] rather than nothing**,
+     * and that is where the fixed palette row went. Us4 took eight swatches of
+     * standard colour out of the panel because the user asked for the space
+     * back; putting five of them here costs no height at all, because the
+     * recents row exists either way. They behave like any other recent — the
+     * first colour the artist mixes pushes one off the end — so it is a warm
+     * start rather than a second palette that never changes.
      */
     fun loadRecentColours(): List<Int> =
         prefs.getString(KEY_RECENT, null)
             ?.split(',')
             ?.mapNotNull { it.trim().toIntOrNull() }
             ?.take(MAX_RECENT)
-            ?: emptyList()
+            ?: STARTING_COLOURS
 
     /** Push [argb] to the front, dropping a duplicate and the oldest overflow. */
     fun pushRecentColour(argb: Int): List<Int> {
@@ -124,6 +132,23 @@ class DockStore(context: Context) {
     companion object {
         /** How many mixed colours are kept. One row of swatches, and no more. */
         const val MAX_RECENT = 8
+
+        /**
+         * What the recents row holds before anything has been mixed.
+         *
+         * These five were the colour panel's fixed palette, and the reasoning
+         * that chose them is unchanged: **no white**, because white ink on
+         * white paper is a hole in the drawing that looks exactly like an
+         * eraser, and a picker offering an invisible colour is offering a
+         * mistake. Black is first because it is the ink the app starts with.
+         */
+        val STARTING_COLOURS: List<Int> = listOf(
+            0xFF000000.toInt(),
+            0xFF555555.toInt(),
+            0xFFD32F2F.toInt(),
+            0xFF1976D2.toInt(),
+            0xFF2E7D32.toInt(),
+        )
 
         private const val PREFS = "chrome"
         private const val KEY_LAYOUT = "toolbar.layout"

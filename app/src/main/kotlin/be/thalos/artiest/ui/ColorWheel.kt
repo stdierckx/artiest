@@ -6,12 +6,17 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,9 +36,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import be.thalos.artiest.engine.color.ColorDisc
 import be.thalos.artiest.engine.color.Hsv
 
@@ -112,14 +121,25 @@ private object DiscRaster {
  */
 fun warmColourWheel() = DiscRaster.warm()
 
-/** Tall enough to hit with a thumb without the bar competing with the wheel. */
-private val VALUE_BAR_HEIGHT = 28.dp
+/**
+ * One slider row: tall enough to hit with a thumb, thin enough that three of
+ * them cost less than the wheel.
+ *
+ * It was 28 for a single value bar. Three rows at 28 plus their gaps is 94dp
+ * of a panel the user has asked to get smaller, and a 20dp track with a 24dp
+ * row around it is still twice the height of a fingertip's precision.
+ */
+private val TRACK_HEIGHT = 20.dp
+
+/** The row a track sits in, which is what the layout actually spends. */
+private val SLIDER_ROW = 24.dp
 
 /** The puck, which shows the chosen colour rather than merely pointing at it. */
 private val PUCK_RADIUS = 9.dp
 
 /**
- * An HSV colour wheel: hue and saturation on a disc, value on a bar beneath it.
+ * An HSV colour wheel: hue and saturation on a disc, and all three on sliders
+ * beneath it.
  *
  * **State is [Hsv] and the caller holds it.** The overload below takes a packed
  * ARGB `Int` for callers whose colour already is one, but the picker's own
@@ -130,9 +150,15 @@ private val PUCK_RADIUS = 9.dp
  * under the finger through black, through white, and back out again.
  *
  * **What this deliberately does not have.** No alpha slider — the app's ink is
- * opaque by construction and `Brush` (Phase 1's `RoundPen`) says why that is load-bearing rather
- * than incidental. No hex field, no eyedropper, no recent-colours row. This is
- * the wheel; the panel that will hold it is Phase 4's job.
+ * opaque by construction and `Brush` (Phase 1's `RoundPen`) says why that is
+ * load-bearing rather than incidental. No eyedropper. The hex field and the
+ * recent-colours row live in [ColourPanel], which is where a colour stops being
+ * a coordinate and starts being one you have used.
+ *
+ * The single value bar that used to sit under the disc is now the third of
+ * [HsvSliders]' three rows, which is Us4 of `docs/ui-space-plan.md` and the
+ * user's own sentence: *"The palette with some standard colors can go instead
+ * for a hue, saturation, brightness slider."*
  *
  * The geometry and the conversion are in `:engine`
  * ([ColorDisc], [Hsv]) and tested there, on the JVM, without a device. What is
@@ -143,11 +169,164 @@ fun ColorWheel(
     hsv: Hsv,
     onHsvChange: (Hsv) -> Unit,
     modifier: Modifier = Modifier,
+    discSize: Dp? = null,
 ) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Disc(hsv, onHsvChange, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(12.dp))
-        ValueBar(hsv, onHsvChange, Modifier.fillMaxWidth())
+        Disc(hsv, onHsvChange, if (discSize == null) Modifier.fillMaxWidth() else Modifier.width(discSize))
+        Spacer(Modifier.height(10.dp))
+        HsvSliders(hsv, onHsvChange, Modifier.fillMaxWidth())
+    }
+}
+
+/**
+ * Hue, saturation and value, one gradient track each, with the number.
+ *
+ * ## Why three sliders under a wheel that already has two of them
+ *
+ * Because the user asked for them by name, and in the same breath as the thing
+ * they replaced:
+ *
+ * > *"The palette with some standard colors can go instead for a hue,
+ * > saturation, brightness slider."*
+ *
+ * They are not redundant with the disc, they are the *other* half of the same
+ * job. A disc is the fast instrument — a flick lands you in the right region of
+ * colour and you can see where you are going. A slider is the precise one: it
+ * has one degree of freedom, so a small movement changes one thing by a known
+ * amount, and it is the only way to say "the same red, a little darker" without
+ * disturbing the hue. Every picker people already know has both.
+ *
+ * ## Each track is its own answer
+ *
+ * The hue track is the whole hue circle; the saturation track runs from grey to
+ * the full chroma of the hue you are on; the value track runs from black to the
+ * colour you have. So the track *is* the range at the setting you are at — you
+ * aim rather than hunt — and all three are rebuilt whenever the fields they
+ * depend on move, which is what makes the saturation track go grey when the
+ * value does.
+ *
+ * The value track replaced a standalone bar of the same construction. Nothing
+ * about it changed except that it now has two siblings and is 8dp shorter.
+ */
+@Composable
+fun HsvSliders(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        // Six stops and not seven: the circle closes, so red is the first and
+        // the last, and a gradient that ends on magenta puts a seam in the one
+        // place the eye is most likely to be aiming.
+        SliderRow(
+            label = "H",
+            value = hsv.hue / 360f,
+            reading = (hsv.hue + 0.5f).toInt().toString(),
+            track = remember(hsv.saturation, hsv.value) {
+                List(HUE_STOPS + 1) { i ->
+                    Color(Hsv(i * 360f / HUE_STOPS, 1f, 1f).toArgb())
+                }
+            },
+            puck = Color(hsv.copy(saturation = 1f, value = 1f).toArgb()),
+            onFraction = { onHsvChange(hsv.copy(hue = it * 360f)) },
+        )
+        SliderRow(
+            label = "S",
+            value = hsv.saturation,
+            reading = percent(hsv.saturation),
+            track = remember(hsv.hue, hsv.value) {
+                listOf(
+                    Color(Hsv(hsv.hue, 0f, hsv.value).toArgb()),
+                    Color(Hsv(hsv.hue, 1f, hsv.value).toArgb()),
+                )
+            },
+            puck = Color(hsv.toArgb()),
+            onFraction = { onHsvChange(hsv.copy(saturation = it)) },
+        )
+        SliderRow(
+            label = "V",
+            value = hsv.value,
+            reading = percent(hsv.value),
+            track = remember(hsv.hue, hsv.saturation) {
+                listOf(
+                    Color(Hsv(hsv.hue, hsv.saturation, 0f).toArgb()),
+                    Color(Hsv(hsv.hue, hsv.saturation, 1f).toArgb()),
+                )
+            },
+            puck = Color(hsv.toArgb()),
+            onFraction = { onHsvChange(hsv.copy(value = it)) },
+        )
+    }
+}
+
+/**
+ * Enough stops that a hue ramp has no visible facets across a 240dp track.
+ *
+ * Twelve is one every thirty degrees, which is 20dp of track per segment —
+ * `horizontalGradient` interpolates in linear RGB between them, and thirty
+ * degrees of hue is close enough to a straight line in RGB that the difference
+ * is under a level.
+ */
+private const val HUE_STOPS = 12
+
+private fun percent(v: Float): String = "${(v * 100f + 0.5f).toInt()}"
+
+/**
+ * A label, a gradient track you can aim at, and the number it is reading.
+ *
+ * The number is there because it is half of what the user asked for: *"You cant
+ * input a color code"* is about the hex field, and a picker that cannot tell you
+ * what hue you are on cannot be written down either. It is read-only — the hex
+ * field is where typing happens, because one editable field is a thing people
+ * find and four are a form.
+ */
+@Composable
+private fun SliderRow(
+    label: String,
+    value: Float,
+    reading: String,
+    track: List<Color>,
+    puck: Color,
+    onFraction: (Float) -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().height(SLIDER_ROW),
+    ) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(13.dp),
+        )
+        Canvas(
+            Modifier
+                .weight(1f)
+                .height(TRACK_HEIGHT)
+                .trackTouch { position, viewport ->
+                    if (viewport.width <= 0) return@trackTouch
+                    onFraction((position.x / viewport.width).coerceIn(0f, 1f))
+                },
+        ) {
+            if (size.width <= 0f) return@Canvas
+            val corner = CornerRadius(size.height / 2f)
+            drawRoundRect(brush = Brush.horizontalGradient(track), cornerRadius = corner)
+            drawRoundRect(
+                color = Color.Black.copy(alpha = 0.25f),
+                cornerRadius = corner,
+                style = Stroke(width = 1.dp.toPx()),
+            )
+            val r = size.height / 2f - 2.dp.toPx()
+            // Inset so the puck cannot hang off either end of the track at 0
+            // and 1.
+            val x = (value * size.width).coerceIn(r, size.width - r)
+            drawPuck(Offset(x, size.height / 2f), puck, r)
+        }
+        Text(
+            reading,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(28.dp),
+        )
     }
 }
 
@@ -167,6 +346,7 @@ fun ColorWheel(
     argb: Int,
     onColorChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    discSize: Dp? = null,
 ) {
     var hsv by remember { mutableStateOf(Hsv.fromArgb(argb)) }
     LaunchedEffect(argb) {
@@ -179,6 +359,7 @@ fun ColorWheel(
             onColorChange(it.toArgb())
         },
         modifier = modifier,
+        discSize = discSize,
     )
 }
 
@@ -266,54 +447,6 @@ private fun Disc(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
                 radius = PUCK_RADIUS.toPx(),
             )
         }
-    }
-}
-
-/**
- * Value, from black to the hue the disc is pointing at.
- *
- * It is a bar and not a second ring around the wheel because a ring puts the
- * two things you adjust together at opposite ends of a gesture, and because the
- * gradient here can show the answer: the track *is* the range, so you aim
- * rather than hunt.
- */
-@Composable
-private fun ValueBar(hsv: Hsv, onHsvChange: (Hsv) -> Unit, modifier: Modifier) {
-    // Keyed on the two fields that change it. Recomputing this per frame of a
-    // value drag would rebuild the brush for a gradient whose endpoints did not
-    // move.
-    val track = remember(hsv.hue, hsv.saturation) {
-        listOf(
-            Color(Hsv(hsv.hue, hsv.saturation, 0f).toArgb()),
-            Color(Hsv(hsv.hue, hsv.saturation, 1f).toArgb()),
-        )
-    }
-
-    Canvas(
-        modifier
-            .height(VALUE_BAR_HEIGHT)
-            .trackTouch { position, viewport ->
-                if (viewport.width <= 0) return@trackTouch
-                onHsvChange(hsv.copy(value = (position.x / viewport.width).coerceIn(0f, 1f)))
-            }
-    ) {
-        if (size.width <= 0f) return@Canvas
-        val corner = CornerRadius(size.height / 2f)
-        drawRoundRect(brush = Brush.horizontalGradient(track), cornerRadius = corner)
-        drawRoundRect(
-            color = Color.Black.copy(alpha = 0.25f),
-            cornerRadius = corner,
-            style = Stroke(width = 1.dp.toPx()),
-        )
-
-        val puckRadius = size.height / 2f - 2.dp.toPx()
-        // Inset so the puck cannot hang off either end of the track at 0 and 1.
-        val x = (hsv.value * size.width).coerceIn(puckRadius, size.width - puckRadius)
-        drawPuck(
-            centre = Offset(x, size.height / 2f),
-            colour = Color(hsv.toArgb()),
-            radius = puckRadius,
-        )
     }
 }
 

@@ -158,6 +158,44 @@ Four changes, in order of how much room they give back:
    weaker once there is a hue *slider*, because the slider is the precise
    instrument and the disc is the fast one.
 
+### Us4 — what was actually built
+
+All four changes, plus one the plan did not name.
+
+**The palette did not simply go.** `DockStore.STARTING_COLOURS` seeds the
+recents row with the five colours the fixed palette held, so a fresh install
+still has black, grey, red, blue and green one tap away — in a row that exists
+anyway, at no height at all. They behave like any other recent and the first
+colour the artist mixes pushes one off the end. The 45dp row of fixed swatches
+is gone; the colours are not.
+
+**The three-digit hex shorthand is refused on purpose.** The field commits on
+every keystroke, which is the only behaviour that does not lose what somebody
+typed when they reach for the pen — and `#D32` is both a valid short code and a
+prefix of `#D32F2F`, so accepting it would walk the ink through `#DD3322` on the
+way to a red. Committing early and accepting prefixes are two halves of one bad
+idea; this is the half worth keeping.
+
+**The disc is 128dp** where it was about 240. Its old argument was aim — 740dp
+of rim travel for a full hue sweep — and that argument stopped being decisive
+once there is a hue *slider* underneath: the disc is the fast instrument and the
+slider the precise one, so the disc no longer has to be both. At 128dp a
+fingertip still resolves six degrees of hue, and the slider resolves one and a
+half. Krita's own selector, measured off the user's screenshot, is 98dp at this
+panel's density — smaller again.
+
+Measured, in dp of panel height:
+
+| | Before | After |
+|---|---|---|
+| Colour popup | 440 | 302 |
+| Colour card furniture | 200 | 172 |
+| Layers panel, opacity and blend | 173 | 64 |
+| Layers card furniture | 150 declared / 233 real | 166, counted |
+
+The colour panel gives back 31% of its height and the layers panel's controls
+give back 63% of theirs.
+
 ### Us5 — the sweep
 
 Whatever is left. Counted, not guessed: the panel heights before and after, in

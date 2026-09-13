@@ -329,24 +329,6 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
 }
 
-/**
- * The ink colours, as a palette rather than a wheel.
- *
- * Five, and no white: white ink on white paper is a hole in the drawing that
- * looks exactly like an eraser, and Phase 1 has no eraser — the pen's back
- * reports `TOOL_TYPE_FINGER`, so flip-to-erase is impossible on this hardware
- * rather than merely deferred. Offering an invisible colour would be offering
- * the feature by accident, without the undo model or the blend mode it needs.
- * A colour wheel is Phase 4 and the doc agrees.
- */
-private val PALETTE = listOf(
-    AndroidColor.BLACK,
-    AndroidColor.rgb(0x55, 0x55, 0x55),
-    AndroidColor.rgb(0xD3, 0x2F, 0x2F),
-    AndroidColor.rgb(0x19, 0x76, 0xD2),
-    AndroidColor.rgb(0x2E, 0x7D, 0x32),
-)
-
 /** The two stress shapes the readout is meant to be compared across. */
 private val STRESS_MODES = listOf(
     Triple("Sweep", null, StrokeStress.Path.SPIRAL),
@@ -402,7 +384,7 @@ private fun CanvasScreen(
     // render path — deliberately, they are read once per stroke — so making
     // them the source of truth for a slider would mean a recomposition could
     // not see a change and a stroke could see half of one.
-    var ink by remember { mutableIntStateOf(PALETTE.first()) }
+    var ink by remember { mutableIntStateOf(AndroidColor.BLACK) }
     var sizeMax by remember { mutableFloatStateOf(DEFAULT_SIZE_MAX) }
 
     var smoothing by remember { mutableFloatStateOf(DEFAULT_SMOOTHING) }
@@ -1794,7 +1776,6 @@ private fun ToolSlot(
         ToolItem.COLOUR -> ColourButton(
             ink = ink,
             onInk = onInk,
-            palette = PALETTE,
             recent = recentInks,
             onCommit = onInkCommitted,
             onFixate = { onFixate(ToolItem.COLOUR_PANEL, it) },
@@ -1809,7 +1790,6 @@ private fun ToolSlot(
         ToolItem.COLOUR_PANEL -> ColourPanelCard(
             ink = ink,
             onInk = onInk,
-            palette = PALETTE,
             recent = recentInks,
         )
 
