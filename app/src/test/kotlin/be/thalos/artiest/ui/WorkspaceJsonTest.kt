@@ -52,6 +52,53 @@ class WorkspaceJsonTest {
     // ---- the round trip ----------------------------------------------------
 
     @Test
+    fun `a file written before selecting had its own group still offers it`() {
+        // `marquee` was a Draw tool and `selection` a Canvas one until
+        // catalogue 7. Somebody's saved workspace still says "draw", and it
+        // meant "and the marquee with it" on the day it was written -- so the
+        // reader adds the group rather than letting a toolbar they arranged
+        // months ago lose its tools from the chooser.
+        val old = """
+            {
+              "artiest_workspace": 2,
+              "catalogue": 6,
+              "id": "mine",
+              "name": "Mine",
+              "filter": {"groups": ["edit", "draw"], "hide": [], "show": []},
+              "surfaces": []
+            }
+        """.trimIndent()
+        val ws = assertNotNull(WorkspaceJson.decode(old).workspace)
+
+        assertTrue(ToolItem.MARQUEE in ws.filter, "the marquee came back")
+        assertTrue(ToolItem.FLOAT_COPY in ws.filter, "and so did what joined it")
+        assertTrue(ToolItem.PEN in ws.filter, "with Draw untouched")
+        assertFalse(ToolItem.ZOOM_IN in ws.filter, "and Canvas still filtered out")
+    }
+
+    @Test
+    fun `a file written against this catalogue is taken at its word`() {
+        // The other half of the rule: the split is a repair of files that
+        // predate it, not a standing policy of adding Selection to anything
+        // that mentions Draw. A file stamped with this catalogue chose its
+        // groups knowing the group exists.
+        val now = """
+            {
+              "artiest_workspace": 2,
+              "catalogue": ${ToolCatalogue.VERSION},
+              "id": "mine",
+              "name": "Mine",
+              "filter": {"groups": ["edit", "draw"], "hide": [], "show": []},
+              "surfaces": []
+            }
+        """.trimIndent()
+        val ws = assertNotNull(WorkspaceJson.decode(now).workspace)
+
+        assertFalse(ToolItem.MARQUEE in ws.filter)
+        assertTrue(ToolItem.PEN in ws.filter)
+    }
+
+    @Test
     fun `a workspace goes out and comes back the same`() {
         val there = WorkspaceJson.encode(sketcher())
         val back = WorkspaceJson.decode(there)

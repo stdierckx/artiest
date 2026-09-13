@@ -203,7 +203,11 @@ object WorkspaceJson {
         val id = root.text("id", Workspace.MAX_SLUG)?.let { Workspace.slug(it) }
             ?: Workspace.slug(name)
 
-        val filter = decodeFilter(root.obj("filter"), dropped)
+        // The catalogue the file was written against. It decides one thing --
+        // see [SELECT_SPLIT] -- and a file with no stamp is treated as current,
+        // because every file this app writes has one.
+        val catalogue = root.int("catalogue") ?: ToolCatalogue.VERSION
+        val filter = decodeFilter(root.obj("filter"), catalogue, dropped)
         val defaults = decodeDefaults(root.obj("defaults"), dropped)
         val layout = decodeSurfaces(root.arr("surfaces"), format ?: 1, dropped)
 
@@ -222,7 +226,11 @@ object WorkspaceJson {
         )
     }
 
-    private fun decodeFilter(obj: JsonValue.Obj?, dropped: MutableList<String>): CatalogueFilter {
+    private fun decodeFilter(
+        obj: JsonValue.Obj?,
+        catalogue: Int,
+        dropped: MutableList<String>,
+    ): CatalogueFilter {
         if (obj == null) return CatalogueFilter.EVERYTHING
         for (key in obj.unknown(FILTER_KEYS)) dropped += "filter: \"$key\" is not a field"
 
@@ -232,6 +240,22 @@ object WorkspaceJson {
                 val text = (v as? JsonValue.Str)?.value
                 val group = ToolGroup.entries.firstOrNull { it.name.equals(text, true) }
                 if (group == null) dropped += "filter: there is no group \"$text\"" else out += group
+            }
+            // Selecting lived *inside* Draw, and the selection panel inside
+            // Canvas, until the catalogue split them out. A file written before
+            // that says "draw" and means "and the marquee with it", so the new
+            // group is added rather than a tool quietly vanishing from a
+            // toolbar somebody arranged months ago.
+            //
+            // Adding is the safe direction and the only one taken: a filter is
+            // about what you are **offered**, never about what is taken away,
+            // so a file that gains a group gains buttons in its chooser and
+            // loses nothing. Nothing is written back either — the file is left
+            // as it is until the user saves it for their own reasons.
+            if (catalogue < SELECT_SPLIT &&
+                (ToolGroup.DRAW in out || ToolGroup.CANVAS in out)
+            ) {
+                out += ToolGroup.SELECT
             }
             out
         }
@@ -539,6 +563,14 @@ object WorkspaceJson {
         "artiest_workspace", "catalogue", "id", "name", "description", "author",
         "revision", "filter", "defaults", "surfaces",
     )
+    /**
+     * The catalogue version that gave selecting its own group.
+     *
+     * Files stamped lower than this were written when `marquee` was a Draw tool
+     * and `selection` a Canvas one. See [decodeFilter].
+     */
+    private const val SELECT_SPLIT = 7
+
     private val FILTER_KEYS = setOf("groups", "hide", "show")
     private val DEFAULTS_KEYS = setOf("brush", "shelf", "stabilisation")
     private val SURFACE_KEYS = setOf("id", "anchor", "dock", "at", "rects", "flow", "tools")
