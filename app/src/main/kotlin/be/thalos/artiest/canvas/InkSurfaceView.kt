@@ -3181,6 +3181,17 @@ class InkSurfaceView(
             recordLead(docPoint[0] - lastRealDocX, docPoint[1] - lastRealDocY)
             builder.forkSmoothing(tailSmoothing)
             tailSmoothing.push(docPoint[0], docPoint[1], sample.pressure, sample.eventTimeNanos)
+            // **Through the same guide the real ink goes through**, and after
+            // the same smoothing. `docs/inker-plan.md`'s tripwire is "a wet
+            // tail that wanders off the guide and jumps back", and the tail is
+            // the part of the stroke the eye is on — so it is the most visible
+            // thing a guide can get wrong. See `StrokeBuilder.snapPredicted`.
+            var tailX = tailSmoothing.x
+            var tailY = tailSmoothing.y
+            if (builder.snapPredicted(tailX, tailY, tailPoint)) {
+                tailX = tailPoint[0]
+                tailY = tailPoint[1]
+            }
 
             val last = builder.dabCount - 1
             val fromRadius = builder.radius(last)
@@ -3190,8 +3201,8 @@ class InkSurfaceView(
             val emittedDabs = tail.emit(
                 fromX = builder.x(last),
                 fromY = builder.y(last),
-                toX = tailSmoothing.x,
-                toY = tailSmoothing.y,
+                toX = tailX,
+                toY = tailY,
                 fromPressure = builder.smoothedPressure,
                 toPressure = tailSmoothing.pressure,
                 elapsedMillis = elapsedMillis,
@@ -3416,6 +3427,9 @@ class InkSurfaceView(
          * stroke would be tested at (0, 0). The gesture's first point is the
          * only thing that knows where the pen actually landed.
          */
+        /** Reused by [drawPredictedTail]'s snap; one per view, never escapes. */
+        private val tailPoint = FloatArray(2)
+
         private var marqueeDownX = 0f
         private var marqueeDownY = 0f
 

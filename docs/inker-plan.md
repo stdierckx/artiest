@@ -300,7 +300,7 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
-| **Ik12** | **The snap stage.** A `Guide` interface in `:engine` with one method — project a document-space point onto the guide — called in `StrokeBuilder.add` between `stabilizer.push` and `resampler.add`, **after** smoothing and never before. The predicted tail is snapped too, through the same guide, via `forkSmoothing`. Tested against the trace corpus with golden dabs. | `:engine` | Med | — | 3–4 |
+| **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
 | **Ik13** | **The guide framework.** `GuideSet` on the document, `GuideOverlay` as a second pass in the chrome beside `SelectionOverlay`, handles that are dragged **in arrange mode only**, on/off per guide, and persistence in `project.json`. | `:app` | **High** | Ik12 | 8–12 |
 | **Ik14** | The rulers: straight and infinite, parallel, ellipse, curve, and **snap falloff** — strength that fades with distance instead of an on/off, which is what separates a ruler you lean on from one that fights you. | `:engine`, `:app` | Med | Ik13 | 8–12 |
 | **Ik15** | **Perspective:** a horizon, one to three vanishing points, rays, infinitising a point, an isometric grid, and the ray-choice rule — whichever ray is closest to the stroke's own direction, with a manual override. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
@@ -1146,6 +1146,66 @@ to be on the other end of, and a moving highlight is what a hand aims with.
 The box's matrix is cumulative, so it is reset both when the selection changes —
 a transform held across a new pick would be applied to strokes it was never
 dragged over — and after each drop, because the strokes have absorbed it.
+
+## What Ik12 built
+
+> 2026-09-13. `:engine`, `be.thalos.artiest.engine.guide`. Thirteen tests, no
+> device.
+
+`docs/guides-plan.md` prices the guide framework at 8–12 days *before item 16
+draws a single ray*. This is the part of it the **ink** has to know about, and
+it is one field and three lines:
+
+```kotlin
+var snap: Snap? = null                     // on StrokeBuilder
+```
+
+`Guide` has one method — *where would this point be if it were on the guide?* —
+and that is the whole interface. A ruler, a parallel set, an ellipse and a
+three-point perspective ray are all that question with different arithmetic in
+it, which is what keeps the snap stage one branch on the hottest path in the
+engine rather than a `when` over guide types.
+
+A guide that does not apply at a point answers **false** and the point is left
+alone. Ik15's rays are the case that needs it: a stroke started nowhere near any
+ray has no ray to snap to, and forcing one would drag it across the page.
+
+### Where it happens, which is the whole of the risk
+
+Between `stabilizer.push` and `resampler.add`. Both halves of that are traps
+`docs/guides-plan.md` names, and both are tests:
+
+**After the smoothing.** Snapping first puts the stabilizer's lag *across* the
+guide, so the line drifts off the ruler and creeps back — it reads as a loose
+ruler. The test draws with stabilisation at 0.9 and asserts every dab is within
+a fifth of a pixel of the line.
+
+**Before the spline.** The resampler interpolates between the points it is
+given, so snapping its *output* would move the knots and leave the curve between
+them bulging off the guide. The test feeds twenty samples far apart, gets over
+two hundred dabs, and asserts that **every dab** is on the line — not every
+sample.
+
+### The falloff is smoothstep, and the shape is the point
+
+`Snap` carries a strength and a reach. The reach is 0 by default, which means
+everywhere — that is a ruler's own behaviour and the one a ruler wants: while it
+is on, it is on. A finite reach is for guides that are furniture rather than
+instruments.
+
+The curve is smoothstep and not linear or squared, because it is flat at **both**
+ends: a hand near the guide does not feel the pull changing as it moves, and the
+pull dies away at the edge without a corner. A linear falloff has a corner at the
+boundary that reads as a click; a plain square is already down to 0.81 a tenth of
+the way in, so a ruler with any reach at all would feel loose everywhere but
+exactly on it.
+
+### The predicted tail goes through the same guide
+
+`docs/inker-plan.md`'s tripwire is *"a wet tail that wanders off the guide and
+jumps back"*, and the tail is the part of the stroke the eye is on. The fork
+that copies the stabilizer now has a twin that applies the snap, and
+`drawPredictedTail` uses it.
 
 ## Stop conditions
 

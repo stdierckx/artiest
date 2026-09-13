@@ -3,6 +3,7 @@ package be.thalos.artiest.engine.ink
 import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.brush.DabContext
 import be.thalos.artiest.engine.brush.TiltFilter
+import be.thalos.artiest.engine.guide.Snap
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -76,6 +77,23 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
     /** Reused per dab; nothing retains it. See [DabContext]. */
     private val context = DabContext()
+
+    /**
+     * The guide the pen is drawing against, or null.
+     *
+     * **Ik12, and it is one field and three lines.** `docs/guides-plan.md`
+     * prices the guide framework at 8–12 days before a single ray is drawn;
+     * this is the part of it the *ink* has to know about, and it is this. A
+     * ruler, a parallel set, an ellipse and a three-point perspective ray are
+     * all the same question asked of a point — see [Guide].
+     *
+     * Set between strokes, like the brush. A guide that changed mid-stroke
+     * would be a line that bent where nothing happened.
+     */
+    var snap: Snap? = null
+
+    /** Reused by [snapped]; one instance, never escapes. */
+    private val snapPoint = FloatArray(2)
 
     private var nextSeed: Int = 0
     private var strokeRandom: Float = 0f
@@ -233,6 +251,25 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     /** The smoothing strength currently in force, for building a fork. */
     val smoothingStrength: Float get() = stabilizer.strength
 
+    /**
+     * A predicted point, through the same guide the real ink goes through.
+     *
+     * W11's speculative tail is smoothed by a *copy* of the stabilizer — see
+     * [forkSmoothing] — and it has to be snapped by the same guide for the same
+     * reason: a tail that wandered off the ruler and jumped back when the real
+     * samples arrived is `docs/inker-plan.md`'s "the predicted tail is not
+     * snapped" tripwire, and it is the most visible thing a guide can get
+     * wrong, because the tail is the part of the stroke the eye is on.
+     *
+     * Writes into [out] at 0 and 1. Answers false when there is no guide or it
+     * does not apply, in which case [out] is not written and the caller keeps
+     * the point it had.
+     */
+    fun snapPredicted(xDoc: Float, yDoc: Float, out: FloatArray): Boolean {
+        val s = snap ?: return false
+        return s.apply(xDoc, yDoc, out)
+    }
+
     fun add(sample: PenSample) {
         addTilt(sample.tilt, sample.orientation, sample.eventTimeNanos)
         add(sample.x, sample.y, sample.pressure, sample.eventTimeNanos)
@@ -287,7 +324,22 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         sampleCount++
         stabilizer.push(xDoc, yDoc, pressure, eventTimeNanos)
         val elapsedMillis = elapsedBase + (eventTimeNanos - downTimeNanos) / 1_000_000f
-        resampler.add(stabilizer.x, stabilizer.y, stabilizer.pressure, elapsedMillis)
+        // **The snap goes here: after the smoothing and before the spline.**
+        // `docs/guides-plan.md` trap 1 is that snapping before the smoothing
+        // puts the stabilizer's lag *across* the guide, so the line drifts off
+        // the ruler and creeps back — it looks like the ruler is loose. After
+        // it, the guide has the last word about where the ink goes, which is
+        // what a ruler is.
+        //
+        // Before the spline rather than after, because the resampler
+        // interpolates between the points it is given: snapping its output
+        // would move the knots and leave the curve between them off the guide.
+        val s = snap
+        if (s != null && s.apply(stabilizer.x, stabilizer.y, snapPoint)) {
+            resampler.add(snapPoint[0], snapPoint[1], stabilizer.pressure, elapsedMillis)
+        } else {
+            resampler.add(stabilizer.x, stabilizer.y, stabilizer.pressure, elapsedMillis)
+        }
     }
 
     /**
