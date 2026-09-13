@@ -481,6 +481,21 @@ Soft* in Wb4: *Texture Big* at 435 px and *Stamp Bokeh* at 384 px do not fit in 
 232-pixel swatch page. They are counted among the 40 because the stroke is right
 and the picture of it is too small.
 
+### One thing Wb8 shipped that the renderer had never been measured against
+
+`airbrush-soft` is **600 document pixels wide**. Every preset this engine was
+tuned on tops out at 96, so one imported brush is six times larger than anything
+the dab loop had ever been asked to draw — one of its dabs writes 5% of the
+page, and at `spacing 0.1` ten of them overlap at every point. It took about a
+second for an airbrush stroke to appear on the tablet, and the cause and the fix
+are `docs/big-nib-plan.md`.
+
+Nothing about the brush was wrong. What was wrong is that **an import can
+produce a nib an order of magnitude outside the range the renderer was measured
+on, and nothing said so.** `tools/krita-brushes.py` now prints a `BIG` line for
+any preset it writes above 128 px, so the next one is noticed on the day it
+arrives rather than in a report six weeks later.
+
 ### Two corrections the eraser work made possible
 
 - **The converter writes `erase 1` now, and it used to refuse to.** The refusal

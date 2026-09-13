@@ -660,6 +660,10 @@ def load_bundle(path):
     return presets, tips
 
 
+#: A nib wider than this gets a line on stderr. See `docs/big-nib-plan.md`.
+BIG_NIB_PX = 128.0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('sources', nargs='+',
@@ -707,11 +711,25 @@ def main():
             continue
         tip_line = next((l.split(' ', 1)[1] for l in text.split('\n')
                          if l.startswith('tip ')), None)
+        diameter = max(
+            (float(l.split()[2]) for l in text.split('\n') if l.startswith('size ')),
+            default=0.0,
+        )
         proposals.append((ident, label, tip_line))
         if picked is not None and ident not in picked:
             passed += 1
             continue
         open(os.path.join(args.out, ident + '.brush'), 'w').write(text)
+        if diameter > BIG_NIB_PX:
+            # An import can produce a nib an order of magnitude larger than
+            # anything the renderer was ever measured against, and one did:
+            # `airbrush-soft` is 600 document pixels where the presets this
+            # engine was tuned on top out at 96. See `docs/big-nib-plan.md` —
+            # one of its dabs writes 5% of the page and ten of them overlap at
+            # every point. It is a legitimate brush and it ships; the warning is
+            # so that the next one is noticed on the day it arrives rather than
+            # in a report six weeks later.
+            print(f'  BIG {label}: {diameter:.0f} px nib', file=sys.stderr)
         if tip_line:
             tipped += 1
         if args.preview:

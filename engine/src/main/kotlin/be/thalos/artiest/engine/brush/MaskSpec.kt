@@ -128,25 +128,81 @@ data class MaskTolerance(
     val rotationSteps: Int = 64,
     /** Diameters at or below this are quantised to whole tenths instead of geometrically. */
     val minDiameter: Float = 0.5f,
+    /**
+     * Above this diameter the size step widens from [sizeRatio] to
+     * [coarseRatio].
+     *
+     * **One ratio cannot serve a 1.5 px fineliner and a 600 px airbrush**, for
+     * the same reason a fixed pixel step cannot: 3% is right where the nib is
+     * small, and where it is large it buys a precision nothing can see while
+     * multiplying the number of distinct masks the cache has to hold.
+     *
+     * A 602 px `ALPHA_8` mask is 353 KiB, so eleven of them fill the whole
+     * default budget. At 3% a pressure ramp walks about 150 buckets above this
+     * pivot; `BigNibBench` measured that as **579 ms of mask generation for 240
+     * dabs, a 40% hit rate and 100 evictions** — several times worse than the
+     * airbrush that prompted the work, and reachable by anyone who drags a size
+     * slider. At 8% the same ramp walks 29, and one step at 600 px is 48 px of
+     * width on a rim that falls off over 180.
+     *
+     * The pivot is 64 px, which is also `DabRasterizer.SNAP_ABOVE_PX`. Both are
+     * answering the same question — *is this nib large enough that half a pixel
+     * of anything cannot be seen?* — and two different answers to one question
+     * is how a renderer acquires a fudge factor.
+     */
+    val coarseAbove: Float = 64f,
+    /** The size step above [coarseAbove]. See there. */
+    val coarseRatio: Float = 1.08f,
 ) {
 
     init {
         require(sizeRatio > 1f) { "sizeRatio must exceed 1, was $sizeRatio" }
+        require(coarseRatio >= sizeRatio) { "coarseRatio must not be finer than sizeRatio" }
         require(hardnessSteps >= 1 && aspectSteps >= 1 && rotationSteps >= 1)
         require(minDiameter > 0f)
+        require(coarseAbove >= minDiameter)
     }
 
     private val lnRatio = ln(sizeRatio.toDouble())
+    private val lnCoarse = ln(coarseRatio.toDouble())
+
+    /** The last bucket of the fine regime. */
+    private val pivotBucket: Int =
+        Math.round(ln(coarseAbove.toDouble() / minDiameter) / lnRatio).toInt()
+
+    /**
+     * The diameter [pivotBucket] stands for, which is where the two regimes
+     * meet.
+     *
+     * Derived from the bucket rather than from [coarseAbove] directly, because
+     * the two have to agree exactly: the coarse regime measures from this
+     * value, and a pivot half a bucket away from the fine regime's last step
+     * would make `sizeBucket(sizeForBucket(n)) != n` right at the join — a
+     * cache that misses every dab in one narrow band, which is the hardest kind
+     * of miss to find.
+     */
+    private val pivotDiameter: Float =
+        (minDiameter * Math.pow(sizeRatio.toDouble(), pivotBucket.toDouble())).toFloat()
 
     /** Which geometric bucket [diameter] falls in. */
     fun sizeBucket(diameter: Float): Int {
         val d = if (diameter < minDiameter) minDiameter else diameter
-        return Math.round(ln(d.toDouble() / minDiameter) / lnRatio).toInt()
+        if (d <= pivotDiameter) {
+            return Math.round(ln(d.toDouble() / minDiameter) / lnRatio).toInt()
+        }
+        return pivotBucket + Math.round(ln(d.toDouble() / pivotDiameter) / lnCoarse).toInt()
     }
 
     /** The representative diameter for a bucket — the value the mask is built at. */
-    fun sizeForBucket(bucket: Int): Float =
-        (minDiameter * Math.pow(sizeRatio.toDouble(), bucket.toDouble())).toFloat()
+    fun sizeForBucket(bucket: Int): Float {
+        if (bucket <= pivotBucket) {
+            return (minDiameter * Math.pow(sizeRatio.toDouble(), bucket.toDouble())).toFloat()
+        }
+        return (
+            pivotDiameter *
+                Math.pow(coarseRatio.toDouble(), (bucket - pivotBucket).toDouble())
+            ).toFloat()
+    }
 
     fun hardnessBucket(h: Float): Int =
         (h.coerceIn(0f, 1f) * hardnessSteps).roundToInt().coerceIn(0, hardnessSteps)

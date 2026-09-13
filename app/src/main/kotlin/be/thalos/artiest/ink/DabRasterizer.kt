@@ -74,6 +74,17 @@ class DabRasterizer(
     var tip: be.thalos.artiest.engine.brush.Tip? = null
 
     /**
+     * Whether a large dab is blitted at a whole pixel. See [SNAP_ABOVE_PX].
+     *
+     * A field only so the device can measure both, which
+     * `docs/big-nib-plan.md`'s second stop condition requires: *"anything under
+     * 10x means the device's blitter does not have the integer fast path this
+     * rests on."* A host bench cannot answer that about a tablet, and an A/B in
+     * one run on the tablet can. Nothing in the app ever sets it false.
+     */
+    var snapLargeDabs: Boolean = true
+
+    /**
      * Paint every dab at the ink's full alpha, ignoring flow.
      *
      * Set while erasing. An eraser is not a brush made of white paint: it takes
@@ -273,6 +284,105 @@ class DabRasterizer(
             return
         }
         val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, aspect, rotation, tip))
-        canvas.drawBitmap(cache.bitmapOf(mask), x - mask.hotspotX, y - mask.hotspotY, paint)
+        val left = x - mask.hotspotX
+        val top = y - mask.hotspotY
+        if (snapLargeDabs && snappable(mask.width)) {
+            canvas.drawBitmap(
+                cache.bitmapOf(mask), Math.round(left).toFloat(), Math.round(top).toFloat(), paint,
+            )
+            return
+        }
+        canvas.drawBitmap(cache.bitmapOf(mask), left, top, paint)
+    }
+
+    /**
+     * Whether a dab of this mask width may be blitted at a whole pixel.
+     *
+     * **Two conditions, each measured, and both must hold** — see
+     * [SNAP_ABOVE_PX] for the size and [SNAP_SOFT_PX] for the rim.
+     *
+     * A [tip] is excluded outright, because [hardness] does not describe its
+     * edge — `MaskGenerator` ignores hardness over a picture — so the rim
+     * arithmetic here would be reading a field that means nothing about it. No
+     * shipped tipped brush is near the size where this would pay, and a rule
+     * that guesses about a picture's edge is worse than one that declines to.
+     */
+    private fun snappable(maskWidth: Int): Boolean {
+        if (tip != null) return false
+        if (maskWidth < SNAP_ABOVE_PX) return false
+        return maskWidth * (1f - hardness) * 0.5f >= SNAP_SOFT_PX
+    }
+
+    companion object {
+
+        /**
+         * Above this mask width, a dab is *eligible* for a whole-pixel blit.
+         *
+         * ## Why the whole-pixel blit exists
+         *
+         * Skia has a fast path for a bitmap blit that is a pure integer
+         * translate at 1:1, and it takes it whether or not [isFilterBitmap] is
+         * set — the flag stops mattering when there is nothing to interpolate.
+         * A fractional offset leaves that path and every destination pixel
+         * becomes a bilinear fetch. Measured in `BigNibBench`, on one 600 px
+         * soft dab:
+         *
+         * | | ms per dab |
+         * |---|---|
+         * | filtered, fractional offset | 3.887 |
+         * | point-sampled, fractional offset | 0.797 |
+         * | **whole-pixel offset** | **0.164** |
+         *
+         * Twenty-four times, for a rounding. On the DTH-A116 the same brush's
+         * wet pass measured 22.2 ms a batch against an 11.1 ms frame with 18
+         * batch-ring spills — which is what "the airbrush takes a second to
+         * appear" is, seen from the render thread — and a device A/B through
+         * the commit path measured the rounding worth **7.9x** there.
+         *
+         * ## Why there is a size gate at all
+         *
+         * [isFilterBitmap] is set for a stated and correct reason: dabs are
+         * spaced a fraction of a diameter apart, so snapping each to the pixel
+         * grid puts a visible ripple along a slow diagonal. At an eighth of a
+         * diameter a 10 px nib lays dabs 1.25 px apart, and rounding two
+         * neighbours to the same pixel is a *bead*, not a ripple — a different
+         * defect from the rim one below, and one nothing about softness fixes.
+         * 64 px keeps the dab spacing at 8 px and the question academic.
+         *
+         * It is a **mask width** rather than the asked-for diameter because the
+         * mask is what is blitted: `MaskTolerance` quantises size, and the
+         * bitmap's own extent is the thing whose offset is being rounded.
+         */
+        const val SNAP_ABOVE_PX: Int = 64
+
+        /**
+         * How many pixels the rim must fall off over before half a pixel of
+         * placement error is lost in it.
+         *
+         * **This is the condition that actually decides it, and the
+         * measurement is one-sided enough to be worth writing out.**
+         * `DabFootprintTest` draws a slow shallow diagonal — the case where
+         * consecutive dabs round in different directions — and counts the rim
+         * pixels that move by more than an eighth of the channel, per 1000
+         * document pixels of stroke:
+         *
+         * | diameter | hardness 1.0 | hardness 0.4 |
+         * |---|---|---|
+         * | 64 | 1367 | **0** |
+         * | 128 | 1459 | **0** |
+         * | 300 | 1570 | **0** |
+         * | 600 | 147 | **0** |
+         *
+         * A hard rim ripples at every size; a soft rim never does. Size alone
+         * was the rule `docs/big-nib-plan.md` expected to find and it is the
+         * wrong one — the plan's third stop condition allowed for exactly this
+         * and named the answer: *ships gated on hardness, soft rims only, which
+         * is the whole of the reported problem*.
+         *
+         * Two pixels because that is where a half-pixel shift stops being most
+         * of the gradient. The airbrush this work began with has a rim 180 px
+         * wide; the pencil's is 0.75 and the chalk's is 0.
+         */
+        const val SNAP_SOFT_PX: Float = 2f
     }
 }

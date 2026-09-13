@@ -5,13 +5,17 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
+import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.ink.MutableBounds
+import be.thalos.artiest.engine.ink.Stroke
+import be.thalos.artiest.engine.ink.StrokeBuilder
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.Random
+import kotlin.math.abs
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -145,5 +149,145 @@ class DabFootprintTest {
             "no partial coverage: this is ShadowLegacyCanvas, not Skia. Alphas seen: $alphas",
         )
         assertEquals(Color.BLACK, pixels[48 * size + 48], "the dab centre is opaque black")
+    }
+
+    // ---- Bn2: where a dab may be snapped to the pixel grid ------------------
+
+    /**
+     * `DabRasterizer.SNAP_ABOVE_PX` and `SNAP_SOFT_PX`, found rather than
+     * guessed.
+     *
+     * Snapping a dab's blit to a whole pixel buys 23.8x on the host and 7.9x on
+     * the tablet, and it costs up to half a pixel of placement on every dab it
+     * applies to. `docs/big-nib-plan.md` Bn2 asks for the rule to be measured
+     * and pinned; this is the pin, and it is in this file because this is where
+     * a claim about what Skia actually inks belongs.
+     *
+     * ## What is drawn
+     *
+     * A **slow shallow diagonal** with the rim under test. Shallow, because a
+     * stroke at 45 degrees rounds consistently along its length while one that
+     * climbs a pixel in sixty rounds *differently* from dab to dab — and that
+     * alternation is the ripple. The number that matters is the count of rim
+     * pixels that move by more than an eighth of the channel, per thousand
+     * document pixels of stroke; a mean over the whole stroke is diluted by its
+     * area, so a large nib would flatter itself simply by being large.
+     *
+     * ## What it found
+     *
+     * | diameter | hardness 1.0 | hardness 0.4 |
+     * |---|---|---|
+     * | 64 | 1367 | **0** |
+     * | 128 | 1459 | **0** |
+     * | 300 | 1570 | **0** |
+     * | 600 | 147 | **0** |
+     *
+     * **A hard rim ripples at every size and a soft rim never does.** The plan
+     * expected a size threshold; there is not one. Size survives as a second
+     * condition only because dabs a pixel apart bead when they round onto the
+     * same pixel, which is a different defect that softness does not fix.
+     */
+    private val snapW = 1200
+    private val snapH = 400
+
+    private fun snapNib(diameter: Float, hard: Float): Brush = Brush().apply {
+        sizeMin = diameter
+        sizeMax = diameter
+        hardness = hard
+        spacing = 0.125f
+        stabilization = 0f
+        onsetMillis = 0f
+        flow = 1f
+        flowOption.min = 1f
+    }
+
+    /** 900 document pixels long, climbing one pixel in sixty. */
+    private fun snapDiagonal(brush: Brush): Stroke {
+        val b = StrokeBuilder(brush)
+        b.begin(Color.BLACK)
+        for (i in 0 until 300) {
+            val nanos = 1_000_000_000L + i * 3_108_000L
+            b.addTilt(0f, 0f, nanos)
+            b.add(60f + i * 3f, 200f + i * 0.05f, 1f, nanos)
+        }
+        return b.end()
+    }
+
+    private fun snapPaint(diameter: Float, hard: Float, snap: Boolean): Bitmap {
+        val bmp = Bitmap.createBitmap(snapW, snapH, Bitmap.Config.ARGB_8888)
+        val brush = snapNib(diameter, hard)
+        DabRasterizer(snapW, snapH, StampCache()).also {
+            it.mode = DabRasterizer.Mode.STAMP
+            it.hardness = brush.hardness
+            it.snapLargeDabs = snap
+        }.drawDry(Canvas(bmp), snapDiagonal(brush))
+        return bmp
+    }
+
+    /** `(mean |da| over inked pixels, jumpy pixels per 1000 of stroke, worst)`. */
+    private fun snapDrift(diameter: Float, hard: Float): Triple<Double, Double, Int> {
+        val snapped = snapPaint(diameter, hard, snap = true)
+        val loose = snapPaint(diameter, hard, snap = false)
+        var sum = 0L
+        var worst = 0
+        var inked = 0L
+        var jumped = 0L
+        for (y in 0 until snapH) {
+            for (x in 0 until snapW) {
+                val a = Color.alpha(snapped.getPixel(x, y))
+                val b = Color.alpha(loose.getPixel(x, y))
+                if (a == 0 && b == 0) continue
+                val d = abs(a - b)
+                sum += d
+                inked++
+                if (d > 32) jumped++
+                if (d > worst) worst = d
+            }
+        }
+        snapped.recycle()
+        loose.recycle()
+        return Triple(
+            if (inked == 0L) 0.0 else sum.toDouble() / inked,
+            jumped * 1000.0 / 900.0,
+            worst,
+        )
+    }
+
+    @Test
+    fun `a dab is snapped only where the rim can swallow half a pixel`() {
+        println("diam  hard   mean |da|   jumpy px per 1000   worst")
+        val readings = LinkedHashMap<Pair<Int, Float>, Triple<Double, Double, Int>>()
+        for (hard in floatArrayOf(1f, 0.4f)) {
+            for (d in intArrayOf(16, 32, 64, 128, 300, 600)) {
+                val r = snapDrift(d.toFloat(), hard)
+                readings[d to hard] = r
+                println("%4d  %4.1f %11.3f %19.1f %7d".format(d, hard, r.first, r.second, r.third))
+            }
+        }
+
+        // Nothing below the size gate is snapped, whatever its rim. This half
+        // proves the rule is gated rather than merely cheap.
+        for (hard in floatArrayOf(1f, 0.4f)) {
+            for (d in intArrayOf(16, 32)) {
+                assertTrue(readings[d to hard]!!.first == 0.0, "a $d px dab was snapped")
+            }
+        }
+
+        // A hard rim is never snapped, at any size — the finding that chose the
+        // rule. Shipping on diameter alone would have put a visible staircase
+        // on every large hard nib.
+        for (d in intArrayOf(64, 128, 300, 600)) {
+            assertTrue(readings[d to 1f]!!.first == 0.0, "a $d px hard-rimmed dab was snapped")
+        }
+
+        // And where it is applied there is no ripple at all to count, with the
+        // whole-stroke drift a fraction of one level of 255.
+        for (d in intArrayOf(64, 128, 300, 600)) {
+            val (mean, jumpy, worst) = readings[d to 0.4f]!!
+            assertTrue(mean > 0.0, "a $d px soft dab was not snapped")
+            assertTrue(mean < 2.0, "a $d px soft dab drifted $mean of 255")
+            assertTrue(jumpy == 0.0, "a $d px soft dab moved $jumpy rim pixels per 1000")
+            assertTrue(worst <= 16, "a $d px soft dab moved one pixel by $worst")
+        }
     }
 }

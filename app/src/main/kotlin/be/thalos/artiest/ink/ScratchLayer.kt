@@ -67,6 +67,31 @@ class ScratchLayer(
     private var bitmap: Bitmap? = null
     private var canvas: Canvas? = null
 
+    /**
+     * The buffer that is not currently being drawn on.
+     *
+     * ## Why there are two
+     *
+     * An origin move cannot be done in place: the ink has to land at a new
+     * offset inside the same pixels, and a bitmap cannot be copied onto itself
+     * — clearing it first destroys the source and not clearing it leaves the
+     * old copy behind. So the original code dropped the allocation and made a
+     * fresh one **every time the pen reached up or left**, however much room
+     * the buffer in hand had.
+     *
+     * A hand-drawn arc reaches up or left on about half its batches. Measured
+     * in `BigNibBench`, eight pencil strokes: **607 allocations, 606 growths,
+     * 173 ms in the buffer against 17 ms in the dab loop** — the scratch cost
+     * ten times what the drawing cost. On the tablet, ten airbrush strokes:
+     * **114 allocations**.
+     *
+     * Two long-lived buffers turn that into a copy between them. The cost is
+     * one extra allocation of the same size, permanently, and
+     * [maxWidth]/[maxHeight] cap it exactly as they cap the first. See
+     * `docs/big-nib-plan.md`, Bn3.
+     */
+    private var spare: Bitmap? = null
+
     /** Document-space position of the bitmap's top-left. */
     var originX: Int = 0
         private set
@@ -156,10 +181,28 @@ class ScratchLayer(
     fun ensureCovers(bounds: Bounds, padPx: Int = PAD): Boolean {
         if (!isOpen) return false
         if (bitmap == null) return false
-        val l = minOf(originX, Math.floor(bounds.left.toDouble()).toInt() - padPx)
-        val t = minOf(originY, Math.floor(bounds.top.toDouble()).toInt() - padPx)
+        var l = minOf(originX, Math.floor(bounds.left.toDouble()).toInt() - padPx)
+        var t = minOf(originY, Math.floor(bounds.top.toDouble()).toInt() - padPx)
         val r = maxOf(originX + usedWidth, Math.ceil(bounds.right.toDouble()).toInt() + padPx)
         val b = maxOf(originY + usedHeight, Math.ceil(bounds.bottom.toDouble()).toInt() + padPx)
+        // **Overshoot when the origin has to move at all.** Growing right or
+        // down keeps the origin where it is and costs a strip clear; growing
+        // left or up moves it, and *every* pixel already drawn has to be copied
+        // to a new offset. On the tablet, ten airbrush strokes — half of them
+        // drawn upward — copied a 2055x1186 region **242 times**, once per
+        // batch, because each batch reached one more pixel up than the last.
+        //
+        // Taking [SLACK] more than was asked for makes the next few batches
+        // land inside the region already held, where `l == originX` and nothing
+        // is copied. A hand moving 1500 document pixels a second advances about
+        // seventeen pixels a batch at 90 Hz, so one copy covers roughly fifteen
+        // batches instead of one.
+        //
+        // What it costs is a slightly larger used region: a bigger clear on the
+        // move, and a bigger final composite. Both are paid once where the copy
+        // was paid every time.
+        if (l < originX) l -= SLACK
+        if (t < originY) t -= SLACK
         if (l == originX && t == originY && r == originX + usedWidth && b == originY + usedHeight) {
             return true
         }
@@ -212,12 +255,17 @@ class ScratchLayer(
         } else {
             maxOf(usedHeight, capNowH)
         }
-        bitmap = null
-        canvas = null
-        ensureCapacity(capW, capH)
+        swapToSpare(capW, capH)
         val c = canvas ?: return false
+        // The **used region only**, not the whole allocation. This branch used
+        // to clear everything, which is the cost `begin`'s `clearUsed` was
+        // written specifically to avoid and which it paid again here on every
+        // origin move. Nothing ever reads outside the used region — the
+        // composite, the mask and the shader rect are all measured by it — so a
+        // stale pixel beyond it is a pixel nobody looks at.
         c.save()
         c.setMatrix(null)
+        c.clipRect(0, 0, usedWidth, usedHeight)
         c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         c.restore()
         if (old != null) {
@@ -511,6 +559,36 @@ class ScratchLayer(
         isOpen = false
         canvas = null
         bitmap = null
+        spare = null
+    }
+
+    /**
+     * Move to the other buffer, big enough for [minW] by [minH], leaving the
+     * one in hand as the spare so the ink can be copied out of it.
+     *
+     * Allocates only when the spare cannot hold the request — which, after the
+     * first stroke or two of a session, is never. See [spare].
+     */
+    private fun swapToSpare(minW: Int, minH: Int) {
+        val old = bitmap
+        val held = spare
+        val fits = held != null && held.width >= minW && held.height >= minH &&
+            held.config == config && !held.isRecycled
+        val target = if (fits) {
+            held!!
+        } else {
+            val gw = (((maxOf(minW, 1) + GRAIN - 1) / GRAIN) * GRAIN).coerceAtMost(maxWidth)
+            val gh = (((maxOf(minH, 1) + GRAIN - 1) / GRAIN) * GRAIN).coerceAtMost(maxHeight)
+            allocations++
+            Bitmap.createBitmap(gw, gh, config)
+        }
+        // The buffer being left becomes the spare, so the next origin move has
+        // somewhere to go without asking the allocator. When the spare did not
+        // fit it is simply dropped, which is right: it was too small and would
+        // not fit the next time either.
+        spare = old
+        bitmap = target
+        canvas = Canvas(target)
     }
 
     /** The buffer's own bitmap, for the composite blit and for tests. */
@@ -567,6 +645,16 @@ class ScratchLayer(
          * pixel short clips every stroke's edge.
          */
         const val PAD: Int = 2
+
+        /**
+         * Document pixels of headroom taken when the origin has to move.
+         *
+         * See [ensureCovers]. 256 because a batch at 90 Hz advances tens of
+         * pixels and a stroke is hundreds long, so it is large enough to make
+         * the copy rare and small enough that the extra cleared region is a
+         * fraction of a buffer that is already thousands of pixels across.
+         */
+        const val SLACK: Int = 256
 
         /** Allocation granularity, in pixels, on both axes. */
         const val GRAIN: Int = 128

@@ -189,4 +189,5 @@ way this feature can make the app feel worse instead of better.
 | `comics-plan.md` | 8–11 now / 250+ complete | text, groups, pages |
 | `animation-plan.md` | 23–36 (flipbook) / 60+ (with sound and camera) | the sequence subsystem |
 | `inker-plan.md` — the build for P4, over `vector-plan.md` and `guides-plan.md` | 77–115 | P3 |
+| `big-nib-plan.md` — a defect against shipped work, not a phase. **Done 2026-09-13** | 7–11.5 | — |
 | `big-nib-plan.md` — a measured defect: a 600 px dab costs 24x what it should | 7–11.5 | none |

@@ -487,7 +487,7 @@ class InkSurfaceView(
                     .append('\n')
                 out.append(
                     "strokes samples    dabs  cold ms  warm ms ms/strk   KiB  " +
-                        "hit  patch ms\n",
+                        "hit  patch ms  nosnap ms\n",
                 )
                 val builder = StrokeBuilder(pen)
                 var drift = -1L
@@ -499,12 +499,21 @@ class InkSurfaceView(
                     sheet.blank()
                     val warm = renderScene(scene, builder, sheet)
                     val patch = renderScene(touching(scene, builder, w, h), builder, sheet)
+                    // The same pass with the whole-pixel rule turned off. On
+                    // the host a 600 px dab is 23.8x dearer that way; whether
+                    // the tablet's blitter has the same integer fast path is
+                    // the question `docs/big-nib-plan.md` stops on, and it can
+                    // only be answered here.
+                    rasterizer.snapLargeDabs = false
+                    sheet.blank()
+                    val loose = renderScene(scene, builder, sheet)
+                    rasterizer.snapLargeDabs = true
                     if (drift < 0) drift = driftOf(scene, builder, sheet, w, h)
                     out.append(
-                        "%7d %7d %7d %8.1f %8.1f %7.2f %5d %4d %9.1f\n".format(
+                        "%7d %7d %7d %8.1f %8.1f %7.2f %5d %4d %9.1f %10.1f\n".format(
                             n, VectorStress.samplesOf(scene), cold.second,
                             cold.first, warm.first, warm.first / n,
-                            raw / 1024, patchCount, patch.first,
+                            raw / 1024, patchCount, patch.first, loose.first,
                         ),
                     )
                 }
