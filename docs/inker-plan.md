@@ -303,7 +303,7 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 | **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
 | **Ik13** | **DONE.** `GuideSet`, `Guideline`, `NearestGuide`, `GuideOverlay`, `GuideHandles`, the guides panel, `StrokeRecord.guide` and format 3 on both files. See **What Ik13 built**. | `:app` | **High** | Ik12 | 8–12 |
 | **Ik14** | **DONE.** `ParallelGuide`, `EllipseGuide`, `CurveGuide`, the `Guide.begin` the first needed, and *Trace that stroke*. The straight ruler and the falloff came with Ik13 and Ik12. See **What Ik14 built**. | `:engine`, `:app` | Med | Ik13 | 5–8 |
-| **Ik15** | **Perspective:** a horizon, one to three vanishing points, rays, infinitising a point, an isometric grid, and the ray-choice rule — whichever ray is closest to the stroke's own direction, with a manual override. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
+| **Ik15** | **DONE, and two of its six parts needed no code.** `PerspectiveGuide`, `Guide.advance`, the ray-choice rule with its tie-break, the lock, the derived horizon. The isometric grid and infinitising a point are both the parallel ruler. See **What Ik15 built**. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
 | **Ik16** | The feel pass on the tablet, by the person holding the pen, and the reconcile of this document against what was measured. | device, docs | Low | all | 1–2 |
 
 **Guide subtotal: 30–44 days.**
@@ -1416,6 +1416,107 @@ Nothing in Ik14. The four kinds `docs/guides-plan.md` asks for at Tier 1 — 8,
 built and are each one `buildGuide` branch and one `outline` branch, which is
 the price the framework was designed to make them cost.
 
+## What Ik15 built
+
+> 2026-09-13. `:engine` and `:app`. Sixteen tests in the engine, ten more in the
+> app, and a tablet.
+
+`docs/guides-plan.md` scores item 18 — *which ray did you mean* — as **"the part
+that decides whether perspective feels usable"**, and building it proves the
+point: items 16 and 17 are a fan of lines and an afternoon, and 18 is the
+feature.
+
+### Every ray passes through the pen-down point
+
+That is what a ray *is*, so "the nearest ray" is a tie the moment the pen lands
+and a coin-flip a millisecond later. `NearestGuide` said exactly this about
+perspective before there was any, and it turned out to be the whole design
+problem rather than a footnote.
+
+The only thing that can answer it is the stroke's **direction**, and a direction
+does not exist until the hand has moved. So nothing snaps for the first eight
+document pixels, then the ray closest to the direction travelled is chosen and
+kept for the rest of the stroke.
+
+**What the first eight pixels cost** is worth writing down, because it is the
+one visible compromise in the guide framework. They are drawn where the hand put
+them and the ninth is on the ray. The chosen ray passes through the pen-down
+point, so the step at the join is eight times the sine of the angle between the
+hand and the ray — and that angle is the *smallest* of the candidates by
+construction, so with three points sixty degrees apart it is at most four
+pixels, which is narrower than a nib. Eight and not two because two pixels of a
+slow inking stroke is three samples of tremor; eight and not thirty because
+thirty pixels of unguided line at the start of every stroke is a thing you
+would see.
+
+### `Guide.advance`, and the second weakening of a contract
+
+Ik14 weakened *pure* to *pure within one stroke*. Ik15 needed one thing more:
+`project` is called by the **predicted tail** as well, at points the pen has not
+been to, and a guide that decided from those would pick its ray from a guess
+about the future — a guess whose being wrong puts the whole stroke on the wrong
+point. So `StrokeBuilder.add` calls a new hook and `snapPredicted` does not.
+
+Both hooks take raw samples, which is what makes a rebuild decide the same way:
+one test drives thirty tail points hard the wrong way before any real travel,
+another runs the same stroke twice at stabilisation 0.8 and compares every dab.
+
+### The tie is the textbook case
+
+Two vanishing points placed symmetrically on a horizon, and a stroke drawn
+horizontally from midway between them, score **identically** against both. That
+is not a case dreamt up for a test — it is the canonical two-point setup and the
+most ordinary stroke in it, and the first run of the tests found it.
+
+A tie is broken by the **signed** cosine: of two rays equally aligned, the one
+the hand is heading toward wins. The score itself stays absolute, because a ray
+is a line and not an arrow — drawing away from a vanishing point is as much
+along its ray as drawing toward it, and that is most of the lines in a
+perspective drawing.
+
+### Items 19 and 20 needed no code at all
+
+This is the strongest thing the framework has done, so it is worth naming:
+
+- **The isometric grid** (item 19) is *"three fixed angles, no vanishing
+  points"*, which is three of Ik14's parallel rulers. Three guides and not one,
+  so any of them can be switched off alone — two angles for a wall, all three
+  for a box.
+- **Infinitising a vanishing point** (item 20) is a parallel set. The rays from
+  any two points on a page to a vanishing point a hundred pages away differ by
+  an angle too small to see, so the arithmetic degenerates on its own — a test
+  pins it at under a thousandth of a degree over 800 pixels. What item 20 is
+  really asking for is a vanishing point you can still *reach*, and that is an
+  angle with no point at all.
+
+### The override is geometry, so it is stored
+
+The manual override is a word on the guide's row: *auto*, *to 1*, *to 2*, *to
+3*, *auto*. A cycle rather than a menu, because four states do not need one. A
+locked set also snaps from the very first sample, because it needs no direction
+— so there is no unguided head at all, which is the other half of what the
+override buys.
+
+It lives on the `Guideline` and in the saved row, and that is Ik13's rule rather
+than an exception to it. Ik13 refused a per-guide *strength* because nothing
+would read it; this is read on every sample, and — the part that settles it — it
+**changes where the ink goes**, so it has to survive a save and be named by the
+record or a locked stroke would re-render against a different ray. The row's
+third field carries it as one integer, because a column that is blank on every
+row but one is a column nobody can read.
+
+### Two smaller decisions
+
+The **horizon is derived**: the line through the first two points, or a
+horizontal through the only one. It moves when a point is dragged, which is what
+a horizon does, and a stored one would be a second thing to keep in step.
+
+The **rays are aimed at the visible rectangle** rather than spread at even
+angles. A vanishing point is usually a long way off the page, so an even fan
+would put nearly all of it off screen and leave two lines that look like a
+mistake. Aiming each ray at a point spaced along the clip's own edge fills
+whatever is in front of you, at any zoom and wherever the point is.
+
 ## The Inker workspace, which is what all of this was for
 
 > 2026-09-13, on the user's ask: *"create a nice worklayout for the inker."*
@@ -1506,12 +1607,14 @@ daily value), then **Ik11** (sharp at zoom — editing is the reason for the
 feature, sharpness is the poster), then **Ik10** (restyle), then **Ik14**'s
 curve and ellipse rulers, leaving the straight and parallel ones.
 
-> **2026-09-13: everything below the first two is built.** Ik10 and all four of
-> Ik14's rulers shipped, so what the cut order still describes is Ik15 and Ik11
-> — and both of those are held for the reason the next section gives rather
-> than for time: they are the two items **The questions only you can answer**
-> asks about by name. Ik11 has a further reason of its own, recorded below,
-> which is that its cheap half turned out not to be cheap.
+> **2026-09-13: only Ik11 is left of this list.** Ik10, all four of Ik14's
+> rulers and Ik15 shipped, so the cut order now describes one item — and it is
+> held for the reason the next section gives rather than for time.
+>
+> Ik15 was the first thing this list said to cut, and it cost less than its
+> 10–14 days because two of its six parts turned out to be the parallel ruler
+> Ik14 had already built. That is worth noticing about cut orders generally: an
+> item's price is not fixed until the things under it exist.
 
 **Do not cut Ik0** — Phase 1's strongest lesson is that a plan built on unmeasured
 numbers produces confident wrong answers. **Do not cut Ik2** — without it every
