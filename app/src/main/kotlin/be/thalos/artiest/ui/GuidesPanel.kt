@@ -64,7 +64,16 @@ data class GuideInfo(
      */
     val picked: Int = 0,
 ) {
-    data class Row(val id: Long, val label: String, val on: Boolean)
+    data class Row(
+        val id: Long,
+        val label: String,
+        val on: Boolean,
+        /**
+         * What a perspective set's lock reads, or null for a kind that has no
+         * rays. See `Guideline.lockedRay`.
+         */
+        val lock: String? = null,
+    )
 
     val isEmpty: Boolean get() = rows.isEmpty()
 }
@@ -82,6 +91,20 @@ sealed interface GuideAct {
      * already drawn is one.
      */
     object FromPicked : GuideAct
+
+    /**
+     * Three parallel sets at the isometric angles.
+     *
+     * `docs/guides-plan.md` item 19, and it needs no guide of its own: an
+     * isometric grid is *"three fixed angles, no vanishing points"*, which is
+     * three of Ik14's parallel rulers. Three guides and not one, so that any of
+     * them can be switched off on its own — which is how it is used: two
+     * angles for a wall, all three for a box.
+     */
+    object Isometric : GuideAct
+
+    /** Cycle a perspective set's ray: choosing, then each point, then choosing. */
+    class Lock(val id: Long) : GuideAct
 
     class SetOn(val id: Long, val on: Boolean) : GuideAct
 
@@ -220,6 +243,17 @@ private fun GuidesBody(
             Make(ToolIcons.marqueeOval, "Ellipse") { onAct(GuideAct.Add(GuideKind.ELLIPSE)) }
         }
 
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Make(ToolIcons.perspective, "Perspective") {
+                onAct(GuideAct.Add(GuideKind.PERSPECTIVE))
+            }
+            // Item 19, and it is three parallel sets rather than a guide of its
+            // own -- which is why it sits beside Perspective as an equal and
+            // not inside it as an option.
+            Make(ToolIcons.isometric, "Isometric") { onAct(GuideAct.Isometric) }
+        }
+
         // Only when there is a stroke to trace. See GuideInfo.picked.
         if (info.picked > 0) {
             Spacer(Modifier.height(6.dp))
@@ -305,6 +339,23 @@ private fun GuideRow(row: GuideInfo.Row, onAct: (GuideAct) -> Unit) {
             color = if (row.on) colors.onPrimaryContainer else colors.onSurfaceVariant,
         )
         Spacer(Modifier.weight(1f))
+        // `docs/guides-plan.md` item 18's manual override, as a word you tap.
+        // A cycle rather than a menu: there are at most four states, and a menu
+        // for four states is a menu nobody opens.
+        if (row.lock != null) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.surfaceContainerHigh)
+                    .clickable { onAct(GuideAct.Lock(row.id)) }
+                    .padding(horizontal = 9.dp),
+            ) {
+                Text(row.lock, fontSize = 11.sp, color = colors.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier

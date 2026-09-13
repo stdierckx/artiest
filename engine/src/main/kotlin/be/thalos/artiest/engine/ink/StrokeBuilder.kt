@@ -328,6 +328,10 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
             // identical live and on a replay. See `Guide.begin`.
             snap?.guide?.begin(xDoc, yDoc)
         }
+        // Ik15. Every real sample, and **not** the predicted tail: a guide that
+        // is deciding something about the stroke has to decide it from where
+        // the hand went. See `Guide.advance`.
+        snap?.guide?.advance(xDoc, yDoc)
         sampleCount++
         stabilizer.push(xDoc, yDoc, pressure, eventTimeNanos)
         val elapsedMillis = elapsedBase + (eventTimeNanos - downTimeNanos) / 1_000_000f

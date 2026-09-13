@@ -585,7 +585,7 @@ private fun CanvasScreen(
         val set = document.guides
         GuideInfo(
             rows = set.all().mapIndexed { at, line ->
-                GuideInfo.Row(line.id, labelFor(line, at), line.on)
+                GuideInfo.Row(line.id, labelFor(line, at), line.on, lockLabel(line))
             },
             strength = set.strength,
             reachDoc = set.reachDoc,
@@ -751,6 +751,35 @@ private fun CanvasScreen(
                     arranging = true
                 }
             }
+
+            GuideAct.Isometric -> {
+                // Three parallel sets at 30, 150 and 90 degrees, which is the
+                // isometric triple. Three guides and not one, so that any of
+                // them can be switched off on its own -- two angles for a wall,
+                // all three for a box.
+                //
+                // Placed as short handle pairs near the middle, for the reason
+                // a parallel set is placed short: the two points set an angle
+                // and are not a line to draw along.
+                val cx = document.widthPx * 0.5f
+                val cy = document.heightPx * 0.5f
+                val reach = minOf(document.widthPx, document.heightPx) * 0.08f
+                for (degrees in intArrayOf(30, 150, 90)) {
+                    val a = Math.toRadians(degrees.toDouble())
+                    val dx = (kotlin.math.cos(a) * reach).toFloat()
+                    val dy = (kotlin.math.sin(a) * reach).toFloat()
+                    set.put(
+                        be.thalos.artiest.doc.Guideline(
+                            set.nextId(),
+                            be.thalos.artiest.doc.GuideKind.PARALLEL,
+                            floatArrayOf(cx - dx, cy - dy, cx + dx, cy + dy),
+                        ),
+                    )
+                }
+                arranging = true
+            }
+
+            is GuideAct.Lock -> set.byId(act.id)?.let { set.put(it.nextLock()) }
 
             is GuideAct.SetOn -> set.setOn(act.id, act.on)
             is GuideAct.Remove -> set.remove(act.id)
@@ -2983,6 +3012,18 @@ private const val DEFAULT_SIZE_MAX = 24f
 
 /** `Brush.stabilization`'s default. The plan's number, on the plan's slider. */
 /**
+ * What a perspective set's lock button reads, or null for a kind with no rays.
+ *
+ * "auto" and then a number, and the number is one-based because it is the
+ * *point* the user sees rather than the index the code holds — the same reason
+ * `labelFor` writes "Ruler 1" for the first ruler.
+ */
+private fun lockLabel(line: be.thalos.artiest.doc.Guideline): String? {
+    if (line.kind != be.thalos.artiest.doc.GuideKind.PERSPECTIVE) return null
+    return if (line.lockedRay < 0) "auto" else "to ${line.lockedRay + 1}"
+}
+
+/**
  * Where a fresh guide is put.
  *
  * **In the middle of the page**, and not where the last one was or where the
@@ -3020,6 +3061,19 @@ private fun madeAt(
         // says so without a caption.
         be.thalos.artiest.doc.GuideKind.ELLIPSE ->
             floatArrayOf(w * 0.5f, h * 0.5f, w * 0.8f, h * 0.5f, w * 0.5f, h * 0.66f)
+
+        // Two points on a horizon at eye level, and both **off the page**,
+        // which is where a vanishing point belongs: a two-point set whose
+        // points are on the paper is a fish-eye, not a room. A third of a page
+        // beyond each edge is close enough that the handles are reachable at a
+        // fit-to-screen zoom and far enough that the rays read as parallel-ish
+        // near the middle, which is what perspective looks like.
+        //
+        // The horizon is at 45% rather than half way, because a picture with
+        // its eye level exactly in the middle is the one composition nobody
+        // wants, and moving it is a drag rather than a setting.
+        be.thalos.artiest.doc.GuideKind.PERSPECTIVE ->
+            floatArrayOf(-w * 0.35f, h * 0.45f, w * 1.35f, h * 0.45f)
 
         // Nothing. A curve is not placed, it is *traced*: it comes from a
         // stroke you have already drawn and picked, which is the only honest

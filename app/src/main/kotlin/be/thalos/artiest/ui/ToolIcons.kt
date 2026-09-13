@@ -981,6 +981,52 @@ object ToolIcons {
         }
     }
 
+    /**
+     * Rays converging on a point off to one side. Ik15's perspective.
+     *
+     * Converging and not a box in perspective, because what the button makes is
+     * a *set of rays* and not a drawing: the picture is the tool, which is the
+     * same rule [ruler] follows.
+     */
+    val perspective: ImageVector by lazy {
+        icon("perspective") {
+            stroke {
+                moveTo(2.4f, 12f)
+                lineTo(21.6f, 12f)
+                moveTo(2.4f, 3.6f)
+                lineTo(21.6f, 11.2f)
+                moveTo(2.4f, 20.4f)
+                lineTo(21.6f, 12.8f)
+                moveTo(2.4f, 7.8f)
+                lineTo(21.6f, 11.6f)
+                moveTo(2.4f, 16.2f)
+                lineTo(21.6f, 12.4f)
+            }
+        }
+    }
+
+    /**
+     * Three lines at the isometric angles, meeting at a point. Item 19.
+     *
+     * The corner of a cube, which is the one thing everybody draws on an
+     * isometric grid and the shape the three angles make on their own.
+     */
+    val isometric: ImageVector by lazy {
+        icon("isometric") {
+            stroke {
+                moveTo(12f, 12f)
+                lineTo(12f, 22f)
+                moveTo(12f, 12f)
+                lineTo(3.4f, 7f)
+                moveTo(12f, 12f)
+                lineTo(20.6f, 7f)
+                moveTo(3.4f, 7f)
+                lineTo(12f, 2f)
+                lineTo(20.6f, 7f)
+            }
+        }
+    }
+
     /** Two sheets, one behind the other. Duplicate. */
     val duplicate: ImageVector by lazy {
         icon("duplicate") {

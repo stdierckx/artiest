@@ -2,6 +2,7 @@ package be.thalos.artiest.doc
 
 import be.thalos.artiest.engine.guide.Guide
 import be.thalos.artiest.engine.guide.NearestGuide
+import be.thalos.artiest.engine.guide.PerspectiveGuide
 import be.thalos.artiest.engine.guide.Snap
 
 /**
@@ -11,9 +12,22 @@ import be.thalos.artiest.engine.guide.Snap
  * ## The format
  *
  * ```
- * <id> <kind> <on> <x0>,<y0> <x1>,<y1> ...
+ * <id> <kind> <state> <x0>,<y0> <x1>,<y1> ...
  * 3 ruler 1 100.0,50.0 900.0,780.0
+ * 4 perspective 3 -1100.0,970.0 4400.0,970.0
  * ```
+ *
+ * `<state>` is one integer and it says two things, because the second only
+ * exists for one kind and a column that is blank on every other row is a column
+ * nobody can read:
+ *
+ * | state | means |
+ * |---|---|
+ * | `0` | off |
+ * | `1` | on, and a perspective set chooses its own ray |
+ * | `2`, `3`, `4` | on, and locked to ray 0, 1 or 2 |
+ *
+ * Rows written before Ik15 say `0` or `1` and mean exactly what they meant.
  *
  * Text and not base64, for `PathText`'s reason and with more force: there are a
  * handful of guides on a page, not two thousand points, so the whole table is a
@@ -80,7 +94,16 @@ object GuideText {
         append(' ')
         append(line.kind.id)
         append(' ')
-        append(if (line.on) '1' else '0')
+        // See the class note's table. One integer, because the lock exists for
+        // one kind and a column that is blank on every other row is a column
+        // nobody can read.
+        append(
+            when {
+                !line.on -> 0
+                line.lockedRay < 0 -> 1
+                else -> 2 + line.lockedRay
+            },
+        )
         for (i in 0 until line.pointCount) {
             append(' ')
             append(round(line.xAt(i)))
@@ -103,11 +126,10 @@ object GuideText {
         val id = parts[0].toLongOrNull() ?: return null
         if (id <= 0L) return null
         val kind = GuideKind.byId(parts[1]) ?: return null
-        val on = when (parts[2]) {
-            "1" -> true
-            "0" -> false
-            else -> return null
-        }
+        val state = parts[2].toIntOrNull() ?: return null
+        if (state < 0 || state > 1 + PerspectiveGuide.MAX_POINTS) return null
+        val on = state != 0
+        val locked = if (state >= 2) state - 2 else PerspectiveGuide.NO_LOCK
         // Exactly as many points as the kind takes. Too few cannot be placed;
         // too many means the row was written by a build where this kind meant
         // something else, and that is the one case where guessing is worse than
@@ -118,7 +140,7 @@ object GuideText {
         // the shape rather than a property of the kind.
         val given = parts.size - 3
         val count = if (kind.points == GuideKind.ANY) given else kind.points
-        if (given != count || count < 2 || count > MAX_POINTS) return null
+        if (given != count || count < kind.least || count > MAX_POINTS) return null
         val points = FloatArray(count * 2)
         for (i in 0 until count) {
             val pair = parts[3 + i].split(',')
@@ -130,7 +152,7 @@ object GuideText {
             points[i * 2] = x
             points[i * 2 + 1] = y
         }
-        return Guideline(id, kind, points, on)
+        return Guideline(id, kind, points, on, locked)
     }
 
     /** Every line that reads, in file order, capped at [MAX_GUIDES]. */

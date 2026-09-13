@@ -7,6 +7,7 @@ import be.thalos.artiest.engine.guide.CurveGuide
 import be.thalos.artiest.engine.guide.EllipseGuide
 import be.thalos.artiest.engine.guide.LineGuide
 import be.thalos.artiest.engine.guide.ParallelGuide
+import be.thalos.artiest.engine.guide.PerspectiveGuide
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -52,6 +53,11 @@ enum class GuideKind(
      * it, you do not reshape it.
      */
     val handles: Boolean = true,
+    /**
+     * The fewest points a kind with [ANY] of them can be made of. Ignored by a
+     * kind that names a fixed count, which is its own answer.
+     */
+    private val leastAny: Int = 2,
 ) {
 
     /**
@@ -112,8 +118,37 @@ enum class GuideKind(
      * [ANY] points, which is why that constant exists: a curve's point count is
      * its shape, not a property of its kind.
      */
-    CURVE("curve", ANY_POINTS, "Curve", handles = false),
+    CURVE("curve", ANY_POINTS, "Curve", handles = false, leastAny = 2),
+
+    /**
+     * One, two or three vanishing points, and the rays that converge on them.
+     *
+     * `docs/guides-plan.md` items 16, 17 and 18 in one kind, because they are
+     * one thing: a perspective grid *is* a set of vanishing points, and 1-, 2-
+     * and 3-point perspective differ only in how many there are. [ANY] points,
+     * capped at three by `PerspectiveGuide`.
+     *
+     * The **horizon is not stored**. It is the line through the first two
+     * points, or a horizontal through the only one — so it moves when a point
+     * is dragged, which is what a horizon does. A stored one would be a second
+     * thing to keep in step with the first.
+     *
+     * Items 19 and 20 are *not* here and need no code: an isometric grid is
+     * three [PARALLEL] sets at fixed angles, and a vanishing point pushed to
+     * infinity is a [PARALLEL] set with no point at all. See
+     * `PerspectiveGuide`.
+     */
+    PERSPECTIVE("perspective", ANY_POINTS, "Perspective", leastAny = 1),
     ;
+
+    /**
+     * The fewest points one of these can be made of.
+     *
+     * One for a perspective set, because one-point perspective is a perspective
+     * and not a broken two-point one; two for everything else, because a guide
+     * made of one point is a guide with no direction.
+     */
+    val least: Int get() = if (points == ANY) leastAny else points
 
     companion object {
 
@@ -172,6 +207,19 @@ class Guideline(
      * `ToolItem`'s rule 1 applied to a field.
      */
     val on: Boolean = true,
+    /**
+     * Which ray a perspective set uses whatever the hand does, or
+     * [PerspectiveGuide.NO_LOCK] to let it choose. Meaningless for every other
+     * kind.
+     *
+     * **Per-guide, where the strength deliberately is not**, and the difference
+     * is the rule rather than an exception to it: nothing reads a per-guide
+     * strength, and this is read on every sample of every stroke drawn against
+     * the set. It is also *geometry* — it changes where the ink goes — so it
+     * has to survive a save and be named by the record, which is why it is on
+     * the guideline and in the row rather than a piece of panel state.
+     */
+    val lockedRay: Int = PerspectiveGuide.NO_LOCK,
 ) {
 
     /**
@@ -184,8 +232,8 @@ class Guideline(
     )
 
     init {
-        require(points.size >= 4 && points.size % 2 == 0) {
-            "${points.size} floats is not a set of points"
+        require(points.size % 2 == 0 && points.size >= kind.least * 2) {
+            "${points.size} floats is not a ${kind.id}"
         }
         for (v in this.points) require(v.isFinite()) { "a guide point was $v" }
     }
@@ -235,6 +283,11 @@ class Guideline(
             if (n < 2) null else CurveGuide(points, minOf(n, CurveGuide.MAX_POINTS))
         }
 
+        GuideKind.PERSPECTIVE -> {
+            val n = minOf(pointCount, PerspectiveGuide.MAX_POINTS)
+            if (n < 1) null else PerspectiveGuide(points, n, lockedRay)
+        }
+
         GuideKind.ELLIPSE -> {
             val cx = points[0]
             val cy = points[1]
@@ -253,8 +306,27 @@ class Guideline(
 
     // ---- editing, all of which makes a new one -----------------------------
 
-    /** The same guide, switched on or off. */
-    fun with(on: Boolean): Guideline = if (on == this.on) this else Guideline(id, kind, points, on)
+    /** The same guide, switched on or off, or locked to another ray. */
+    fun with(
+        on: Boolean = this.on,
+        lockedRay: Int = this.lockedRay,
+    ): Guideline =
+        if (on == this.on && lockedRay == this.lockedRay) this
+        else Guideline(id, kind, points, on, lockedRay)
+
+    /**
+     * The next lock in the cycle: choosing, then each point in turn, then
+     * choosing again.
+     *
+     * A cycle and not a menu, because there are at most four states and a menu
+     * for four states is a menu nobody opens. Answers itself unchanged for a
+     * kind that has no rays.
+     */
+    fun nextLock(): Guideline {
+        if (kind != GuideKind.PERSPECTIVE) return this
+        val next = lockedRay + 1
+        return with(lockedRay = if (next >= pointCount) PerspectiveGuide.NO_LOCK else next)
+    }
 
     /** The same guide with point [i] moved to ([xDoc], [yDoc]). */
     fun withPoint(i: Int, xDoc: Float, yDoc: Float): Guideline {
@@ -262,7 +334,7 @@ class Guideline(
         val next = points.copyOf()
         next[i * 2] = xDoc
         next[i * 2 + 1] = yDoc
-        return Guideline(id, kind, next, on)
+        return Guideline(id, kind, next, on, lockedRay)
     }
 
     /** The same guide, every point moved. */
@@ -273,7 +345,7 @@ class Guideline(
             next[i] += dxDoc
             next[i + 1] += dyDoc
         }
-        return Guideline(id, kind, next, on)
+        return Guideline(id, kind, next, on, lockedRay)
     }
 
     // ---- what the overlay and the hand need --------------------------------
@@ -334,6 +406,7 @@ class Guideline(
             GuideKind.PARALLEL -> parallelOutline(out, clip)
             GuideKind.ELLIPSE -> ellipseOutline(out)
             GuideKind.CURVE -> curveOutline(out)
+            GuideKind.PERSPECTIVE -> perspectiveOutline(out, clip)
         }
     }
 
@@ -381,6 +454,74 @@ class Guideline(
      * is bounded, so there is nothing to cut, and the one on screen is the one
      * the hand placed.
      */
+    /**
+     * The horizon, and a fan of rays from each vanishing point.
+     *
+     * **The rays are aimed at the visible rectangle rather than spread at even
+     * angles**, and that is the whole trick: a vanishing point is usually a
+     * long way off the page, so a fan at even angles would put nearly all of it
+     * off screen and the two that were left would look like a mistake. Aiming
+     * each ray at a point spaced along the clip's own edge makes the fan fill
+     * whatever is in front of you, at any zoom and wherever the point is.
+     *
+     * The horizon is derived and not stored: the line through the first two
+     * points, or a horizontal through the only one. It moves when a point is
+     * dragged, which is what a horizon does.
+     */
+    private fun perspectiveOutline(out: Path, clip: RectF) {
+        val n = minOf(pointCount, PerspectiveGuide.MAX_POINTS)
+        if (n < 1) return
+        for (i in 0 until n) {
+            val vx = points[i * 2]
+            val vy = points[i * 2 + 1]
+            for (k in 0 until RAYS) {
+                val at = (k + 0.5f) / RAYS
+                val edge = onPerimeter(clip, at)
+                val dx = edge[0] - vx
+                val dy = edge[1] - vy
+                if (hypot(dx, dy) < MIN_SPAN_DOC) continue
+                lineThrough(out, clip, vx, vy, dx, dy)
+            }
+        }
+        // The horizon last, so it is drawn over its own rays rather than under
+        // them -- it is the one line of the set an eye uses to place the
+        // others.
+        if (n >= 2) {
+            val dx = points[2] - points[0]
+            val dy = points[3] - points[1]
+            if (hypot(dx, dy) >= MIN_SPAN_DOC) lineThrough(out, clip, points[0], points[1], dx, dy)
+        } else {
+            lineThrough(out, clip, points[0], points[1], 1f, 0f)
+        }
+    }
+
+    /**
+     * A point [t] of the way round [clip]'s edge, clockwise from its top-left.
+     *
+     * Reused scratch, because this is called once per ray per frame of a pan.
+     */
+    private fun onPerimeter(clip: RectF, t: Float): FloatArray {
+        val w = clip.width()
+        val h = clip.height()
+        val half = w + h
+        val d = (t.coerceIn(0f, 1f)) * half * 2f
+        when {
+            d < w -> perimeter.set(clip.left + d, clip.top)
+            d < w + h -> perimeter.set(clip.right, clip.top + (d - w))
+            d < w + h + w -> perimeter.set(clip.right - (d - w - h), clip.bottom)
+            else -> perimeter.set(clip.left, clip.bottom - (d - w - h - w))
+        }
+        return perimeter
+    }
+
+    private fun FloatArray.set(x: Float, y: Float) {
+        this[0] = x
+        this[1] = y
+    }
+
+    /** [onPerimeter]'s own point. UI thread only, and it never escapes a draw. */
+    private val perimeter = FloatArray(2)
+
     /**
      * The curve, as the polyline it is. No clip: it is bounded, and cutting it
      * would mean walking it twice to draw a line nobody can see the end of.
@@ -508,5 +649,15 @@ class Guideline(
          * its own right would be furniture competing with the ink.
          */
         private const val PARALLEL_LINES = 9
+
+        /**
+         * How many rays a vanishing point draws across whatever is on screen.
+         *
+         * Seven, against the parallel set's nine, because a two-point grid
+         * draws two of these fans and a three-point grid draws three: fourteen
+         * or twenty-one lines is already the most furniture the app puts on a
+         * page, and more would be a hatching pattern competing with the ink.
+         */
+        private const val RAYS = 7
     }
 }

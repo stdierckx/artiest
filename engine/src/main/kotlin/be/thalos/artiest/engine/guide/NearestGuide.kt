@@ -71,6 +71,10 @@ class NearestGuide(guides: List<Guide>) : Guide {
         for (guide in guides) guide.begin(xDoc, yDoc)
     }
 
+    override fun advance(xDoc: Float, yDoc: Float) {
+        for (guide in guides) guide.advance(xDoc, yDoc)
+    }
+
     override fun toString(): String = "NearestGuide(${guides.size})"
 
     companion object {

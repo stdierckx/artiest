@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -424,6 +425,126 @@ class GuideSetTest {
         assertEquals(300f, bounds.right, 1e-3f)
         assertEquals(20f, bounds.top, 1e-3f)
         assertEquals(400f, bounds.bottom, 1e-3f)
+    }
+
+    // ---- perspective -------------------------------------------------------
+
+    private fun twoPoint(id: Long, lock: Int = -1) = Guideline(
+        id, GuideKind.PERSPECTIVE, floatArrayOf(-1000f, 400f, 2000f, 400f), true, lock,
+    )
+
+    @Test
+    fun `a perspective set takes one, two or three points`() {
+        for (n in 1..3) {
+            val points = FloatArray(n * 2) { (it + 1) * 100f }
+            assertNotNull(Guideline(1, GuideKind.PERSPECTIVE, points).guide, "$n points")
+        }
+        // A fourth is dropped rather than refused: four-point perspective is a
+        // different guide, and a row claiming it should lose the extra point
+        // and not the drawing.
+        val four = Guideline(1, GuideKind.PERSPECTIVE, FloatArray(8) { it * 100f })
+        assertNotNull(four.guide)
+    }
+
+    @Test
+    fun `a perspective set draws a horizon through its points`() {
+        // Derived and not stored, so it moves when a point is dragged.
+        val clip = RectF(0f, 0f, 1000f, 800f)
+        val path = Path().also { set(twoPoint(1)).outline(it, clip) }
+        assertFalse(path.isEmpty)
+        // Every ray and the horizon are cut to the page.
+        val bounds = RectF().also { path.computeBounds(it, true) }
+        assertTrue(bounds.left >= -1f && bounds.right <= 1001f, "$bounds")
+        assertTrue(bounds.top >= -1f && bounds.bottom <= 801f, "$bounds")
+    }
+
+    @Test
+    fun `one vanishing point still gets a horizon`() {
+        val one = Guideline(1, GuideKind.PERSPECTIVE, floatArrayOf(500f, 300f))
+        val path = Path().also { set(one).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        assertFalse(path.isEmpty, "a horizontal through the only point")
+    }
+
+    @Test
+    fun `the lock cycles through the points and back to choosing`() {
+        var line = twoPoint(1)
+        assertEquals(-1, line.lockedRay)
+        line = line.nextLock()
+        assertEquals(0, line.lockedRay)
+        line = line.nextLock()
+        assertEquals(1, line.lockedRay)
+        line = line.nextLock()
+        assertEquals(-1, line.lockedRay, "and round again")
+    }
+
+    @Test
+    fun `a kind with no rays has no lock to cycle`() {
+        val r = ruler(1, 0f, 0f, 100f, 0f)
+        assertSame(r, r.nextLock())
+    }
+
+    @Test
+    fun `the lock survives the row it is written in`() {
+        // It is geometry -- it changes where the ink goes -- so it has to
+        // survive a save and be named by the record. A lock that was panel
+        // state would re-render every locked stroke against a different ray.
+        for (lock in intArrayOf(-1, 0, 1)) {
+            val line = twoPoint(3, lock)
+            val text = GuideText.encode(line)
+            val back = assertNotNull(GuideText.decode(text), text)
+            assertEquals(lock, back.lockedRay, text)
+            assertTrue(back.on, text)
+        }
+    }
+
+    @Test
+    fun `a row from before the lock existed means what it always meant`() {
+        assertEquals(-1, assertNotNull(GuideText.decode("3 ruler 1 0.0,0.0 10.0,0.0")).lockedRay)
+        assertFalse(assertNotNull(GuideText.decode("3 ruler 0 0.0,0.0 10.0,0.0")).on)
+    }
+
+    @Test
+    fun `a state this build cannot read drops the guide`() {
+        assertNull(GuideText.decode("3 perspective 9 0.0,0.0"))
+        assertNull(GuideText.decode("3 perspective -1 0.0,0.0"))
+        assertNull(GuideText.decode("3 perspective x 0.0,0.0"))
+    }
+
+    @Test
+    fun `a locked perspective set snaps from the first sample`() {
+        // The other half of what the override buys: no deciding distance, so
+        // no unguided head at all.
+        val line = twoPoint(1, lock = 1)
+        val g = assertNotNull(line.guide)
+        g.begin(500f, 700f)
+        assertTrue(g.project(700f, 900f, scratch))
+        // On the line from (500, 700) to the right-hand point (2000, 400).
+        val t = ((700f - 500f) * 1500f + (900f - 700f) * -300f) / (1500f * 1500f + 300f * 300f)
+        assertEquals(500f + 1500f * t, scratch[0], 0.1f)
+        assertEquals(700f - 300f * t, scratch[1], 0.1f)
+    }
+
+    @Test
+    fun `an isometric grid is three parallel sets and not a guide of its own`() {
+        // `docs/guides-plan.md` item 19 needs no code: three fixed angles is
+        // three of Ik14's parallel rulers, and three so that any of them can be
+        // switched off on its own.
+        val set = GuideSet()
+        for (degrees in intArrayOf(30, 150, 90)) {
+            val a = Math.toRadians(degrees.toDouble())
+            val dx = (kotlin.math.cos(a) * 100.0).toFloat()
+            val dy = (kotlin.math.sin(a) * 100.0).toFloat()
+            set.put(
+                Guideline(
+                    set.nextId(), GuideKind.PARALLEL,
+                    floatArrayOf(500f - dx, 400f - dy, 500f + dx, 400f + dy),
+                ),
+            )
+        }
+        assertEquals(3, set.size)
+        assertNotNull(set.snap)
+        set.setOn(set[2].id, false)
+        assertEquals(2, set.all().count { it.on }, "and one can be put away")
     }
 
     // ---- what a stroke keeps -----------------------------------------------

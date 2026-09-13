@@ -32,13 +32,18 @@ package be.thalos.artiest.engine.guide
  * points the real stroke will ask about again a frame later, and a guide that
  * drifted between the two would put a kink at the join.
  *
- * *Within one stroke* and not absolutely, because [begin] exists. Ik14's
- * parallel ruler is the case that needs it and it is not an exception that can
- * be designed away: "every stroke comes out parallel to this angle" is a line
+ * *Within one stroke* and not absolutely, because [begin] and [advance] exist.
+ * Ik14's parallel ruler is the first case and it is not an exception that can be
+ * designed away: "every stroke comes out parallel to this angle" is a line
  * through **where the stroke started**, so the guide cannot be built until the
- * pen has landed. A guide that latched its origin on the first `project` call
- * instead would be one whose answer depended on whether the predicted tail had
- * run yet, which is the same defect one layer down.
+ * pen has landed. Ik15's perspective is the second, and it needs one thing more
+ * — which way the hand actually went.
+ *
+ * Both hooks are called from the real sample path and neither from the
+ * predicted tail, which is the point of having them at all: a guide that
+ * latched on the first `project` call would be one whose answer depended on
+ * whether the tail had run yet, and a perspective guide would then choose its
+ * ray from a guess about the future.
  */
 interface Guide {
 
@@ -51,7 +56,7 @@ interface Guide {
 
     /**
      * A stroke has started at ([xDoc], [yDoc]). Nothing, for a guide that is a
-     * fixed thing on the page — which is all of them but one.
+     * fixed thing on the page — which is all of them but two.
      *
      * Called from `StrokeBuilder.add` on the first sample, with the **raw**
      * point rather than the smoothed one: the stabilizer has nothing to smooth
@@ -61,6 +66,22 @@ interface Guide {
      * storing anything extra.
      */
     fun begin(xDoc: Float, yDoc: Float) = Unit
+
+    /**
+     * The stroke has **really** reached ([xDoc], [yDoc]). Nothing, for a guide
+     * that does not care how a stroke is going.
+     *
+     * The difference between this and [project] is the whole reason it exists:
+     * `project` is called by the predicted tail as well, at points the pen has
+     * not been to yet. A guide that is *deciding* something about the stroke —
+     * Ik15's perspective, which has to pick which ray the hand meant — must
+     * decide it from where the hand went and not from where it was guessed to
+     * be going. So `StrokeBuilder.add` calls this and `snapPredicted` does not.
+     *
+     * Raw, like [begin], and for the same reason: a rebuild feeds the same raw
+     * samples back, so a decision made here is made again identically.
+     */
+    fun advance(xDoc: Float, yDoc: Float) = Unit
 }
 
 /**
