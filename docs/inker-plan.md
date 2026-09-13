@@ -302,7 +302,7 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 |---|---|---|---|---|---|
 | **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
 | **Ik13** | **DONE.** `GuideSet`, `Guideline`, `NearestGuide`, `GuideOverlay`, `GuideHandles`, the guides panel, `StrokeRecord.guide` and format 3 on both files. See **What Ik13 built**. | `:app` | **High** | Ik12 | 8–12 |
-| **Ik14** | The rulers: parallel, ellipse and curve. The straight one and **snap falloff** came with Ik13 — the falloff because `Snap` carried it from Ik12, and the straight ruler because a framework with nothing standing on it cannot be tested. Each remaining kind is one `buildGuide` branch and one `outline` branch. | `:engine`, `:app` | Med | Ik13 | 5–8 |
+| **Ik14** | **DONE, except the curve.** `ParallelGuide` and `EllipseGuide`, and the `Guide.begin` the first of them needed. The straight ruler and the falloff came with Ik13 and Ik12. See **What Ik14 built**. | `:engine`, `:app` | Med | Ik13 | 5–8 |
 | **Ik15** | **Perspective:** a horizon, one to three vanishing points, rays, infinitising a point, an isometric grid, and the ray-choice rule — whichever ray is closest to the stroke's own direction, with a manual override. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
 | **Ik16** | The feel pass on the tablet, by the person holding the pen, and the reconcile of this document against what was measured. | device, docs | Low | all | 1–2 |
 
@@ -1328,6 +1328,70 @@ Ik14 owns is the other guide *kinds*, and each of them is `Guideline` plus one
 There is no per-guide strength, and that is a deliberate absence rather than an
 oversight: a perspective grid to lean on and a ruler to obey, on one page, is a
 real thing to want, and it is not there because nothing today would read it.
+
+## What Ik14 built
+
+> 2026-09-13. `:engine` and `:app`. Twenty-two tests and a tablet.
+
+Two more kinds, and the framework held: each is one `Guide` in `:engine`, one
+`buildGuide` branch and one `outline` branch. The codec, the persistence, the
+overlay, the hit test and the snap stage are all untouched, which is what Ik13's
+float-array geometry was for.
+
+### The ellipse, which was written twice
+
+`docs/guides-plan.md` item 13, and the entry that justifies Tier 1 to an inker.
+It is also the only hard arithmetic in the framework.
+
+The obvious iteration — start from the angle the *circle* would give and walk
+the parametric angle toward the foot of the perpendicular — converges
+beautifully from outside the ellipse and **does not converge at all** near the
+long axis inside the evolute. The cross product it steers by is exactly zero
+there, so it sits still and answers the end of the axis: on a 300 by 40 ellipse
+the point (26, 0) came back 274 pixels from the curve instead of 40.
+
+The shape of the test that caught it is worth more than the fix. It is brute
+force against four thousand points on the ellipse, because **a wrong answer that
+is still on the ellipse is exactly what converging to the wrong root looks
+like**, and every cheaper check passes.
+
+The replacement is Eberly's method: bisection on a root that is monotone by
+construction, which cannot fail and needs no starting guess. In **double**,
+because the root lands at −1 + ε for a point near the long axis and in float the
+sum `s + 1` there has about one significant bit left — which came out as a
+nearest point two pixels *outside* an ellipse forty pixels tall. It runs once
+per sample rather than once per dab, so a double divide costs nothing anybody
+can measure.
+
+### The parallel ruler, which cost a word
+
+Item 10, and the cheapest useful thing in the tier: hatching and speed lines are
+*many lines at one angle in different places*, which is otherwise a ruler
+dragged between every stroke.
+
+It is the one guide that is not a fixed thing on the page. A ruler is a line you
+draw along; this is an **angle**, and the line is wherever the pen landed. So
+`Guide` grew `begin(xDoc, yDoc)` and its contract went from *must be pure* to
+*must be pure **within one stroke***.
+
+That is a real weakening of an interface this plan wrote deliberately, so the
+alternative is worth recording: a guide that latched its origin on the first
+`project` call instead would be one whose answer depended on whether the
+predicted tail had run yet — the same defect one layer down, and harder to see.
+
+The origin is the **raw** first sample, which is the one value that is identical
+live and on a replay: the stabilizer has nothing to smooth on the first sample,
+and a rebuild feeds the same first sample back through the same call. So a
+stroke drawn against a parallel ruler re-renders exactly and **nothing extra is
+stored to make it so** — which is the one place Ik13's guide table did not have
+to grow.
+
+### What is left
+
+The curve guide (item 12) and "guide from a drawn stroke" (item 15), which are
+the same item twice: the interesting half of a French curve is not projecting
+onto a polyline, it is *getting the polyline*, and Ik7 already picks a stroke
+whose centreline is one. That is the cheap way in and it is not built.
 
 ## The Inker workspace, which is what all of this was for
 
