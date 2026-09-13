@@ -20,6 +20,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -295,16 +297,20 @@ private fun LayersBody(
 
             val active = layers.firstOrNull { it.id == activeId }
             if (active != null) {
+                // No "Opacity" label. A slider with a percentage on the end of
+                // it, directly under a list of sheets, is not a control anybody
+                // has to be told the name of — and the word was costing a
+                // quarter of the row's width, which the slider now has. The
+                // same trade Krita's docker makes: one row per idea, the value
+                // written into the control rather than beside it.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(28.dp)
+                        .padding(horizontal = 2.dp),
                 ) {
-                    Text(
-                        "Opacity",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     Slider(
                         value = active.opacity,
                         onValueChange = { onOp(LayerOp.SetOpacity(active.id, it)) },
@@ -318,7 +324,7 @@ private fun LayersBody(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
 
                 // Beside the opacity slider and not on the row, for the reason
                 // the slider is here: a row already carries a picture, a name
@@ -326,26 +332,7 @@ private fun LayersBody(
                 // would be a control nobody can hit. Both of these are
                 // properties of the *active* sheet, which is what the
                 // highlighted row means.
-                Text(
-                    "Blend",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 2.dp),
-                )
-                Spacer(Modifier.height(6.dp))
-                // Two rows of words rather than a dropdown. A dropdown is one
-                // more thing to open before you can see what you have, and the
-                // seven fit -- see `LayerBlend` for why there are seven.
-                for (line in BLEND_ROWS) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (blend in line) {
-                            BlendChip(blend, blend == active.blend) {
-                                onOp(LayerOp.SetBlend(active.id, blend))
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
+                BlendPicker(active.blend) { onOp(LayerOp.SetBlend(active.id, it)) }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -427,8 +414,16 @@ fun LayersPanelCard(
     }
 }
 
-/** How much of a docked layers card is not the list. See [LayersPanelCard]. */
-private val CARD_FURNITURE = 150.dp
+/**
+ * How much of a docked layers card is not the list. See [LayersPanelCard].
+ *
+ * **Counted, not guessed, and the count moved.** It was 150 against a real
+ * 233 — the blend chips were never in it — so the card's actions were pushed
+ * off the bottom of a short one. Us3 took the chips down to one 30dp row, and
+ * the parts now add up to what is declared: 20 of padding, 20 of header, 8 and
+ * 10 of gap, 28 of opacity, 6, 30 of blend, 8, and 36 of actions.
+ */
+private val CARD_FURNITURE = 166.dp
 
 /**
  * One sheet: what it looks like, what it is called, and whether it is showing.
@@ -552,42 +547,81 @@ private fun LayerRow(
 }
 
 /**
- * One blend mode, as a word you can press.
+ * The blend mode, as one line that says what it is and opens the rest.
  *
- * A word and not a glyph: there is no picture of "multiply" that anybody reads
- * faster than the word, and the same argument the selection panel makes about
- * its four combine modes applies here with three more of them.
+ * ## Why this replaced seven chips
+ *
+ * It was a heading and two rows of words, 106dp of a panel, and the KDoc
+ * argued for it: *"a dropdown is one more thing to open before you can see
+ * what you have"*. The counter-argument is the screen, and the user made it:
+ *
+ * > *"Layers: The blend modes take up a lot of space, maybe put them in
+ * > dropdown menu, so we save some space"*
+ *
+ * The argument was also weaker than it looked. A dropdown that shows the
+ * current value **is** showing you what you have — the thing you cannot see
+ * without opening it is the *other six*, and those are six words you already
+ * know. Krita spends 26 pixels on the same control, which is what the user's
+ * screenshot of it shows.
+ *
+ * 30dp against 106dp, and the 76 go to the list of layers above.
+ *
+ * ## Why the word and not a glyph
+ *
+ * The old chips' reason, unchanged: there is no picture of "multiply" that
+ * anybody reads faster than the word.
  */
 @Composable
-private fun BlendChip(blend: LayerBlend, selected: Boolean, onClick: () -> Unit) {
+private fun BlendPicker(blend: LayerBlend, onBlend: (LayerBlend) -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(width = 62.dp, height = 28.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) scheme.primaryContainer else scheme.surfaceContainerHighest)
-            .clickable(onClick = onClick),
-    ) {
-        Text(
-            blend.label,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            color = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
-        )
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(scheme.surfaceContainerHighest)
+                .clickable { open = true }
+                .padding(horizontal = 10.dp),
+        ) {
+            Text(
+                blend.label,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = scheme.onSurface,
+            )
+            Icon(
+                ToolIcons.down,
+                "Blend mode",
+                Modifier.size(13.dp),
+                scheme.onSurfaceVariant,
+            )
+        }
+        if (open) {
+            DropdownMenu(expanded = true, onDismissRequest = { open = false }) {
+                for (mode in LayerBlend.entries) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                mode.label,
+                                fontSize = 13.sp,
+                                // The current one is named *and* coloured. A
+                                // tick would need a column of its own in a menu
+                                // that is seven words wide.
+                                color = if (mode == blend) scheme.primary else scheme.onSurface,
+                            )
+                        },
+                        onClick = { open = false; onBlend(mode) },
+                    )
+                }
+            }
+        }
     }
 }
-
-/**
- * Four and three. Seven chips at 62dp plus their gaps is 446dp against a 272dp
- * panel, so they wrap; written out rather than reached for with a `FlowRow`,
- * which is still experimental and would decide the break for us.
- */
-private val BLEND_ROWS: List<List<LayerBlend>> = listOf(
-    listOf(LayerBlend.NORMAL, LayerBlend.MULTIPLY, LayerBlend.SCREEN, LayerBlend.OVERLAY),
-    listOf(LayerBlend.DARKEN, LayerBlend.LIGHTEN, LayerBlend.DIFFERENCE),
-)
 
 /**
  * A small square target inside a row.
@@ -648,6 +682,10 @@ private val PANEL_WIDTH = 272.dp
 /**
  * About four rows before it scrolls, which leaves the panel shorter than the
  * screen at the eight-sheet cap while still showing most drawings whole.
+ *
+ * Unchanged by Us3 on purpose: the popup got shorter by the ~100dp the blend
+ * chips were taking, and spending that back on more rows would have answered
+ * *"the blend modes take up a lot of space"* with a panel the same height.
  */
 private val LIST_MAX_HEIGHT = 232.dp
 
