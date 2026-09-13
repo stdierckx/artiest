@@ -101,6 +101,20 @@ class VectorSheet(
     private var nextId: Long = 1L
 
     /**
+     * Goes up on every change to the stroke list or to either table.
+     *
+     * `Layer.revision`'s counterpart, and it exists for the same caller:
+     * `ProjectSaver` asks "is `strokes/3.ink` still a description of this
+     * sheet" every few seconds, and comparing one long is what makes the
+     * autosave cheap enough to be a poll rather than a hook on every path that
+     * changes something.
+     *
+     * A `Long`, so it cannot wrap in any session a person could have.
+     */
+    var revision: Long = 0L
+        private set
+
+    /**
      * Whether the strokes still account for every pixel on the sheet.
      *
      * **The one thing Ik3 cannot do on its own**, said out loud rather than
@@ -137,6 +151,9 @@ class VectorSheet(
         if (!intact) return
         intact = false
         spoiledBy = reason
+        // The saver watches this number, and a sheet that has just become
+        // un-rebuildable is a sheet whose manifest entry has to change.
+        revision++
     }
 
     private val scratchIds = IdList()
@@ -211,6 +228,7 @@ class VectorSheet(
     fun reorder() {
         records.sortBy { it.id }
         reindex()
+        revision++
     }
 
     /** Take these out, and answer with what was taken, in draw order. */
@@ -232,6 +250,7 @@ class VectorSheet(
         records.clear()
         records.addAll(kept)
         reindex()
+        revision++
         return taken
     }
 
@@ -253,6 +272,7 @@ class VectorSheet(
             grid.add(r.id, r.bounds)
         }
         reindex()
+        revision++
         return old
     }
 
@@ -272,9 +292,30 @@ class VectorSheet(
         // recorded. So it un-spoils.
         intact = true
         spoiledBy = ""
+        revision++
     }
 
     // -------------------------------------------------------------- reading
+
+    /**
+     * Fill an empty sheet from a file. **Not** for an edit — [add] and [append]
+     * are — and it takes the tables whole rather than interning, because a
+     * loaded record's `brush` index already names a position in the list it
+     * came with.
+     *
+     * Refuses to do anything to a sheet that already has strokes, because
+     * merging two brush tables is a renumbering of every record that names one,
+     * and there is no caller that wants it.
+     */
+    fun load(records: List<StrokeRecord>, brushes: List<String>, clips: List<Path>): Boolean {
+        if (this.records.isNotEmpty()) return false
+        brushText.addAll(brushes)
+        repeat(brushes.size) { brushCache.add(null) }
+        clipPaths.addAll(clips)
+        for (r in records.sortedBy { it.id }) add(r)
+        revision++
+        return true
+    }
 
     fun byId(id: Long): StrokeRecord? = position[id]?.let { records[it] }
 
@@ -407,6 +448,7 @@ class VectorSheet(
         position[record.id] = records.size
         records.add(record)
         grid.add(record.id, record.bounds)
+        revision++
     }
 
     private fun reindex() {
@@ -427,6 +469,7 @@ class VectorSheet(
         for (i in brushText.indices.reversed()) if (brushText[i] == text) return i
         brushText.add(text)
         brushCache.add(null)
+        revision++
         return brushText.size - 1
     }
 
@@ -440,6 +483,7 @@ class VectorSheet(
             if (samePath(clipPaths[i], clip)) return i
         }
         clipPaths.add(Path(clip))
+        revision++
         return clipPaths.size - 1
     }
 

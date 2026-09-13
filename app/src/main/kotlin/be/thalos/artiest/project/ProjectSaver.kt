@@ -8,6 +8,8 @@ import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.Layer
 import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.doc.Thumbnails
+import be.thalos.artiest.doc.VectorSheet
+import be.thalos.artiest.engine.ink.StrokeCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -94,6 +96,17 @@ class ProjectSaver(private val files: ProjectFiles) {
     private var describedActive: Int = -1
 
     /**
+     * What was at each index's *stroke* file when it was last written: the
+     * sheet, and the revision it was at. Null where the sheet at that index
+     * kept no strokes.
+     *
+     * A second list rather than a field on [written], because the two answer
+     * different questions and change at different times — a stroke moves both,
+     * an undo of a vector edit moves only this one, and a rename moves neither.
+     */
+    private var writtenStrokes: List<Pair<VectorSheet, Long>?> = emptyList()
+
+    /**
      * Take these sheets, at these revisions, as already on disk.
      *
      * Called by `ProjectLoader` with the layers it has just built from the
@@ -101,8 +114,11 @@ class ProjectSaver(private val files: ProjectFiles) {
      * open re-encodes the whole drawing to produce the bytes that are already
      * there — eight sheets, several seconds, for nothing.
      */
-    fun seed(project: Project, layers: List<Layer>) {
+    fun seed(project: Project, layers: List<Layer>, sheets: List<VectorSheet?> = emptyList()) {
         written = layers.map { it to it.revision }
+        writtenStrokes = layers.indices.map { i ->
+            sheets.getOrNull(i)?.let { it to it.revision }
+        }
         described = project.sheets
         describedActive = project.active
     }
@@ -110,6 +126,7 @@ class ProjectSaver(private val files: ProjectFiles) {
     /** Nothing on disk belongs to what is in the document. After a New. */
     fun forget() {
         written = emptyList()
+        writtenStrokes = emptyList()
         described = emptyList()
         describedActive = -1
     }
@@ -135,18 +152,34 @@ class ProjectSaver(private val files: ProjectFiles) {
         for (i in 0 until count) {
             val entry = stack.entryAt(i)
             if (!clean(i, entry.layer, entry.layer.revision)) return true
+            if (!strokesClean(i, entry.vector)) return true
             if (described[i] != describe(entry, i)) return true
         }
         return false
     }
 
-    private fun describe(entry: be.thalos.artiest.doc.LayerStack.Entry, index: Int) = ProjectSheet(
-        file = Project.fileFor(index),
-        name = entry.name,
-        opacity = entry.opacity,
-        visible = entry.visible,
-        blend = entry.blend,
-    )
+    /** Whether `strokes/<i>.ink` is still a description of this sheet's list. */
+    private fun strokesClean(i: Int, sheet: VectorSheet?): Boolean {
+        val was = writtenStrokes.getOrNull(i)
+        if (sheet == null) return was == null
+        return was != null && was.first === sheet && was.second == sheet.revision
+    }
+
+    private fun describe(entry: be.thalos.artiest.doc.LayerStack.Entry, index: Int): ProjectSheet {
+        val vector = entry.vector
+        return ProjectSheet(
+            file = Project.fileFor(index),
+            name = entry.name,
+            opacity = entry.opacity,
+            visible = entry.visible,
+            blend = entry.blend,
+            strokes = if (vector != null) Project.strokesFor(index) else null,
+            brushes = vector?.brushes.orEmpty(),
+            // The tables are the sheet's and go in the manifest; the samples go
+            // in the `.ink` file. See `ProjectSheet.brushes`.
+            clips = vector?.clips.orEmpty().map { PathText.encode(it) },
+        )
+    }
 
     /**
      * Write [document] into [project]'s directory and return what it is now.
@@ -170,6 +203,7 @@ class ProjectSaver(private val files: ProjectFiles) {
 
         val sheets = ArrayList<ProjectSheet>(count)
         val nowWritten = ArrayList<Pair<Layer, Long>>(count)
+        val nowStrokes = ArrayList<Pair<VectorSheet, Long>?>(count)
         var encoded = 0
         // One transient for the whole save, not one per sheet: 27.19 MiB is the
         // largest allocation in the app and the second one is the one that
@@ -184,6 +218,23 @@ class ProjectSaver(private val files: ProjectFiles) {
                 val revision = layer.revision
                 sheets += describe(entry, i)
                 nowWritten += layer to revision
+
+                // The strokes before the pixels, and independently of them: an
+                // undo of a vector edit repaints the sheet and so moves both,
+                // but a *redo* of one that changed nothing visible moves only
+                // the record list, and a saver that only watched pixels would
+                // write a stroke file one edit behind.
+                val vector = entry.vector
+                nowStrokes += vector?.let { it to it.revision }
+                if (vector != null && !strokesClean(i, vector)) {
+                    val bytes = StrokeCodec.encode(vector.strokes)
+                    if (!files.writeAtomically(files.strokesOf(project.id, i)) {
+                            it.writeBytes(bytes)
+                        }
+                    ) {
+                        return SaveResult.Failed("the strokes of sheet ${i + 1} could not be written")
+                    }
+                }
 
                 if (clean(i, layer, revision) && files.sheetOf(project.id, i).isFile) continue
 
@@ -204,7 +255,16 @@ class ProjectSaver(private val files: ProjectFiles) {
 
             // Only now: these are the files the manifest no longer names.
             files.pruneSheets(project.id, keep = count)
+            // And the stroke file of any sheet that has stopped keeping its
+            // strokes, which `pruneSheets` cannot see because the sheet is
+            // still there. A `strokes/3.ink` left behind would be picked up by
+            // whatever becomes sheet 3 next.
+            files.pruneStrokes(
+                project.id,
+                keepIndices = sheets.indices.filter { sheets[it].strokes != null }.toSet(),
+            )
             written = nowWritten
+            writtenStrokes = nowStrokes
             described = sheets
             describedActive = saved.active
 

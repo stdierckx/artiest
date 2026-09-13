@@ -42,8 +42,17 @@ import be.thalos.artiest.ui.text
  */
 object ProjectJson {
 
-    /** The version of the *format*. A file that claims another is still read. */
-    const val FORMAT = 1
+    /**
+     * The version of the *format*. A file that claims another is still read.
+     *
+     * **2 since Ik6**, which added three optional fields per sheet: `strokes`,
+     * `brushes` and `clips`. A version 1 file has none of them and decodes as a
+     * drawing of ordinary sheets, which is what it is. A version 2 file read by
+     * a version 1 build loses the editability of its ink sheets and keeps every
+     * pixel, because the PNG is still there and is still what the drawing looks
+     * like — see `ProjectSheet.strokes`.
+     */
+    const val FORMAT = 2
 
     /** What was read, and what could not be. */
     data class Decoded(
@@ -84,7 +93,29 @@ object ProjectJson {
         append(", \"opacity\": ").append(round(s.opacity))
         append(", \"visible\": ").append(s.visible)
         append(", \"blend\": ").append(Json.quote(s.blend.id))
+        // Three fields written only when there is something to say, so a
+        // drawing of ordinary sheets encodes to exactly the bytes version 1
+        // wrote. That is what makes the version bump cheap to reason about:
+        // nothing that existed before moves.
+        if (s.strokes != null) {
+            append(", \"strokes\": ").append(Json.quote(s.strokes))
+        }
+        if (s.brushes.isNotEmpty()) {
+            append(", \"brushes\": ").append(array(s.brushes))
+        }
+        if (s.clips.isNotEmpty()) {
+            append(", \"clips\": ").append(array(s.clips))
+        }
         append("}")
+    }
+
+    private fun array(items: List<String>): String = buildString {
+        append('[')
+        for ((i, v) in items.withIndex()) {
+            if (i > 0) append(", ")
+            append(Json.quote(v))
+        }
+        append(']')
     }
 
     /**
@@ -170,12 +201,25 @@ object ProjectJson {
                 dropped += "a sheet names a file this build will not open: ${obj.str("file")}"
                 continue
             }
+            // A sheet that names a stroke file this build will not open keeps
+            // its pixels and loses its strokes, rather than being dropped. The
+            // PNG is what the drawing looks like; the strokes are what it can
+            // be edited from, and losing the second is recoverable where losing
+            // the first is not.
+            val strokes = strokesFile(obj.str("strokes"))
+            if (strokes == null && obj.str("strokes") != null) {
+                dropped += "a sheet names a stroke file this build will not open: " +
+                    "${obj.str("strokes")} — its ink is still there but cannot be edited"
+            }
             out += ProjectSheet(
                 file = file,
                 name = obj.text("name", Project.MAX_NAME) ?: "Layer ${out.size + 1}",
                 opacity = obj.float("opacity")?.coerceIn(0f, 1f) ?: 1f,
                 visible = (obj["visible"] as? JsonValue.Bool)?.value ?: true,
                 blend = LayerBlend.byId(obj.str("blend")),
+                strokes = strokes,
+                brushes = strings(obj["brushes"], MAX_TABLE),
+                clips = strings(obj["clips"], MAX_TABLE),
             )
         }
         return out
@@ -194,6 +238,32 @@ object ProjectJson {
     private fun sheetFile(raw: String?): String? {
         val name = raw ?: return null
         return if (FILE.matches(name)) name else null
+    }
+
+    /** [sheetFile] for the stroke file beside it, and the same argument. */
+    private fun strokesFile(raw: String?): String? {
+        val name = raw ?: return null
+        return if (INK.matches(name)) name else null
+    }
+
+    /**
+     * A list of strings, bounded.
+     *
+     * Bounded because both tables are indexed by a number that came out of the
+     * same file: a corrupt `brushes` array of a million entries is a million
+     * strings allocated before anything has looked at them. `VectorSheet`
+     * already answers a default for an index it does not have, so a truncated
+     * table costs one stroke its nib rather than the drawing.
+     */
+    private fun strings(value: JsonValue?, limit: Int): List<String> {
+        val arr = (value as? JsonValue.Arr)?.items ?: return emptyList()
+        val out = ArrayList<String>(minOf(arr.size, limit))
+        for (item in arr) {
+            if (out.size >= limit) break
+            val s = (item as? JsonValue.Str)?.value ?: continue
+            out += s
+        }
+        return out
     }
 
     /** `#rgb`, `#rrggbb` or `#aarrggbb`. Anything else is white, and says so. */
@@ -224,6 +294,15 @@ object ProjectJson {
     private const val WHITE = 0xFFFFFFFF.toInt()
 
     private val FILE = Regex("^${Project.LAYERS}/[0-9]{1,4}\\.png$")
+
+    /** See [FILE]. The set of names this app writes is `strokes/0.ink` upwards. */
+    private val INK = Regex("^${Project.STROKES}/[0-9]{1,4}\\.ink$")
+
+    /**
+     * More brushes or clips than a sheet can plausibly have. A page of inking
+     * has two or three nibs and no clips; 256 is a refusal of nonsense.
+     */
+    private const val MAX_TABLE = 256
 
     private val ROOT_KEYS = setOf(
         "artiest_project", "id", "name", "created", "modified", "revision",

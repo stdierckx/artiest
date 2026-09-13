@@ -1,5 +1,13 @@
 package be.thalos.artiest.project
 
+import android.graphics.Path
+import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.brush.BrushCodec
+import be.thalos.artiest.engine.ink.Bounds
+import be.thalos.artiest.engine.ink.SampleLog
+import be.thalos.artiest.engine.ink.StrokeRecord
+import kotlin.test.assertContentEquals
+import kotlin.test.assertNull
 import be.thalos.artiest.doc.PendingStroke
 import android.graphics.Color
 import be.thalos.artiest.doc.CommitQueue
@@ -215,5 +223,177 @@ class ProjectRoundTripTest {
         runBlocking { ProjectLoader.open(files, saved.project, opened, ProjectSaver(files)) }
         opened.render()
         assertFalse(opened.canUndo, "and it is gone rather than pointing at closed pixels")
+    }
+    // ---- Ik6: the strokes beside the pixels --------------------------------
+
+    private fun pending(y: Float, seed: Int = 1): PendingStroke {
+        val log = SampleLog()
+        for (i in 0 until 20) log.add(4f + i, y, 0.7f, 0.1f, 0f, i * 3.1f)
+        return PendingStroke(
+            samples = log.pack(),
+            sampleCount = log.count,
+            seed = seed,
+            colorArgb = Color.BLACK,
+            erase = false,
+            brushText = BrushCodec.encode(Brush().apply { sizeMax = 9f }),
+            bounds = Bounds.of(0f, y - 5f, 30f, y + 5f),
+        )
+    }
+
+    /**
+     * The whole of Ik6 in one test: an ink sheet's strokes, its brush table and
+     * its clip table survive a save, a close and an open, and the sheet comes
+     * back editable.
+     *
+     * The clip is the half that is easy to leave out and expensive to leave
+     * out. A stroke drawn into a selection is *clipped pixels*; if the clip
+     * table did not survive, the first edit after reopening would re-render
+     * that stroke outside its stencil — silently, and nowhere near the thing
+     * that caused it.
+     */
+    @Test
+    fun `an ink sheet keeps its strokes, its brushes and its clips across a save`() {
+        val made = document()
+        made.layers.apply(LayerOp.AddVector(made.newLayer(), "Ink"))
+        val sheet = made.layers.active.vector!!
+        val clip = Path().apply { addRect(2f, 2f, 40f, 40f, Path.Direction.CW) }
+        val a = sheet.append(pending(10f), null)
+        val b = sheet.append(pending(20f, seed = 9), clip)
+        paint(made, 0, Color.RED)
+
+        val project = assertNotNull(files.create("Inked", 64, 48, 1_000L))
+        val saver = ProjectSaver(files)
+        val saved = assertIs<SaveResult.Saved>(runBlocking { saver.save(project, made, 2_000L) })
+        assertTrue(File(files.dirFor(saved.project.id), "strokes/1.ink").isFile)
+        assertFalse(
+            File(files.dirFor(saved.project.id), "strokes/0.ink").isFile,
+            "an ordinary sheet should not get a stroke file",
+        )
+
+        val opened = document()
+        val stored = assertNotNull(files.load(saved.project.id)).project!!
+        val result = assertIs<OpenResult.Opened>(
+            runBlocking { ProjectLoader.open(files, stored, opened, ProjectSaver(files)) }
+        )
+        opened.render()
+        assertEquals(emptyList(), result.notes)
+
+        assertNull(opened.layers.entryAt(0).vector, "the raster sheet stayed raster")
+        val back = assertNotNull(opened.layers.entryAt(1).vector)
+        assertTrue(back.intact)
+        assertEquals(2, back.size)
+        assertEquals(listOf(a.id, b.id), back.strokes.map { it.id })
+        assertEquals(listOf(a.seed, b.seed), back.strokes.map { it.seed })
+        assertEquals(1, back.brushes.size, "one nib, one table entry")
+        assertEquals(9f, back.brushAt(back.strokes[0].brush).sizeMax)
+        assertEquals(StrokeRecord.NO_CLIP, back.strokes[0].clip)
+        assertEquals(0, back.strokes[1].clip)
+        assertNotNull(back.clipAt(0))
+
+        // And the samples themselves, byte for byte.
+        assertContentEquals(a.copyPackedBytes(), back.strokes[0].copyPackedBytes())
+
+        // The sheet is live: a tap finds the stroke it drew.
+        assertEquals(b.id, back.hit(14f, 20f, 2f))
+    }
+
+    /**
+     * The PNG is what the drawing looks like; the strokes are what it can be
+     * edited from. Losing the second must not cost the first — which is
+     * `docs/inker-plan.md`'s stated reason for writing both.
+     */
+    @Test
+    fun `a stroke file that cannot be read costs editability and not the drawing`() {
+        val made = document()
+        made.layers.apply(LayerOp.AddVector(made.newLayer(), "Ink"))
+        made.layers.active.vector!!.append(pending(10f), null)
+        paint(made, 1, Color.BLUE)
+
+        val project = assertNotNull(files.create("Inked", 64, 48, 1_000L))
+        val saved = assertIs<SaveResult.Saved>(
+            runBlocking { ProjectSaver(files).save(project, made, 2_000L) }
+        )
+        File(files.dirFor(saved.project.id), "strokes/1.ink").writeText("not a stroke file")
+
+        val opened = document()
+        val stored = assertNotNull(files.load(saved.project.id)).project!!
+        val result = assertIs<OpenResult.Opened>(
+            runBlocking { ProjectLoader.open(files, stored, opened, ProjectSaver(files)) }
+        )
+        opened.render()
+
+        assertEquals(Color.BLUE, pixel(opened, 1, 10, 10), "the pixels are still there")
+        val back = assertNotNull(opened.layers.entryAt(1).vector)
+        assertFalse(back.intact, "and the sheet knows it cannot be rebuilt")
+        assertEquals(0, back.size)
+        assertTrue(result.notes.any { it.contains("cannot be edited") }, "${result.notes}")
+    }
+
+    @Test
+    fun `a sheet that stops keeping strokes loses its stroke file`() {
+        val made = document()
+        made.layers.apply(LayerOp.AddVector(made.newLayer(), "Ink"))
+        val inkId = made.layers.active.id
+        made.layers.active.vector!!.append(pending(10f), null)
+
+        val project = assertNotNull(files.create("Inked", 64, 48, 1_000L))
+        val saver = ProjectSaver(files)
+        val first = assertIs<SaveResult.Saved>(runBlocking { saver.save(project, made, 2_000L) })
+        val ink = File(files.dirFor(first.project.id), "strokes/1.ink")
+        assertTrue(ink.isFile)
+
+        made.layers.apply(LayerOp.Delete(inkId))
+        val second = assertIs<SaveResult.Saved>(
+            runBlocking { saver.save(first.project, made, 3_000L) }
+        )
+        assertEquals(1, second.project.sheets.size)
+        assertFalse(ink.isFile, "the deleted sheet's strokes were left behind")
+    }
+
+    /**
+     * The autosave is a poll, so it has to notice a change that moves no
+     * pixels. Undoing a vector edit repaints the sheet and so moves both — but
+     * a change to the record list that happens to repaint identically would be
+     * missed by a saver that only watched `Layer.revision`.
+     */
+    @Test
+    fun `the saver notices a change to the stroke list alone`() {
+        val made = document()
+        made.layers.apply(LayerOp.AddVector(made.newLayer(), "Ink"))
+        val sheet = made.layers.active.vector!!
+        val project = assertNotNull(files.create("Inked", 64, 48, 1_000L))
+        val saver = ProjectSaver(files)
+        val saved = assertIs<SaveResult.Saved>(runBlocking { saver.save(project, made, 2_000L) })
+        assertFalse(saver.dirty(made))
+
+        sheet.append(pending(10f), null)
+        assertTrue(saver.dirty(made), "a new record left the saver thinking it was clean")
+        runBlocking { saver.save(saved.project, made, 3_000L) }
+        assertFalse(saver.dirty(made))
+    }
+
+    /**
+     * A version 1 file has no `strokes` field and is a drawing of ordinary
+     * sheets, which is what it is. Nothing about opening one changes.
+     */
+    @Test
+    fun `a file from before ink layers opens as ordinary sheets`() {
+        val made = document()
+        paint(made, 0, Color.RED)
+        val project = assertNotNull(files.create("Old", 64, 48, 1_000L))
+        val saved = assertIs<SaveResult.Saved>(
+            runBlocking { ProjectSaver(files).save(project, made, 2_000L) }
+        )
+        val manifest = File(files.dirFor(saved.project.id), "project.json")
+        manifest.writeText(manifest.readText().replace("\"artiest_project\": 2", "\"artiest_project\": 1"))
+
+        val opened = document()
+        val stored = assertNotNull(files.load(saved.project.id)).project!!
+        assertIs<OpenResult.Opened>(
+            runBlocking { ProjectLoader.open(files, stored, opened, ProjectSaver(files)) }
+        )
+        opened.render()
+        assertNull(opened.layers.entryAt(0).vector)
+        assertEquals(Color.RED, pixel(opened, 0, 10, 10))
     }
 }

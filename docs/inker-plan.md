@@ -261,7 +261,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik3** | **DONE.** `VectorSheet`, `PendingStroke`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, the commit path appending a record beside the pixels, and **`VectorSheet.intact`** — which is the part the plan did not foresee. See **What Ik3 built**. | `:app` | Med | Ik1 | 5–7 |
 | **Ik4** | **DONE, and "identical" turned out to be the wrong word.** `InkSurfaceView.rebuild`, `Confinement`, `Layer.blank(rect)`, a coalescing throttle, and the clip table in use. See **What Ik4 built**. | `:app` | **High** | Ik3, Ik2 | 5–8 |
 | **Ik5** | **DONE.** `DocStep`, the exchange moved onto the step, `VectorStep`, `SheetRebuilder`, and undo/redo of a vector edit. Two of Ik3's three spoilers are gone. See **What Ik5 built**. | `:app` | Med | Ik4 | 4–6 |
-| **Ik6** | Persistence: `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2 with a `kind` per sheet, save on the same debounce, load into `LayerOp.Open`. **The PNG stays** and is still written — see below. | `:app` | Med | Ik1, Ik3 | 4–6 |
+| **Ik6** | **DONE.** `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2, `PathText` for the clip table, save on the same debounce, load into `LayerOp.Open`. The PNG stays. See **What Ik6 built**. | `:app` | Med | Ik1, Ik3 | 4–6 |
 | **Ik7** | Picking strokes: tap, lasso (the marquee gesture, a different hit test), the selected set, and the highlight in the overlay. | `:app` | Med | Ik3 | 4–6 |
 | **Ik8** | **The three eraser modes.** Whole stroke; to the nearest intersection; and an ordinary partial rub that splits a record. `StrokeGeometry.intersections` in `:engine`, JVM-tested. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
 | **Ik9** | Move, rotate and scale the selected strokes, through `TransformBox` over records instead of pixels. Drop is a `VectorStep`; grain regenerates where it lands. | `:app` | Med | Ik7, Ik5 | 4–6 |
@@ -831,6 +831,75 @@ drawing at under 0.4% of the total ink, and after the first rebuild the pixels
 come from the records — so a second rebuild of the same region is
 pixel-identical. It converges after one press rather than drifting with every
 press.
+
+## What Ik6 built
+
+> 2026-09-13. `:app`. Verified on the DTH-A116: four strokes on an ink layer, a
+> force-stop, a relaunch — `ink  Ink 3 strokes 1 KiB`, and a rebuild of the
+> reloaded sheet repaints all three in 428.8 ms.
+
+An ink sheet writes `strokes/<n>.ink` beside `layers/<n>.png`, named from its
+position for the same reason the PNG is. `ProjectJson` is version **2**, and the
+version-1 shape is untouched: the three new fields — `strokes`, `brushes`,
+`clips` — are written only when there is something to say, so a drawing of
+ordinary sheets encodes to exactly the bytes version 1 wrote.
+
+### What goes where, and why it is split
+
+| | Where | Why |
+|---|---|---|
+| The samples | `strokes/<n>.ink`, `StrokeCodec` | Nine bytes a sample is the whole argument for keeping them; that does not belong in JSON. |
+| The brush table | `project.json` | It is the *sheet's*, not the strokes', it is text beside other text a person reads, and it has two or three entries. |
+| The clip table | `project.json`, as `PathText` | Same. |
+
+### The clip table had to be solved, not deferred
+
+A stroke drawn into a selection is *clipped pixels*. If the clip table did not
+survive a save, the first edit after reopening would re-render that stroke
+**outside** the stencil — silently, and nowhere near what caused it. That is the
+exact failure the table was invented to prevent, so a table that does not
+persist is a table that does not work.
+
+`Path` has no serialisation this build can use (`getPathIterator` is API 34,
+`minSdk` is 29), so **`PathText`** walks each contour with a `PathMeasure` and
+emits points a document pixel apart. That is exact enough by construction:
+a clip is a mask, rasterised to whole pixels, whose edge Skia antialiases over
+one of them. It would be the wrong technique for a stroke — which is why strokes
+are stored as their input, and why this plan refuses Bézier outlines for ink.
+
+Direction is kept, so a selection with a hole in it comes back with the hole.
+Reversing one contour would fill it in, which is a defect that looks like a
+rendering bug three features away, so it is its own test.
+
+### An unreadable stroke file costs editability and nothing else
+
+The PNG is what the drawing looks like; the strokes are what it can be edited
+from, and losing the second is recoverable where losing the first is not. So a
+sheet whose manifest says it keeps strokes and whose file is missing, corrupt,
+or has a clip this build cannot read **still opens** — with its pixels, as a
+vector sheet with no records, **spoiled**, and with a note saying so. Nothing
+tries to repaint a page from a list that does not describe it.
+
+### Two things the saver had to learn
+
+**A second revision to watch.** `dirty()` is a poll — comparing longs every few
+seconds, so that nobody has to remember to call something from a stroke, a
+clear, an undo or whatever the next feature adds. `VectorSheet.revision` is
+`Layer.revision`'s counterpart, and without it a change to a record list that
+happened to repaint identically would be missed.
+
+**A second thing to prune.** `strokes/3.ink` left behind by a deleted sheet
+would be picked up by whatever becomes sheet 3 next — a drawing that opens with
+somebody else's strokes on it. Pruned by the set of indices the manifest still
+names, not by a count, because a sheet can stop keeping strokes without going
+away.
+
+### A copy of an ink sheet is an ink sheet
+
+`LayerOp.Duplicate` copies the record list too. The records are **shared**
+rather than copied — they are immutable values, and copying the samples would
+double the one cost this design is careful about — while the clip paths are
+copied, because a `Path` is not immutable.
 
 ## Stop conditions
 

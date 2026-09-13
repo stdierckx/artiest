@@ -3,6 +3,8 @@ package be.thalos.artiest.project
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import be.thalos.artiest.doc.Document
+import be.thalos.artiest.doc.VectorSheet
+import be.thalos.artiest.engine.ink.StrokeCodec
 import be.thalos.artiest.doc.Layer
 import be.thalos.artiest.doc.LayerOp
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +77,7 @@ object ProjectLoader {
         // The files on disk are already a picture of these sheets, so the first
         // save after an open writes nothing. Without this it would re-encode the
         // whole drawing to produce bytes that are already there.
-        saver.seed(project, ok.sheets.map { it.layer })
+        saver.seed(project, ok.sheets.map { it.layer }, ok.sheets.map { it.vector })
 
         // The UI thread's half of the swap: the stroke bookkeeping is its list.
         // The undo history is the render thread's and is cleared as the
@@ -139,6 +141,7 @@ object ProjectLoader {
                 opacity = described.opacity,
                 visible = described.visible,
                 blend = described.blend,
+                vector = vectorOf(files, project, described, document, notes),
             )
             peak = maxOf(peak, android.os.Debug.getNativeHeapAllocatedSize())
         }
@@ -146,6 +149,55 @@ object ProjectLoader {
         val ms = (System.nanoTime() - startNs) / 1_000_000L
         ProjectCounters.openedProject(ms, sheets.size, peak)
         return Built.Sheets(sheets, notes, ms)
+    }
+
+    /**
+     * The strokes beside the pixels, or null for an ordinary sheet.
+     *
+     * **A stroke file that cannot be read costs the sheet its editability and
+     * nothing else.** The PNG has already been decoded by the time this runs
+     * and is what the drawing looks like, so a note is the right answer and a
+     * refusal is not — `docs/inker-plan.md`'s reason for keeping the PNG at all
+     * is that it is "what opens the drawing if the stroke file is ever
+     * unreadable".
+     *
+     * A sheet whose manifest says it keeps strokes and whose file is missing
+     * still comes back as a vector sheet, empty. That is the honest state: it
+     * keeps strokes, it has none, and it is **spoiled** so that nothing tries
+     * to repaint the page from a list that does not describe it.
+     */
+    private fun vectorOf(
+        files: ProjectFiles,
+        project: Project,
+        described: ProjectSheet,
+        document: Document,
+        notes: MutableList<String>,
+    ): VectorSheet? {
+        if (described.strokes == null) return null
+        val sheet = VectorSheet(document.widthPx, document.heightPx)
+        val file = File(files.dirFor(project.id), described.strokes)
+        val bytes = runCatching { if (file.isFile) file.readBytes() else null }.getOrNull()
+        if (bytes == null) {
+            notes += "\"${described.name}\" says it keeps its strokes and ${described.strokes} " +
+                "could not be read — its ink is still there but cannot be edited"
+            sheet.spoil("the stroke file could not be read")
+            return sheet
+        }
+        val records = runCatching { StrokeCodec.decode(bytes) }.getOrElse { e ->
+            notes += "\"${described.name}\" has a stroke file this build cannot read " +
+                "(${e.message ?: "unreadable"}) — its ink is still there but cannot be edited"
+            sheet.spoil("the stroke file could not be read")
+            return sheet
+        }
+        val clips = described.clips.mapNotNull { PathText.decode(it) }
+        if (clips.size != described.clips.size) {
+            notes += "\"${described.name}\" has a selection this build cannot read — " +
+                "its ink is still there but cannot be edited"
+            sheet.spoil("a clip could not be read")
+            return sheet
+        }
+        sheet.load(records, described.brushes, clips)
+        return sheet
     }
 
     private enum class Painted { DRAWN, MISSING, CLOSED }

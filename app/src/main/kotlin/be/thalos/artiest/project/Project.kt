@@ -76,8 +76,17 @@ data class Project(
          */
         fun fileFor(index: Int): String = "$LAYERS/$index.png"
 
+        /**
+         * What a sheet's stroke file is called, for a sheet that keeps its
+         * strokes. Beside the PNG and named the same way, for the same reason.
+         */
+        fun strokesFor(index: Int): String = "$STROKES/$index.ink"
+
         /** The directory sheets live in, inside a project's own directory. */
         const val LAYERS = "layers"
+
+        /** Where `strokes/<n>.ink` lives. See [strokesFor]. */
+        const val STROKES = "strokes"
 
         /** What the gallery shows. Composited by the same code the screen uses. */
         const val THUMBNAIL = "thumbnail.png"
@@ -108,4 +117,35 @@ data class ProjectSheet(
     val opacity: Float = 1f,
     val visible: Boolean = true,
     val blend: LayerBlend = LayerBlend.NORMAL,
+    /**
+     * `strokes/<n>.ink` for a sheet that keeps the strokes that made it, null
+     * for an ordinary one. See `VectorSheet`.
+     *
+     * **The PNG stays and is still written.** It is three things at once: what
+     * the autosave already writes, what the gallery thumbnail and the `.ora`
+     * export read, and what opens the drawing if the stroke file is ever
+     * unreadable. Disk is the cheapest thing this project spends — a full
+     * drawing's stroke file is under a megabyte beside sheet PNGs that are
+     * already hundreds of kilobytes — and the alternative is a drawing whose
+     * only copy is in a format one build of one program understands.
+     */
+    val strokes: String? = null,
+    /**
+     * The sheet's brush table: `BrushCodec` text, deduplicated, indexed by
+     * `StrokeRecord.brush`.
+     *
+     * Here rather than in the `.ink` file because it is the *sheet's* and not
+     * the strokes', because it is text beside other text a person can read, and
+     * because the whole argument for the stroke file is that it is nine bytes a
+     * sample. Usually two or three entries.
+     */
+    val brushes: List<String> = emptyList(),
+    /**
+     * The sheet's clip table, as [PathText]. Usually empty.
+     *
+     * A stroke drawn into a selection is clipped pixels; a clip table that did
+     * not survive a save would let the first edit after reopening re-render
+     * that stroke outside its stencil.
+     */
+    val clips: List<String> = emptyList(),
 )

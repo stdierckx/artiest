@@ -67,6 +67,12 @@ class ProjectFiles(private val root: File) {
     /** Where a sheet's pixels go. The name comes from the position, never from the file. */
     fun sheetOf(id: String, index: Int): File = File(dirFor(id), Project.fileFor(index))
 
+    /**
+     * Where a sheet's strokes go, for a sheet that keeps them. Beside the PNG,
+     * named from the position for the same reason. See [sheetOf].
+     */
+    fun strokesOf(id: String, index: Int): File = File(dirFor(id), Project.strokesFor(index))
+
     fun load(id: String): ProjectJson.Decoded? {
         val file = manifestOf(id)
         if (!file.isFile) return null
@@ -142,9 +148,31 @@ class ProjectFiles(private val root: File) {
      * safely written.
      */
     fun pruneSheets(id: String, keep: Int) {
-        val dir = File(dirFor(id), Project.LAYERS)
+        prune(File(dirFor(id), Project.LAYERS), ".png", keep)
+        // The stroke files too, and for a stronger reason than disk: a sheet
+        // that stops keeping its strokes, or that is deleted, must not leave a
+        // `strokes/3.ink` behind for whatever becomes sheet 3 next to pick up.
+        // The manifest is what names them, and by here it no longer does.
+        prune(File(dirFor(id), Project.STROKES), ".ink", keep)
+    }
+
+    /**
+     * Delete `<n><suffix>` for every n at or above [keep].
+     *
+     * A sheet that is still there but no longer keeps its strokes is handled by
+     * the caller passing the count it kept; this only knows about position.
+     */
+    fun pruneStrokes(id: String, keepIndices: Set<Int>) {
+        val dir = File(dirFor(id), Project.STROKES)
         for (file in dir.listFiles().orEmpty()) {
-            val n = file.name.removeSuffix(".png").toIntOrNull() ?: continue
+            val n = file.name.removeSuffix(".ink").toIntOrNull() ?: continue
+            if (n !in keepIndices) runCatching { file.delete() }
+        }
+    }
+
+    private fun prune(dir: File, suffix: String, keep: Int) {
+        for (file in dir.listFiles().orEmpty()) {
+            val n = file.name.removeSuffix(suffix).toIntOrNull() ?: continue
             if (n >= keep) runCatching { file.delete() }
         }
     }

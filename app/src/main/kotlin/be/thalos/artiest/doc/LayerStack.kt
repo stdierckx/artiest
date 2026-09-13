@@ -274,6 +274,21 @@ class LayerStack(
                     val patch = PixelPatch.captureAll(from.layer, widthPx, heightPx)
                     patch?.restoreInto(entry.layer)
                     patch?.recycle()
+                    // A copy of an ink sheet is an ink sheet. The records
+                    // themselves are shared rather than copied — they are
+                    // immutable values, and copying the samples would double
+                    // the one cost this design is careful about — while the
+                    // clip paths are copied, because a `Path` is not.
+                    from.vector?.let { source ->
+                        val copy = VectorSheet(widthPx, heightPx)
+                        copy.load(
+                            source.strokes,
+                            source.brushes,
+                            source.clips.map { android.graphics.Path(it) },
+                        )
+                        if (!source.intact) copy.spoil(source.spoiledBy)
+                        entry.vector = copy
+                    }
                     entries.add(at, entry)
                     activeIndex = at
                     true
@@ -309,7 +324,7 @@ class LayerStack(
                                 opacity = sheet.opacity.coerceIn(0f, 1f),
                                 visible = sheet.visible,
                                 blend = sheet.blend,
-                            )
+                            ).also { it.vector = sheet.vector }
                         )
                     }
                     activeIndex = op.active.coerceIn(0, entries.size - 1)
@@ -658,6 +673,16 @@ sealed interface LayerOp {
             val opacity: Float = 1f,
             val visible: Boolean = true,
             val blend: LayerBlend = LayerBlend.NORMAL,
+            /**
+             * The strokes that made these pixels, already built from the file,
+             * or null for an ordinary sheet.
+             *
+             * Built by the loader rather than here, for the same reason the
+             * `Layer` is: opening a project reads files, and reading files
+             * inside a render callback is a hitch in the frame the user is
+             * looking at. The sheet arrives finished.
+             */
+            val vector: VectorSheet? = null,
         )
     }
 
