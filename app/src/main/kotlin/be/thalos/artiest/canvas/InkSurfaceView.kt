@@ -27,6 +27,7 @@ import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.doc.EraseMode
 import be.thalos.artiest.doc.SheetRebuilder
 import be.thalos.artiest.doc.StrokeEraser
+import be.thalos.artiest.doc.StrokeRestyle
 import be.thalos.artiest.doc.StrokeOp
 import be.thalos.artiest.doc.VectorSheet
 import be.thalos.artiest.doc.VectorStep
@@ -1348,6 +1349,27 @@ class InkSurfaceView(
                 is StrokeOp.Erase -> edit(eraser.plan(op, sheet, entry.id), sheet, entry)
                 StrokeOp.DeletePicked ->
                     edit(eraser.planDelete(document.picked.toArray(), sheet, entry.id), sheet, entry)
+                is StrokeOp.Restyle -> {
+                    val was = document.picked.toArray()
+                    val step = StrokeRestyle.plan(op, was, sheet, entry.id)
+                    if (step != null) {
+                        StrokeRestyle.apply(step, sheet)
+                        document.recordVectorEdit(step)
+                        rebuild(entry, step.damage())
+                        document.layers.touchActive()
+                        redrawDry()
+                        // A restyled stroke is a *new* record with a new id, so
+                        // the picked set has to follow it: without this the
+                        // user would watch their selection vanish for having
+                        // changed its colour.
+                        document.picked.setTo(
+                            LongArray(step.added.size) { step.added[it].id },
+                            sheet,
+                            entry.id,
+                        )
+                        post { onPickChanged?.invoke() }
+                    }
+                }
                 else ->
                     if (document.picked.apply(op, sheet, entry.id)) post { onPickChanged?.invoke() }
             }

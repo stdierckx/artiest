@@ -44,6 +44,7 @@ import be.thalos.artiest.doc.EraseMode
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
+import be.thalos.artiest.doc.StrokeOp
 
 /**
  * The selection panel, as a button that opens it.
@@ -84,10 +85,16 @@ fun SelectionButton(
      */
     picking: Boolean?,
     eraseMode: EraseMode,
+    pickedStrokes: Int,
+    /** The colour in the hand, for "give them this colour". */
+    ink: Int,
+    /** `BrushCodec.encode` of the brush in the hand, built on demand. */
+    brushText: () -> String,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
     onEraseMode: (EraseMode) -> Unit,
+    onStrokeOp: (StrokeOp) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onSelecting: (Boolean) -> Unit,
@@ -120,6 +127,9 @@ fun SelectionButton(
                 floating = floating,
                 picking = picking,
                 eraseMode = eraseMode,
+                pickedStrokes = pickedStrokes,
+                ink = ink,
+                brushText = brushText,
                 onShape = {
                     onShape(it)
                     onSelecting(true)
@@ -127,6 +137,7 @@ fun SelectionButton(
                 onMode = onMode,
                 onPicking = onPicking,
                 onEraseMode = onEraseMode,
+                onStrokeOp = onStrokeOp,
                 onOp = onOp,
                 onFloatOp = onFloatOp,
                 onDismiss = { open = false },
@@ -148,10 +159,16 @@ private fun SelectionPanel(
     floating: Boolean,
     picking: Boolean?,
     eraseMode: EraseMode,
+    pickedStrokes: Int,
+    /** The colour in the hand, for "give them this colour". */
+    ink: Int,
+    /** `BrushCodec.encode` of the brush in the hand, built on demand. */
+    brushText: () -> String,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
     onEraseMode: (EraseMode) -> Unit,
+    onStrokeOp: (StrokeOp) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onDismiss: () -> Unit,
@@ -178,10 +195,14 @@ private fun SelectionPanel(
                 floating = floating,
                 picking = picking,
                 eraseMode = eraseMode,
+                pickedStrokes = pickedStrokes,
+                ink = ink,
+                brushText = brushText,
                 onShape = onShape,
                 onMode = onMode,
                 onPicking = onPicking,
                 onEraseMode = onEraseMode,
+                onStrokeOp = onStrokeOp,
                 onOp = onOp,
                 // Lifting closes the panel: the transform box is on the canvas
                 // and this card would be sitting over the pixels it moves.
@@ -216,10 +237,16 @@ fun SelectionPanelCard(
     floating: Boolean,
     picking: Boolean?,
     eraseMode: EraseMode,
+    pickedStrokes: Int,
+    /** The colour in the hand, for "give them this colour". */
+    ink: Int,
+    /** `BrushCodec.encode` of the brush in the hand, built on demand. */
+    brushText: () -> String,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
     onEraseMode: (EraseMode) -> Unit,
+    onStrokeOp: (StrokeOp) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
 ) {
@@ -231,10 +258,14 @@ fun SelectionPanelCard(
         floating = floating,
         picking = picking,
         eraseMode = eraseMode,
+        pickedStrokes = pickedStrokes,
+        ink = ink,
+        brushText = brushText,
         onShape = onShape,
         onMode = onMode,
         onPicking = onPicking,
         onEraseMode = onEraseMode,
+        onStrokeOp = onStrokeOp,
         onOp = onOp,
         onFloatOp = onFloatOp,
         onFixate = null,
@@ -258,10 +289,16 @@ private fun SelectionBody(
     floating: Boolean,
     picking: Boolean?,
     eraseMode: EraseMode,
+    pickedStrokes: Int,
+    /** The colour in the hand, for "give them this colour". */
+    ink: Int,
+    /** `BrushCodec.encode` of the brush in the hand, built on demand. */
+    brushText: () -> String,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
     onEraseMode: (EraseMode) -> Unit,
+    onStrokeOp: (StrokeOp) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onFixate: (() -> Unit)?,
@@ -342,6 +379,35 @@ private fun SelectionBody(
                 ) { onEraseMode(EraseMode.TO_JUNCTION) }
                 Choice(ToolIcons.softEraser, "Just what it touches", eraseMode == EraseMode.PART) {
                     onEraseMode(EraseMode.PART)
+                }
+            }
+
+            // Ik10, and it only appears when there is something to do it to. A
+            // row of controls that are dimmed for most of a session is a row
+            // that teaches the eye to skip it.
+            if (pickedStrokes > 0) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "$pickedStrokes stroke${if (pickedStrokes == 1) "" else "s"} picked",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // "The brush in your hand", both of them, because that is
+                    // the one nib and the one colour the user can see. A panel
+                    // of its own for a colour these strokes might become would
+                    // be a second colour picker to keep in step with the first.
+                    Choice(ToolIcons.palette, "Give them this colour", false) {
+                        onStrokeOp(StrokeOp.Restyle(colorArgb = ink, brushText = null))
+                    }
+                    Choice(ToolIcons.brushes, "Give them this brush", false) {
+                        onStrokeOp(StrokeOp.Restyle(colorArgb = null, brushText = brushText()))
+                    }
+                    Choice(ToolIcons.trash, "Rub them out", false) {
+                        onStrokeOp(StrokeOp.DeletePicked)
+                    }
                 }
             }
         }

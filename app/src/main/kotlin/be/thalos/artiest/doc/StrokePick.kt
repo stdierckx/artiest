@@ -75,6 +75,25 @@ sealed interface StrokeOp {
 
     /** Take the picked strokes off the sheet. */
     object DeletePicked : StrokeOp
+
+    /**
+     * Give the picked strokes a different colour, a different nib, or both.
+     *
+     * **All four of `docs/inker-plan.md`'s restyle operations are this one.**
+     * The plan lists recolour, re-brush, scale the width and re-stabilise as
+     * four things; three of them are a *brush* — width is `sizeMin`/`sizeMax`,
+     * stabilisation is `stabilization`, and re-brush is the whole of it — so
+     * the caller scales or tunes a copy of the brush and hands over its text.
+     * One op, one undo step, one repaint.
+     *
+     * Null means "leave it alone", which is what makes "recolour without
+     * changing the nib" expressible.
+     */
+    class Restyle(
+        val colorArgb: Int?,
+        /** `BrushCodec.encode` of the brush to give them, or null. */
+        val brushText: String?,
+    ) : StrokeOp
 }
 
 /**
@@ -202,9 +221,28 @@ class StrokePick {
             // The two that edit the sheet rather than the set. They come here
             // only to be refused: `StrokeEraser` owns them, and the pruning
             // afterwards is what moves this object.
-            is StrokeOp.Erase, StrokeOp.DeletePicked -> return false
+            is StrokeOp.Erase, StrokeOp.DeletePicked, is StrokeOp.Restyle -> return false
         }
         if (ids.size == before && (was == null || was == ids)) return false
+        publish(sheet)
+        return true
+    }
+
+    /**
+     * Pick exactly these, and republish.
+     *
+     * For an edit that *replaces* records: a restyled or split stroke is a new
+     * record with a new id, and without this the user would watch their
+     * selection vanish for having changed its colour. Ids the sheet does not
+     * have are skipped rather than refused, because an edit that dropped a
+     * piece — a fragment too short to draw — did the right thing.
+     */
+    fun setTo(wanted: LongArray, sheet: VectorSheet, layerId: Int): Boolean {
+        val next = LinkedHashSet<Long>(wanted.size * 2)
+        for (id in wanted) if (sheet.byId(id) != null) next.add(id)
+        if (this.layerId == layerId && next == ids) return false
+        ids = next
+        this.layerId = layerId
         publish(sheet)
         return true
     }

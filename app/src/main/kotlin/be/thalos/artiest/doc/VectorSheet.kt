@@ -279,6 +279,16 @@ class VectorSheet(
     /** [n] fresh ids, ascending, reserved. */
     fun nextIds(n: Int): LongArray = LongArray(n) { nextId++ }
 
+    /**
+     * Intern a brush and answer its table index, for a caller that is about to
+     * build records naming it.
+     *
+     * Public because Ik10 restyles strokes with a brush the sheet may never
+     * have seen, and the table is the sheet's to grow. Deduplicated, so
+     * restyling twenty strokes with one nib adds one entry.
+     */
+    fun brushIndexOf(text: String): Int = internBrush(text)
+
     fun clear() {
         records.clear()
         brushText.clear()

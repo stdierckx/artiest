@@ -1710,6 +1710,13 @@ private fun CanvasScreen(
                         surface?.eraseMode = it
                         generation++
                     },
+                    pickInfo = pickInfo,
+                    onStrokeOp = { document.requestStrokeOp(it); surface?.redrawDry() },
+                    brushText = {
+                        be.thalos.artiest.engine.brush.BrushCodec.encode(
+                            surface?.ink ?: be.thalos.artiest.engine.brush.Brush(),
+                        )
+                    },
                     onSelecting = { on ->
                         setSelecting(on)
                         generation++
@@ -1904,6 +1911,10 @@ private fun ToolSlot(
     onPicking: (Boolean) -> Unit,
     eraseMode: be.thalos.artiest.doc.EraseMode,
     onEraseMode: (be.thalos.artiest.doc.EraseMode) -> Unit,
+    pickInfo: be.thalos.artiest.doc.StrokePickInfo,
+    onStrokeOp: (be.thalos.artiest.doc.StrokeOp) -> Unit,
+    /** `BrushCodec.encode` of the brush in the hand. See `StrokeOp.Restyle`. */
+    brushText: () -> String,
     onSelecting: (Boolean) -> Unit,
     marqueeShape: MarqueeShape,
     onMarqueeShape: (MarqueeShape) -> Unit,
@@ -2095,10 +2106,14 @@ private fun ToolSlot(
             floating = floating,
             picking = picking,
             eraseMode = eraseMode,
+            pickedStrokes = pickInfo.count,
+            ink = ink,
+            brushText = brushText,
             onShape = onMarqueeShape,
             onMode = onMarqueeMode,
             onPicking = onPicking,
             onEraseMode = onEraseMode,
+            onStrokeOp = onStrokeOp,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
             onSelecting = onSelecting,
@@ -2114,10 +2129,14 @@ private fun ToolSlot(
             floating = floating,
             picking = picking,
             eraseMode = eraseMode,
+            pickedStrokes = pickInfo.count,
+            ink = ink,
+            brushText = brushText,
             onShape = { onMarqueeShape(it); onSelecting(true) },
             onMode = onMarqueeMode,
             onPicking = onPicking,
             onEraseMode = onEraseMode,
+            onStrokeOp = onStrokeOp,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
         )

@@ -265,7 +265,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik7** | **DONE.** `StrokeOp`, `StrokePick`, `CommitQueue.Commit.Pick`, the strokes/pixels toggle in the selection panel, and the highlight in the overlay. See **What Ik7 built**. | `:app` | Med | Ik3 | 4–6 |
 | **Ik8** | **DONE.** `StrokeGeometry`, `StrokeSplitter`, `StrokeEraser`, `EraseMode`, the record's time origin, and the mode selector. See **What Ik8 built**. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
 | **Ik9** | Move, rotate and scale the selected strokes, through `TransformBox` over records instead of pixels. Drop is a `VectorStep`; grain regenerates where it lands. | `:app` | Med | Ik7, Ik5 | 4–6 |
-| **Ik10** | Restyle: recolour, re-brush, scale the width, re-stabilise. Four operations, one panel, all of them one field on a record and a re-render. | `:app` | Low | Ik4, Ik7 | 3–5 |
+| **Ik10** | **DONE, and the four operations turned out to be one.** `StrokeOp.Restyle`, `StrokeRestyle`, and three buttons that appear only when strokes are picked. See **What Ik10 built**. | `:app` | Low | Ik4, Ik7 | 3–5 |
 | **Ik11** | **Sharp at any zoom**, and export at any scale: re-render the visible region at view scale on a zoom settle, and let `PngExporter` ask a vector sheet for 2x or 4x. **Gated on Ik0.** | `:app` | **High** | Ik4 | 5–8 |
 
 **Vector subtotal: 47–71 days**, against `docs/vector-plan.md`'s 30–45 for its
@@ -1031,6 +1031,45 @@ buffered layer — a hardware overlay — and the capture can return what was in
 some time ago. An afternoon went into chasing a repaint bug that was not there.
 Read the drawing from the readout, from the log, or from a screenshot taken
 after a restart; do not read it from a screencap taken a second after a gesture.
+
+## What Ik10 built
+
+> 2026-09-13. `:app`. Nine tests.
+
+Pick some strokes and give them the colour in your hand, or the brush in your
+hand, or rub them out. Three buttons in the selection panel, shown only when
+something is picked.
+
+### The four operations are one
+
+The plan lists recolour, re-brush, scale the width and re-stabilise. **Three of
+them are a brush**: width is `sizeMin` and `sizeMax`, stabilisation is
+`stabilization`, and re-brush is the whole of it. So the caller tunes a copy of
+the brush and hands over its `BrushCodec` text, and there is one op, one undo
+step and one repaint.
+
+### What a restyle keeps, and why that is the point
+
+The samples, the seed and the `dabBase`. So the mark lands in **exactly** the
+same place and the grain falls in **exactly** the same pattern; only the colour
+and the nib change. That is not a property the pixel version of this operation
+could have at any price — recolouring pixels is a mask and a fill, and
+re-brushing them is not possible at all.
+
+### The bounds is the union of both
+
+A stroke moved onto a wider nib paints outside the rectangle it painted before,
+so a rebuild of only the old rectangle would clip it — and the *old* rectangle
+still has to be cleared, or the wide version's edges stay behind. Each
+replacement therefore carries the union of what it painted and what it will
+paint, which is what makes `VectorStep.damage` right.
+
+### The picked set has to follow the replacements
+
+A restyled stroke is a **new record with a new id**, because an undo step whose
+two halves name the same thing is a step that removes its own replacement. So
+`StrokePick.setTo` moves the selection onto the new ids; without it the user
+would watch their selection vanish for having changed its colour.
 
 ## Stop conditions
 
