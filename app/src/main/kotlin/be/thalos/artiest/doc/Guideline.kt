@@ -3,8 +3,11 @@ package be.thalos.artiest.doc
 import android.graphics.Path
 import android.graphics.RectF
 import be.thalos.artiest.engine.guide.Guide
+import be.thalos.artiest.engine.guide.EllipseGuide
 import be.thalos.artiest.engine.guide.LineGuide
+import be.thalos.artiest.engine.guide.ParallelGuide
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.hypot
 
 /**
@@ -37,6 +40,38 @@ enum class GuideKind(val id: String, val points: Int, val label: String) {
      * have a kink in it exactly where the hand was going fastest.
      */
     RULER("ruler", 2, "Ruler"),
+
+    /**
+     * An angle. Every stroke comes out parallel to it, through wherever the pen
+     * landed.
+     *
+     * `docs/guides-plan.md` item 10, and the cheapest useful thing in Tier 1:
+     * hatching and speed lines are *many lines at one angle in different
+     * places*, which is a ruler you would otherwise drag between every stroke.
+     *
+     * Two points like a ruler, and they mean something different: they set the
+     * **angle** and nothing else. Where they are on the page is only where the
+     * handles are, which is why one is drawn and dragged exactly as a ruler's
+     * are and the line through them is not what the ink follows. See
+     * [outline], which draws the family rather than the pair.
+     */
+    PARALLEL("parallel", 2, "Parallel"),
+
+    /**
+     * An ellipse to draw around.
+     *
+     * `docs/guides-plan.md` item 13, and the entry that justifies Tier 1 to an
+     * inker: a circle seen at an angle is an ellipse, freehand ellipses are the
+     * thing hands are worst at, and the correction is exactly the one a guide
+     * can make — the hand supplies the sweep and the guide supplies the shape.
+     *
+     * Three points: the centre, the end of one radius, and the end of the
+     * other. The third is **kept perpendicular to the second** — see
+     * [normalised] — because that is what the arithmetic means by two radii,
+     * and a handle drawn where it is not is a handle that lies about what
+     * dragging it will do.
+     */
+    ELLIPSE("ellipse", 3, "Ellipse"),
     ;
 
     companion object {
@@ -94,7 +129,7 @@ class Guideline(
      * The document-space x, y pairs that place this guide. **Copied in**, and
      * never handed out — [xAt] and [yAt] read it.
      */
-    private val points: FloatArray = points.copyOf(kind.points * 2)
+    private val points: FloatArray = normalised(kind, points.copyOf(kind.points * 2))
 
     init {
         for (v in this.points) require(v.isFinite()) { "a guide point was $v" }
@@ -131,6 +166,24 @@ class Guideline(
             val x1 = points[2]
             val y1 = points[3]
             if (hypot(x1 - x0, y1 - y0) < MIN_SPAN_DOC) null else LineGuide.through(x0, y0, x1, y1)
+        }
+
+        GuideKind.PARALLEL -> {
+            val dx = points[2] - points[0]
+            val dy = points[3] - points[1]
+            if (hypot(dx, dy) < MIN_SPAN_DOC) null else ParallelGuide(atan2(dy, dx))
+        }
+
+        GuideKind.ELLIPSE -> {
+            val cx = points[0]
+            val cy = points[1]
+            val ax = points[2] - cx
+            val ay = points[3] - cy
+            val a = hypot(ax, ay)
+            val b = hypot(points[4] - cx, points[5] - cy)
+            if (a < MIN_SPAN_DOC || b < MIN_SPAN_DOC) null else {
+                EllipseGuide(cx, cy, a, b, atan2(ay, ax))
+            }
         }
     }
 
@@ -216,7 +269,70 @@ class Guideline(
     fun outline(out: Path, clip: RectF) {
         when (kind) {
             GuideKind.RULER -> rulerOutline(out, clip)
+            GuideKind.PARALLEL -> parallelOutline(out, clip)
+            GuideKind.ELLIPSE -> ellipseOutline(out)
         }
+    }
+
+    /**
+     * A parallel set draws as **several** lines and not as the one through its
+     * handles, and that is the whole of telling it apart from a ruler.
+     *
+     * A ruler is a line you draw along; this is an angle, and the line the ink
+     * follows is wherever the pen lands. Drawing one line would say "draw
+     * here", which is the opposite of what it does. Drawing a family says
+     * "anywhere, at this angle", which is what it does.
+     *
+     * The family is spaced across the *clip*, so it fills whatever is on screen
+     * at whatever zoom, and the lines are never anything a stroke snaps to —
+     * they are a picture of an angle.
+     */
+    private fun parallelOutline(out: Path, clip: RectF) {
+        val dx = points[2] - points[0]
+        val dy = points[3] - points[1]
+        val len = hypot(dx, dy)
+        if (len < MIN_SPAN_DOC) return
+        // Perpendicular, normalised: the direction the family is spaced along.
+        val nx = -dy / len
+        val ny = dx / len
+        val cx = (clip.left + clip.right) * 0.5f
+        val cy = (clip.top + clip.bottom) * 0.5f
+        // Far enough either way to cross the clip whatever the angle. The
+        // diagonal is the worst case and half of it reaches every corner.
+        val reach = hypot(clip.width(), clip.height()) * 0.5f
+        val gap = reach * 2f / (PARALLEL_LINES + 1)
+        if (gap < MIN_SPAN_DOC) return
+        for (i in 1..PARALLEL_LINES) {
+            val at = -reach + gap * i
+            val px = cx + nx * at
+            val py = cy + ny * at
+            lineThrough(out, clip, px, py, dx, dy)
+        }
+    }
+
+    /**
+     * The ellipse, as a `Path`, in document space.
+     *
+     * `addOval` on a rotated rectangle is not a thing `Path` offers, so the
+     * oval is added upright and the whole path is turned. No clip: an ellipse
+     * is bounded, so there is nothing to cut, and the one on screen is the one
+     * the hand placed.
+     */
+    private fun ellipseOutline(out: Path) {
+        val cx = points[0]
+        val cy = points[1]
+        val ax = points[2] - cx
+        val ay = points[3] - cy
+        val a = hypot(ax, ay)
+        val b = hypot(points[4] - cx, points[5] - cy)
+        if (a < MIN_SPAN_DOC || b < MIN_SPAN_DOC) return
+        val oval = RectF(cx - a, cy - b, cx + a, cy + b)
+        val turn = android.graphics.Matrix()
+        turn.setRotate(Math.toDegrees(atan2(ay, ax).toDouble()).toFloat(), cx, cy)
+        val shape = Path()
+        shape.addOval(oval, Path.Direction.CW)
+        shape.transform(turn)
+        out.addPath(shape)
     }
 
     /**
@@ -228,11 +344,14 @@ class Guideline(
      * intersect-a-line.
      */
     private fun rulerOutline(out: Path, clip: RectF) {
-        val x0 = points[0]
-        val y0 = points[1]
-        val dx = points[2] - x0
-        val dy = points[3] - y0
+        val dx = points[2] - points[0]
+        val dy = points[3] - points[1]
         if (hypot(dx, dy) < MIN_SPAN_DOC) return
+        lineThrough(out, clip, points[0], points[1], dx, dy)
+    }
+
+    /** The infinite line through ([x0], [y0]) along ([dx], [dy]), cut to [clip]. */
+    private fun lineThrough(out: Path, clip: RectF, x0: Float, y0: Float, dx: Float, dy: Float) {
         var tMin = -Float.MAX_VALUE
         var tMax = Float.MAX_VALUE
         // Each edge as p*t <= q. A zero p means the line is parallel to that
@@ -262,6 +381,34 @@ class Guideline(
 
     companion object {
 
+        /**
+         * The points a kind insists on, whatever the hand did to them.
+         *
+         * One kind needs it. An ellipse is a centre and **two perpendicular**
+         * radii, because that is what the arithmetic means by two radii — so
+         * dragging the second radius handle sets its length and nothing else,
+         * and the handle is put back where the shape says it is. Drawing it
+         * where the finger left it would be a handle that lies about what
+         * dragging it does.
+         *
+         * Applied in the constructor rather than at the drag, so that a file, a
+         * transform and a hand all land in the same place.
+         */
+        private fun normalised(kind: GuideKind, points: FloatArray): FloatArray {
+            if (kind != GuideKind.ELLIPSE) return points
+            val cx = points[0]
+            val cy = points[1]
+            val ax = points[2] - cx
+            val ay = points[3] - cy
+            val a = hypot(ax, ay)
+            if (a < MIN_SPAN_DOC) return points
+            val b = hypot(points[4] - cx, points[5] - cy)
+            // Perpendicular to the first radius, at the second one's length.
+            points[4] = cx - ay / a * b
+            points[5] = cy + ax / a * b
+            return points
+        }
+
         /** [handleNear]'s answer when nothing is near enough. */
         const val NO_HANDLE = -1
 
@@ -277,5 +424,15 @@ class Guideline(
 
         /** Below this a slab is parallel to the line and the clip is a test. */
         private const val PARALLEL = 1e-6f
+
+        /**
+         * How many lines a parallel set draws across whatever is on screen.
+         *
+         * Nine. Enough that the angle reads at a glance from anywhere on the
+         * page, and few enough that the drawing underneath is still the thing
+         * you are looking at — a set dense enough to be a hatching pattern in
+         * its own right would be furniture competing with the ink.
+         */
+        private const val PARALLEL_LINES = 9
     }
 }

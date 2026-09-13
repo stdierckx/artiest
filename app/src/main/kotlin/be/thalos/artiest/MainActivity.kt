@@ -723,15 +723,9 @@ private fun CanvasScreen(
     val onGuideAct: (GuideAct) -> Unit = { act ->
         val set = document.guides
         when (act) {
-            GuideAct.AddRuler -> {
-                val w = document.widthPx.toFloat()
-                val h = document.heightPx.toFloat()
+            is GuideAct.Add -> {
                 set.put(
-                    be.thalos.artiest.doc.Guideline(
-                        set.nextId(),
-                        be.thalos.artiest.doc.GuideKind.RULER,
-                        floatArrayOf(w * 0.15f, h * 0.5f, w * 0.85f, h * 0.5f),
-                    ),
+                    be.thalos.artiest.doc.Guideline(set.nextId(), act.kind, madeAt(act.kind, document)),
                 )
                 // Arrange mode, because the next thing a hand wants to do with
                 // a ruler that has just appeared is move it -- and that is the
@@ -2970,6 +2964,47 @@ private fun gib(bytes: Long): String = r(bytes / (1024f * 1024f * 1024f), 2)
 private const val DEFAULT_SIZE_MAX = 24f
 
 /** `Brush.stabilization`'s default. The plan's number, on the plan's slider. */
+/**
+ * Where a fresh guide is put.
+ *
+ * **In the middle of the page**, and not where the last one was or where the
+ * pen is: a guide you cannot see is a guide you cannot pick up, and the middle
+ * is the one place that is on screen at every zoom and pan a fresh drawing has.
+ * The hand's first act is to drag it somewhere better, which is why laying one
+ * down turns arrange mode on.
+ *
+ * The sizes are fractions of the page rather than pixels, so the same code
+ * gives a sensible guide on a phone-sized document and on the tablet's
+ * 3300 by 2160 one.
+ */
+private fun madeAt(
+    kind: be.thalos.artiest.doc.GuideKind,
+    document: be.thalos.artiest.doc.Document,
+): FloatArray {
+    val w = document.widthPx.toFloat()
+    val h = document.heightPx.toFloat()
+    return when (kind) {
+        // Across the page, because a ruler is a line you draw along and its
+        // length on screen is what says which way it runs.
+        be.thalos.artiest.doc.GuideKind.RULER ->
+            floatArrayOf(w * 0.15f, h * 0.5f, w * 0.85f, h * 0.5f)
+
+        // Short, and at 45 degrees. Short because the two points are a handle
+        // for an *angle* and not a line to draw along -- a long one would read
+        // as a ruler. At an angle rather than flat because a parallel set laid
+        // down horizontal is indistinguishable from a ruler until you draw
+        // against it.
+        be.thalos.artiest.doc.GuideKind.PARALLEL ->
+            floatArrayOf(w * 0.42f, h * 0.58f, w * 0.58f, h * 0.42f)
+
+        // A wide ellipse rather than a circle, because the thing it is for is
+        // a circle *seen at an angle*, and one that arrives already flattened
+        // says so without a caption.
+        be.thalos.artiest.doc.GuideKind.ELLIPSE ->
+            floatArrayOf(w * 0.5f, h * 0.5f, w * 0.8f, h * 0.5f, w * 0.5f, h * 0.66f)
+    }
+}
+
 /**
  * The part of the page that is on screen, in document coordinates.
  *

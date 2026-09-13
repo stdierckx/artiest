@@ -261,6 +261,122 @@ class GuideSetTest {
         assertFalse(path.isEmpty, "the top edge is on the page, not off it")
     }
 
+    // ---- the other two kinds -----------------------------------------------
+
+    private fun parallel(id: Long, x0: Float, y0: Float, x1: Float, y1: Float) =
+        Guideline(id, GuideKind.PARALLEL, floatArrayOf(x0, y0, x1, y1))
+
+    private fun ellipse(id: Long, cx: Float, cy: Float, a: Float, b: Float) =
+        Guideline(id, GuideKind.ELLIPSE, floatArrayOf(cx, cy, cx + a, cy, cx, cy + b))
+
+    @Test
+    fun `a parallel set puts the line through where the stroke started`() {
+        val line = parallel(1, 0f, 0f, 100f, 0f)
+        val g = assertNotNull(line.guide)
+        // Nothing before the stroke has started, which is not a defect -- see
+        // ParallelGuide: an origin of (0, 0) would put a speed line through the
+        // corner of the page.
+        assertFalse(g.project(50f, 500f, scratch))
+        g.begin(10f, 400f)
+        assertTrue(g.project(50f, 500f, scratch))
+        assertEquals(400f, scratch[1], 1e-3f)
+    }
+
+    @Test
+    fun `a parallel set draws as a family and not as one line`() {
+        // The whole of telling it apart from a ruler on the page: a ruler says
+        // "draw here" and a parallel set says "anywhere, at this angle".
+        val clip = RectF(0f, 0f, 1000f, 800f)
+        val one = Path().also { set(ruler(1, 0f, 400f, 100f, 400f)).outline(it, clip) }
+        val many = Path().also { set(parallel(1, 0f, 400f, 100f, 400f)).outline(it, clip) }
+        val a = RectF().also { one.computeBounds(it, true) }
+        val b = RectF().also { many.computeBounds(it, true) }
+        assertEquals(0f, a.height(), 1e-3f, "a ruler is one line")
+        assertTrue(b.height() > 300f, "a parallel set fills the page: $b")
+    }
+
+    @Test
+    fun `an ellipse keeps its second radius square to the first`() {
+        // The handle is put where the shape says it is, not where the finger
+        // left it: a handle drawn off the ellipse is a handle that lies about
+        // what dragging it will do.
+        val loose = Guideline(
+            1, GuideKind.ELLIPSE,
+            floatArrayOf(0f, 0f, 100f, 0f, 60f, 60f),
+        )
+        assertEquals(0f, loose.xAt(2), 1e-3f, "square to a radius along +x")
+        assertEquals(kotlin.math.hypot(60f, 60f), loose.yAt(2), 1e-2f, "keeping its length")
+    }
+
+    @Test
+    fun `an ellipse projects onto itself and draws as a closed shape`() {
+        val e = ellipse(1, 500f, 400f, 200f, 80f)
+        val g = assertNotNull(e.guide)
+        assertTrue(g.project(900f, 400f, scratch))
+        assertEquals(700f, scratch[0], 1e-1f)
+        assertEquals(400f, scratch[1], 1e-1f)
+
+        val path = Path().also { set(e).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        val bounds = RectF().also { path.computeBounds(it, true) }
+        assertEquals(300f, bounds.left, 1f)
+        assertEquals(700f, bounds.right, 1f)
+        assertEquals(320f, bounds.top, 1f)
+        assertEquals(480f, bounds.bottom, 1f)
+    }
+
+    @Test
+    fun `a turned ellipse turns its drawing with it`() {
+        val upright = Guideline(
+            1, GuideKind.ELLIPSE, floatArrayOf(0f, 0f, 200f, 0f, 0f, 50f),
+        )
+        val turned = Guideline(
+            1, GuideKind.ELLIPSE, floatArrayOf(0f, 0f, 0f, 200f, 0f, 50f),
+        )
+        val clip = RectF(-400f, -400f, 400f, 400f)
+        val a = RectF().also { Path().also { p -> upright.outline(p, clip); p.computeBounds(it, true) } }
+        val b = RectF().also { Path().also { p -> turned.outline(p, clip); p.computeBounds(it, true) } }
+        assertEquals(a.width(), b.height(), 1f)
+        assertEquals(a.height(), b.width(), 1f)
+    }
+
+    @Test
+    fun `a guide whose points collapse is not a guide, whatever the kind`() {
+        assertNull(parallel(1, 5f, 5f, 5f, 5f).guide)
+        assertNull(
+            Guideline(1, GuideKind.ELLIPSE, floatArrayOf(0f, 0f, 0f, 0f, 0f, 80f)).guide,
+        )
+        assertNull(
+            Guideline(1, GuideKind.ELLIPSE, floatArrayOf(0f, 0f, 80f, 0f, 0f, 0f)).guide,
+        )
+    }
+
+    @Test
+    fun `every kind goes out and comes back`() {
+        for (line in listOf(
+            ruler(1, 0f, 0f, 100f, 0f),
+            parallel(2, 10f, 10f, 60f, 90f),
+            ellipse(3, 500f, 400f, 200f, 80f),
+        )) {
+            val back = assertNotNull(GuideText.decode(GuideText.encode(line)))
+            assertEquals(line.kind, back.kind)
+            assertEquals(line.pointCount, back.pointCount)
+            for (i in 0 until line.pointCount) {
+                assertEquals(line.xAt(i), back.xAt(i), 0.1f, "$line point $i x")
+                assertEquals(line.yAt(i), back.yAt(i), 0.1f, "$line point $i y")
+            }
+        }
+    }
+
+    @Test
+    fun `an ellipse and a ruler on one page are one snap`() {
+        val set = set(ruler(1, 0f, 0f, 1000f, 0f), ellipse(2, 500f, 400f, 200f, 80f))
+        val snap = assertNotNull(set.snap)
+        assertTrue(snap.apply(500f, 20f, scratch))
+        assertEquals(0f, scratch[1], 1e-2f, "near the ruler")
+        assertTrue(snap.apply(500f, 470f, scratch))
+        assertEquals(480f, scratch[1], 1f, "and near the bottom of the ellipse")
+    }
+
     // ---- what a stroke keeps -----------------------------------------------
 
     @Test

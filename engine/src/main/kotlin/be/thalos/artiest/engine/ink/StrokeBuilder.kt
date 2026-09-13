@@ -320,7 +320,14 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         }
         updateTravel(xDoc, yDoc, eventTimeNanos)
         require(pressure.isFinite()) { "sample $sampleCount pressure was $pressure" }
-        if (sampleCount == 0) downTimeNanos = eventTimeNanos
+        if (sampleCount == 0) {
+            downTimeNanos = eventTimeNanos
+            // Ik14. The **raw** first point and not the smoothed one, because
+            // the stabilizer has nothing to smooth yet and a rebuild feeds the
+            // same first sample back — so this is the one value that is
+            // identical live and on a replay. See `Guide.begin`.
+            snap?.guide?.begin(xDoc, yDoc)
+        }
         sampleCount++
         stabilizer.push(xDoc, yDoc, pressure, eventTimeNanos)
         val elapsedMillis = elapsedBase + (eventTimeNanos - downTimeNanos) / 1_000_000f

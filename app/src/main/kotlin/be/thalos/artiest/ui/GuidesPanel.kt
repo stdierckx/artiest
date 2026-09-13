@@ -62,8 +62,8 @@ data class GuideInfo(
 
 /** What the panel asks for. The document is the caller's to change. */
 sealed interface GuideAct {
-    /** A fresh ruler, across the middle of the page. */
-    object AddRuler : GuideAct
+    /** A fresh guide of this kind, in the middle of the page. */
+    class Add(val kind: GuideKind) : GuideAct
 
     class SetOn(val id: Long, val on: Boolean) : GuideAct
 
@@ -193,7 +193,14 @@ private fun GuidesBody(
         }
 
         Spacer(Modifier.height(8.dp))
-        WideAct(ToolIcons.ruler, "Lay down a ruler") { onAct(GuideAct.AddRuler) }
+        // One row of three rather than three rows of one: they are the same
+        // act with a different shape, which is what a row of pictures says and
+        // a stack of sentences does not.
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Make(ToolIcons.ruler, "Ruler") { onAct(GuideAct.Add(GuideKind.RULER)) }
+            Make(ToolIcons.guides, "Parallel") { onAct(GuideAct.Add(GuideKind.PARALLEL)) }
+            Make(ToolIcons.marqueeOval, "Ellipse") { onAct(GuideAct.Add(GuideKind.ELLIPSE)) }
+        }
 
         // The one sentence the panel exists to say, and it is only said when it
         // is actionable: a line telling you to switch modes while you are
@@ -203,9 +210,9 @@ private fun GuidesBody(
             Spacer(Modifier.height(6.dp))
             Text(
                 if (arranging) {
-                    "Drag a ruler, or either of its ends."
+                    "Drag a guide, or any of its handles."
                 } else {
-                    "Rulers are moved in arrange mode."
+                    "Guides are moved in arrange mode."
                 },
                 fontSize = 10.sp,
                 color = colors.onSurfaceVariant,
@@ -331,6 +338,30 @@ private fun NumberRow(
     }
 }
 
+/** One of the three kinds, as a glyph with its word under it. */
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.Make(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .weight(1f)
+            .height(46.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.surfaceContainerHighest)
+            .clickable(onClick = onClick)
+            .padding(top = 5.dp),
+    ) {
+        Icon(icon, contentDescription = text, tint = colors.onSurfaceVariant, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.height(2.dp))
+        Text(text, fontSize = 9.sp, lineHeight = 10.sp, maxLines = 1, color = colors.onSurfaceVariant)
+    }
+}
+
 /** A full-width button with a glyph and a phrase. */
 @Composable
 private fun WideAct(
@@ -364,9 +395,7 @@ private fun percent(v: Float): String = "${(v * 100f).toInt()}%"
  * therefore leaves gaps, and a list reading "Ruler 1, Ruler 4, Ruler 9" would
  * be a list that looks like something has gone missing.
  */
-fun labelFor(line: Guideline, at: Int): String = when (line.kind) {
-    GuideKind.RULER -> "Ruler ${at + 1}"
-}
+fun labelFor(line: Guideline, at: Int): String = "${line.kind.label} ${at + 1}"
 
 /**
  * Past this a reach is not a reach, it is the page.

@@ -55,17 +55,18 @@ class GuideTextTest {
 
     @Test
     fun `a kind this build does not know is dropped and not guessed`() {
-        // A file written by a later build carrying an ellipse opens here with
-        // the ellipse missing and everything else intact. Mapping it to the
-        // nearest kind would put a line where an ellipse was and let somebody
-        // ink a hundred strokes against it.
-        assertNull(GuideText.decode("3 ellipse 1 0.0,0.0 10.0,10.0 20.0,0.0"))
+        // A file written by a later build carrying Ik15's vanishing point opens
+        // here with that guide missing and everything else intact. Mapping it
+        // to the nearest kind would put a ruler where a ray set was and let
+        // somebody ink a hundred strokes against it.
+        assertNull(GuideText.decode("3 vanishing 1 400.0,300.0"))
     }
 
     @Test
     fun `a row with the wrong number of points is dropped`() {
         assertNull(GuideText.decode("3 ruler 1 100.0,50.0"), "too few")
         assertNull(GuideText.decode("3 ruler 1 1.0,2.0 3.0,4.0 5.0,6.0"), "too many")
+        assertNull(GuideText.decode("3 ellipse 1 1.0,2.0 3.0,4.0"), "an ellipse takes three")
     }
 
     @Test
@@ -96,7 +97,7 @@ class GuideTextTest {
     fun `a bad row loses one guide and not the drawing`() {
         val rows = listOf(
             GuideText.encode(ruler(1)),
-            "2 ellipse 1 0.0,0.0",
+            "2 vanishing 1 0.0,0.0",
             GuideText.encode(ruler(3)),
         )
         val back = GuideText.decodeAll(rows)

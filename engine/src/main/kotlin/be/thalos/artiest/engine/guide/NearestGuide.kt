@@ -62,6 +62,15 @@ class NearestGuide(guides: List<Guide>) : Guide {
         return found
     }
 
+    override fun begin(xDoc: Float, yDoc: Float) {
+        // Forwarded to every member, and not only to the one that turned out to
+        // be nearest — because which one is nearest is a question about a
+        // sample and this is a question about a stroke. A parallel ruler that
+        // was only told about strokes which happened to start beside it would
+        // be a ruler that works some of the time.
+        for (guide in guides) guide.begin(xDoc, yDoc)
+    }
+
     override fun toString(): String = "NearestGuide(${guides.size})"
 
     companion object {

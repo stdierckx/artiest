@@ -23,14 +23,22 @@ package be.thalos.artiest.engine.guide
  * alone. A perspective ray set is the case: a stroke started nowhere near any
  * ray has no ray to snap to, and forcing one would drag it across the page.
  *
- * ## Threading
+ * ## Threading, and how pure "pure" is
  *
  * Called from `StrokeBuilder.add`, on the UI thread, once per digitizer sample
  * at 321.75 Hz — and once more per predicted-tail point. Implementations must
- * allocate nothing and must be pure: the same point twice has to give the same
- * answer, because the predicted tail asks about points the real stroke will ask
- * about again a frame later, and a guide that drifted between the two would put
- * a kink at the join.
+ * allocate nothing, and must be pure **within one stroke**: the same point
+ * twice has to give the same answer, because the predicted tail asks about
+ * points the real stroke will ask about again a frame later, and a guide that
+ * drifted between the two would put a kink at the join.
+ *
+ * *Within one stroke* and not absolutely, because [begin] exists. Ik14's
+ * parallel ruler is the case that needs it and it is not an exception that can
+ * be designed away: "every stroke comes out parallel to this angle" is a line
+ * through **where the stroke started**, so the guide cannot be built until the
+ * pen has landed. A guide that latched its origin on the first `project` call
+ * instead would be one whose answer depended on whether the predicted tail had
+ * run yet, which is the same defect one layer down.
  */
 interface Guide {
 
@@ -40,6 +48,19 @@ interface Guide {
      * case [out] is not written.
      */
     fun project(xDoc: Float, yDoc: Float, out: FloatArray): Boolean
+
+    /**
+     * A stroke has started at ([xDoc], [yDoc]). Nothing, for a guide that is a
+     * fixed thing on the page — which is all of them but one.
+     *
+     * Called from `StrokeBuilder.add` on the first sample, with the **raw**
+     * point rather than the smoothed one: the stabilizer has nothing to smooth
+     * yet on the first sample, and a rebuild feeds the same first sample back,
+     * so this is the one value that is identical live and on a replay. That is
+     * what keeps a stroke drawn against a parallel ruler deterministic without
+     * storing anything extra.
+     */
+    fun begin(xDoc: Float, yDoc: Float) = Unit
 }
 
 /**
