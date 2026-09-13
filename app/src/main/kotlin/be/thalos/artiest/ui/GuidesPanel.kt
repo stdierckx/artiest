@@ -54,6 +54,15 @@ data class GuideInfo(
     val rows: List<Row> = emptyList(),
     val strength: Float = 1f,
     val reachDoc: Float = 0f,
+    /**
+     * How many strokes are picked, so the panel can offer to turn them into a
+     * curve — and not offer it when there is nothing to turn.
+     *
+     * A control that is dimmed for most of a session teaches the eye to skip
+     * the row it is in, which is `SelectionPanel`'s reason for hiding its
+     * restyle buttons rather than disabling them.
+     */
+    val picked: Int = 0,
 ) {
     data class Row(val id: Long, val label: String, val on: Boolean)
 
@@ -64,6 +73,15 @@ data class GuideInfo(
 sealed interface GuideAct {
     /** A fresh guide of this kind, in the middle of the page. */
     class Add(val kind: GuideKind) : GuideAct
+
+    /**
+     * The picked strokes' centreline, as a curve to draw along.
+     *
+     * `docs/guides-plan.md` items 12 and 15, which are the same item: the hard
+     * half of a French curve is getting the curve, and a stroke you have
+     * already drawn is one.
+     */
+    object FromPicked : GuideAct
 
     class SetOn(val id: Long, val on: Boolean) : GuideAct
 
@@ -200,6 +218,15 @@ private fun GuidesBody(
             Make(ToolIcons.ruler, "Ruler") { onAct(GuideAct.Add(GuideKind.RULER)) }
             Make(ToolIcons.guides, "Parallel") { onAct(GuideAct.Add(GuideKind.PARALLEL)) }
             Make(ToolIcons.marqueeOval, "Ellipse") { onAct(GuideAct.Add(GuideKind.ELLIPSE)) }
+        }
+
+        // Only when there is a stroke to trace. See GuideInfo.picked.
+        if (info.picked > 0) {
+            Spacer(Modifier.height(6.dp))
+            WideAct(
+                ToolIcons.marqueeLasso,
+                if (info.picked == 1) "Trace that stroke" else "Trace the first of them",
+            ) { onAct(GuideAct.FromPicked) }
         }
 
         // The one sentence the panel exists to say, and it is only said when it

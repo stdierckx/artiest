@@ -45,11 +45,11 @@ import be.thalos.artiest.engine.guide.Snap
  *
  * ## Unknown kinds are dropped, not guessed
  *
- * A file written by a later build carrying an `ellipse` row opens in this one
- * with the ellipse missing and everything else intact. The alternative — refuse
- * the file, or map it to the nearest kind — is worse in both directions: one
- * loses a drawing over a ruler, and the other silently puts a line where an
- * ellipse was and lets somebody ink against it.
+ * A file written by a later build carrying Ik15's `vanishing` row opens in this
+ * one with that guide missing and everything else intact. The alternative —
+ * refuse the file, or map it to the nearest kind — is worse in both directions:
+ * one loses a drawing over a ruler, and the other silently puts a line where a
+ * ray set was and lets somebody ink a hundred strokes against it.
  */
 object GuideText {
 
@@ -64,6 +64,16 @@ object GuideText {
 
     /** Beyond this a coordinate is not on any page this app can make. */
     private const val MAX_COORD = 1e6f
+
+    /**
+     * The most points one guide may name, which only the curve can reach.
+     *
+     * `CurveGuide.MAX_POINTS`, because a row that claims more describes a curve
+     * the engine would refuse to build — and the honest place to refuse it is
+     * the reader, which drops one guide, rather than the constructor, which
+     * would throw on the path that opens somebody's drawing.
+     */
+    private const val MAX_POINTS = be.thalos.artiest.engine.guide.CurveGuide.MAX_POINTS
 
     fun encode(line: Guideline): String = buildString {
         append(line.id)
@@ -102,9 +112,15 @@ object GuideText {
         // too many means the row was written by a build where this kind meant
         // something else, and that is the one case where guessing is worse than
         // dropping it.
-        if (parts.size != 3 + kind.points) return null
-        val points = FloatArray(kind.points * 2)
-        for (i in 0 until kind.points) {
+        //
+        // A kind whose count is `ANY` — the curve — takes what it is given,
+        // between two points and the cap, because for that kind the count *is*
+        // the shape rather than a property of the kind.
+        val given = parts.size - 3
+        val count = if (kind.points == GuideKind.ANY) given else kind.points
+        if (given != count || count < 2 || count > MAX_POINTS) return null
+        val points = FloatArray(count * 2)
+        for (i in 0 until count) {
             val pair = parts[3 + i].split(',')
             if (pair.size != 2) return null
             val x = pair[0].toFloatOrNull() ?: return null

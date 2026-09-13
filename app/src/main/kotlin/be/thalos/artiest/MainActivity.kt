@@ -581,7 +581,7 @@ private fun CanvasScreen(
      * A snapshot rather than the set, because a composable that read the set
      * directly would never recompose: nothing in it is Compose state.
      */
-    val guideInfo = remember(guideTick) {
+    val guideInfo = remember(guideTick, pickInfo) {
         val set = document.guides
         GuideInfo(
             rows = set.all().mapIndexed { at, line ->
@@ -589,6 +589,7 @@ private fun CanvasScreen(
             },
             strength = set.strength,
             reachDoc = set.reachDoc,
+            picked = pickInfo.count,
         )
     }
 
@@ -724,14 +725,31 @@ private fun CanvasScreen(
         val set = document.guides
         when (act) {
             is GuideAct.Add -> {
-                set.put(
-                    be.thalos.artiest.doc.Guideline(set.nextId(), act.kind, madeAt(act.kind, document)),
-                )
+                val points = madeAt(act.kind, document)
+                if (points != null) {
+                    set.put(be.thalos.artiest.doc.Guideline(set.nextId(), act.kind, points))
+                }
                 // Arrange mode, because the next thing a hand wants to do with
                 // a ruler that has just appeared is move it -- and that is the
                 // only mode it can be moved in. The same three lines every
                 // fixate does, and for the same reason.
                 arranging = true
+            }
+
+            GuideAct.FromPicked -> {
+                // The highlight rather than the sheet, because the sheet is the
+                // render thread's and this runs on the UI one — and the
+                // highlight *is* the centreline, republished for exactly this
+                // kind of reader. See `StrokePickInfo.outline`.
+                val points = curveFrom(pickInfo.outline)
+                if (points != null) {
+                    set.put(
+                        be.thalos.artiest.doc.Guideline(
+                            set.nextId(), be.thalos.artiest.doc.GuideKind.CURVE, points,
+                        ),
+                    )
+                    arranging = true
+                }
             }
 
             is GuideAct.SetOn -> set.setOn(act.id, act.on)
@@ -2980,7 +2998,7 @@ private const val DEFAULT_SIZE_MAX = 24f
 private fun madeAt(
     kind: be.thalos.artiest.doc.GuideKind,
     document: be.thalos.artiest.doc.Document,
-): FloatArray {
+): FloatArray? {
     val w = document.widthPx.toFloat()
     val h = document.heightPx.toFloat()
     return when (kind) {
@@ -3002,8 +3020,59 @@ private fun madeAt(
         // says so without a caption.
         be.thalos.artiest.doc.GuideKind.ELLIPSE ->
             floatArrayOf(w * 0.5f, h * 0.5f, w * 0.8f, h * 0.5f, w * 0.5f, h * 0.66f)
+
+        // Nothing. A curve is not placed, it is *traced*: it comes from a
+        // stroke you have already drawn and picked, which is the only honest
+        // answer to "where would a default French curve go". See
+        // `GuideAct.FromPicked` and `curveFrom`.
+        be.thalos.artiest.doc.GuideKind.CURVE -> null
     }
 }
+
+/**
+ * A picked stroke's centreline, as the points of a curve guide.
+ *
+ * `docs/guides-plan.md` items 12 and 15 are the same item, and this is the
+ * join: the hard half of a French curve is getting the curve, and Ik7 already
+ * picks a stroke whose spine is one.
+ *
+ * Walked with a `PathMeasure` at [CURVE_STEP_DOC], for `PathText`'s reason —
+ * `Path` cannot be read back on `minSdk` 29 — and only the **first** contour,
+ * because several picked strokes are several curves and a guide is one shape.
+ * Thinned to `CurveGuide.MAX_POINTS` by taking a longer step rather than by
+ * cutting the tail off, so a long stroke becomes a coarser whole curve rather
+ * than a fine half of one.
+ */
+private fun curveFrom(path: android.graphics.Path?): FloatArray? {
+    if (path == null || path.isEmpty) return null
+    val measure = android.graphics.PathMeasure(path, false)
+    val length = measure.length
+    if (length < CURVE_STEP_DOC * 2f) return null
+    val step = maxOf(CURVE_STEP_DOC, length / (CurveGuideMax - 1))
+    val n = (length / step).toInt() + 1
+    if (n < 2) return null
+    val out = FloatArray(n * 2)
+    val at = FloatArray(2)
+    for (i in 0 until n) {
+        val d = minOf(length, i * step)
+        if (!measure.getPosTan(d, at, null)) return null
+        out[i * 2] = at[0]
+        out[i * 2 + 1] = at[1]
+    }
+    return out
+}
+
+/** See `CurveGuide.MAX_POINTS`. Named here so `curveFrom` reads in one line. */
+private const val CurveGuideMax = be.thalos.artiest.engine.guide.CurveGuide.MAX_POINTS
+
+/**
+ * How far apart the points of a traced curve are, in document pixels.
+ *
+ * Two, which is `StrokePolyline`'s own step: the centreline this traces was
+ * already simplified to that, so a finer walk would invent detail the stroke
+ * does not have.
+ */
+private const val CURVE_STEP_DOC = 2f
 
 /**
  * The part of the page that is on screen, in document coordinates.

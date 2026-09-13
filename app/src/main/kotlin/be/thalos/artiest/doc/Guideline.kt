@@ -3,6 +3,7 @@ package be.thalos.artiest.doc
 import android.graphics.Path
 import android.graphics.RectF
 import be.thalos.artiest.engine.guide.Guide
+import be.thalos.artiest.engine.guide.CurveGuide
 import be.thalos.artiest.engine.guide.EllipseGuide
 import be.thalos.artiest.engine.guide.LineGuide
 import be.thalos.artiest.engine.guide.ParallelGuide
@@ -24,7 +25,34 @@ import kotlin.math.hypot
  * vanishing point is one, and a French curve is as many as it has. See
  * [Guideline.points].
  */
-enum class GuideKind(val id: String, val points: Int, val label: String) {
+/**
+ * [GuideKind.ANY], as a top-level constant.
+ *
+ * An enum entry is constructed before its own companion object, so `CURVE`
+ * cannot read `GuideKind.ANY` in its own argument list. The companion re-exposes
+ * this one, because every *other* reader should see it as the enum's.
+ */
+private const val ANY_POINTS = 0
+
+enum class GuideKind(
+    val id: String,
+    /**
+     * How many document-space points place one, or [ANY] for a kind whose
+     * point count is the shape itself.
+     */
+    val points: Int,
+    val label: String,
+    /**
+     * Whether each point is a handle a finger can grab.
+     *
+     * False for the curve, and that is not a shortcut. A curve traced from a
+     * stroke has hundreds of points; drawing a knob on each would bury the
+     * curve under its own handles and make every one of them too small to hit.
+     * A curve is dragged whole, which is what a French curve is for — you slide
+     * it, you do not reshape it.
+     */
+    val handles: Boolean = true,
+) {
 
     /**
      * An infinite straight line through two points.
@@ -72,9 +100,30 @@ enum class GuideKind(val id: String, val points: Int, val label: String) {
      * dragging it will do.
      */
     ELLIPSE("ellipse", 3, "Ellipse"),
+
+    /**
+     * A shape you lay on the page and draw along: a French curve.
+     *
+     * `docs/guides-plan.md` items 12 and 15, which are the same item twice. The
+     * interesting half is not projecting onto a polyline, it is **getting the
+     * polyline**, and the honest answer is *draw one* — so this kind is made
+     * from a stroke you have already drawn and picked. See `GuideAct.FromPicked`.
+     *
+     * [ANY] points, which is why that constant exists: a curve's point count is
+     * its shape, not a property of its kind.
+     */
+    CURVE("curve", ANY_POINTS, "Curve", handles = false),
     ;
 
     companion object {
+
+        /**
+         * A kind whose point count is its shape rather than a property of the
+         * kind. One kind uses it, and the codec and the model both branch on it
+         * rather than on the kind, so the second one costs nothing.
+         */
+        const val ANY: Int = ANY_POINTS
+
         private val BY_ID: Map<String, GuideKind> = entries.associateBy { it.id }
 
         fun byId(id: String): GuideKind? = BY_ID[id]
@@ -129,13 +178,20 @@ class Guideline(
      * The document-space x, y pairs that place this guide. **Copied in**, and
      * never handed out — [xAt] and [yAt] read it.
      */
-    private val points: FloatArray = normalised(kind, points.copyOf(kind.points * 2))
+    private val points: FloatArray = normalised(
+        kind,
+        if (kind.points == GuideKind.ANY) points.copyOf() else points.copyOf(kind.points * 2),
+    )
 
     init {
+        require(points.size >= 4 && points.size % 2 == 0) {
+            "${points.size} floats is not a set of points"
+        }
         for (v in this.points) require(v.isFinite()) { "a guide point was $v" }
     }
 
-    val pointCount: Int get() = kind.points
+    val pointCount: Int
+        get() = if (kind.points == GuideKind.ANY) points.size / 2 else kind.points
 
     fun xAt(i: Int): Float = points[i * 2]
 
@@ -172,6 +228,11 @@ class Guideline(
             val dx = points[2] - points[0]
             val dy = points[3] - points[1]
             if (hypot(dx, dy) < MIN_SPAN_DOC) null else ParallelGuide(atan2(dy, dx))
+        }
+
+        GuideKind.CURVE -> {
+            val n = pointCount
+            if (n < 2) null else CurveGuide(points, minOf(n, CurveGuide.MAX_POINTS))
         }
 
         GuideKind.ELLIPSE -> {
@@ -239,6 +300,7 @@ class Guideline(
      * answer rather than whichever was written first.
      */
     fun handleNear(xDoc: Float, yDoc: Float, slopDoc: Float): Int {
+        if (!kind.handles) return NO_HANDLE
         var best = slopDoc
         var found = NO_HANDLE
         for (i in 0 until pointCount) {
@@ -271,6 +333,7 @@ class Guideline(
             GuideKind.RULER -> rulerOutline(out, clip)
             GuideKind.PARALLEL -> parallelOutline(out, clip)
             GuideKind.ELLIPSE -> ellipseOutline(out)
+            GuideKind.CURVE -> curveOutline(out)
         }
     }
 
@@ -318,6 +381,17 @@ class Guideline(
      * is bounded, so there is nothing to cut, and the one on screen is the one
      * the hand placed.
      */
+    /**
+     * The curve, as the polyline it is. No clip: it is bounded, and cutting it
+     * would mean walking it twice to draw a line nobody can see the end of.
+     */
+    private fun curveOutline(out: Path) {
+        val n = pointCount
+        if (n < 2) return
+        out.moveTo(points[0], points[1])
+        for (i in 1 until n) out.lineTo(points[i * 2], points[i * 2 + 1])
+    }
+
     private fun ellipseOutline(out: Path) {
         val cx = points[0]
         val cy = points[1]

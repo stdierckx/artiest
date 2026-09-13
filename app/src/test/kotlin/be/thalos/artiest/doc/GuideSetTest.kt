@@ -377,6 +377,55 @@ class GuideSetTest {
         assertEquals(480f, scratch[1], 1f, "and near the bottom of the ellipse")
     }
 
+    @Test
+    fun `a curve takes as many points as it has`() {
+        // The one kind whose point count is its shape rather than a property of
+        // its kind. A traced stroke is however many points it is.
+        val points = FloatArray(40) { it.toFloat() }
+        val line = Guideline(1, GuideKind.CURVE, points)
+        assertEquals(20, line.pointCount)
+        assertNotNull(line.guide)
+
+        val back = assertNotNull(GuideText.decode(GuideText.encode(line)))
+        assertEquals(20, back.pointCount)
+        assertEquals(GuideKind.CURVE, back.kind)
+        for (i in 0 until 20) assertEquals(line.xAt(i), back.xAt(i), 0.1f, "point $i")
+    }
+
+    @Test
+    fun `a curve has no handles, because it would have hundreds`() {
+        // A curve traced from a stroke has hundreds of points; a knob on each
+        // would bury the curve under its own handles and make every one of them
+        // too small to hit. A curve is dragged whole -- which is what a French
+        // curve is for: you slide it, you do not reshape it.
+        val line = Guideline(1, GuideKind.CURVE, floatArrayOf(0f, 0f, 10f, 0f, 20f, 10f))
+        assertEquals(Guideline.NO_HANDLE, line.handleNear(0f, 0f, 50f))
+        assertNotNull(
+            set(line).lineNear(5f, 1f, 10f),
+            "and it can still be picked up by its body",
+        )
+    }
+
+    @Test
+    fun `a curve moves whole`() {
+        val line = Guideline(1, GuideKind.CURVE, floatArrayOf(0f, 0f, 10f, 0f, 20f, 10f))
+        val moved = line.movedBy(100f, 50f)
+        assertEquals(100f, moved.xAt(0), 1e-3f)
+        assertEquals(120f, moved.xAt(2), 1e-3f)
+        assertEquals(60f, moved.yAt(2), 1e-3f)
+    }
+
+    @Test
+    fun `a curve draws as the polyline it is`() {
+        val line = Guideline(1, GuideKind.CURVE, floatArrayOf(10f, 20f, 300f, 20f, 300f, 400f))
+        val path = Path().also { set(line).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        val bounds = RectF().also { path.computeBounds(it, true) }
+        assertEquals(10f, bounds.left, 1e-3f)
+        assertEquals(300f, bounds.right, 1e-3f)
+        assertEquals(20f, bounds.top, 1e-3f)
+        assertEquals(400f, bounds.bottom, 1e-3f)
+    }
+
     // ---- what a stroke keeps -----------------------------------------------
 
     @Test
