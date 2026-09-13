@@ -30,19 +30,20 @@ class StrokeRecordTest {
     // --------------------------------------------------------------- shape
 
     @Test
-    fun `a packed sample is nine bytes after an eight byte origin`() {
+    fun `a packed sample is nine bytes after a twelve byte origin`() {
         val log = SampleLog()
         repeat(100) { i -> log.add(10f + i, 20f, 0.5f, 0.1f, 0f, i * 3.1f) }
         val packed = log.pack()
-        assertEquals(8 + 100 * 9, packed.size)
-        assertEquals(StrokeCodec.ORIGIN_BYTES, 8)
+        assertEquals(12 + 100 * 9, packed.size)
+        // Twelve, not eight: x, y and *time*. See `StrokeCodec.VERSION`.
+        assertEquals(StrokeCodec.ORIGIN_BYTES, 12)
         assertEquals(StrokeCodec.SAMPLE_BYTES, 9)
     }
 
     @Test
     fun `an empty stroke packs to the origin alone`() {
         val packed = SampleLog().pack()
-        assertEquals(8, packed.size)
+        assertEquals(12, packed.size)
         val record = recordOf(packed, 0)
         assertEquals(0, record.sampleCount)
         assertEquals(0f, record.durationMillis)
@@ -203,10 +204,14 @@ class StrokeRecordTest {
         log.add(1f, 0f, 1f, 0f, 0f, 5f)
         log.add(2f, 0f, 1f, 0f, 0f, 12f)
         val out = FloatArray(3 * StrokeRecord.STRIDE)
-        recordOf(log.pack(), 3).decodeInto(out)
-        assertEquals(0f, out[5])
-        assertEquals(0f, out[StrokeRecord.STRIDE + 5])
-        assertEquals(2f, out[2 * StrokeRecord.STRIDE + 5], 0.2f)
+        val record = recordOf(log.pack(), 3)
+        record.decodeInto(out)
+        // The time is an origin now, so the first sample keeps the 10 ms it
+        // happened at rather than being rebased to zero. See `startMillis`.
+        assertEquals(10f, out[5])
+        assertEquals(10f, out[StrokeRecord.STRIDE + 5])
+        assertEquals(12f, out[2 * StrokeRecord.STRIDE + 5], 0.2f)
+        assertEquals(10f, record.startMillis, 0.2f)
     }
 
     @Test

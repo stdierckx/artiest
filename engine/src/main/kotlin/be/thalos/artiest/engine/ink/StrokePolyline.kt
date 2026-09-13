@@ -43,7 +43,7 @@ import kotlin.math.min
  * allocates after construction.
  */
 class StrokePolyline private constructor(
-    /** x, y, halfWidth triples. Private so no caller can alias it. */
+    /** x, y, halfWidth, sampleIndex quads. Private so no caller can alias it. */
     private val points: FloatArray,
     val pointCount: Int,
     /**
@@ -65,6 +65,18 @@ class StrokePolyline private constructor(
 
     /** Half the stroke's width at point [i], in document pixels. */
     fun halfWidth(i: Int): Float = points[i * STRIDE + 2]
+
+    /**
+     * Which sample of the record point [i] came from.
+     *
+     * **The thing that makes a cut expressible.** Ik8 erases part of a stroke,
+     * and "part" has to be said in the record's own terms — a range of samples —
+     * because that is what a new record is built out of. Without this the
+     * geometry could say *where* to cut and nothing could act on it.
+     *
+     * A float only because the array is one; it is a whole number.
+     */
+    fun sampleAt(i: Int): Int = points[i * STRIDE + 3].toInt()
 
     /** What this costs in memory. */
     val byteCount: Int get() = points.size * 4
@@ -124,8 +136,8 @@ class StrokePolyline private constructor(
 
     companion object {
 
-        /** Floats per point: x, y, halfWidth. */
-        const val STRIDE: Int = 3
+        /** Floats per point: x, y, halfWidth, sample index. */
+        const val STRIDE: Int = 4
 
         /**
          * How far apart kept points are, in document pixels.
@@ -173,11 +185,12 @@ class StrokePolyline private constructor(
             var right = Float.NEGATIVE_INFINITY
             var bottom = Float.NEGATIVE_INFINITY
 
-            fun keep(x: Float, y: Float, hw: Float) {
+            fun keep(x: Float, y: Float, hw: Float, sample: Int) {
                 val o = kept * STRIDE
                 out[o] = x
                 out[o + 1] = y
                 out[o + 2] = hw
+                out[o + 3] = sample.toFloat()
                 left = min(left, x - hw)
                 top = min(top, y - hw)
                 right = max(right, x + hw)
@@ -193,13 +206,13 @@ class StrokePolyline private constructor(
                 val y = samples[s + 1]
                 val hw = pen.sizeFor(samples[s + 2], samples[s + 5]) * 0.5f
                 if (kept == 0) {
-                    keep(x, y, hw)
+                    keep(x, y, hw, i)
                     continue
                 }
                 val dx = x - lastX
                 val dy = y - lastY
                 if (dx * dx + dy * dy < MIN_STEP_DOC * MIN_STEP_DOC) continue
-                keep(x, y, hw)
+                keep(x, y, hw, i)
             }
             // The last sample is kept whatever the spacing, because the tail of
             // a stroke is where the taper is and a dropped tail is a stroke
@@ -212,6 +225,7 @@ class StrokePolyline private constructor(
                     samples[lastS],
                     samples[lastS + 1],
                     pen.sizeFor(samples[lastS + 2], samples[lastS + 5]) * 0.5f,
+                    count - 1,
                 )
             }
 

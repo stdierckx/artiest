@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import be.thalos.artiest.canvas.MarqueeShape
+import be.thalos.artiest.doc.EraseMode
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
@@ -82,9 +83,11 @@ fun SelectionButton(
      * keeps none and there is nothing to choose between.
      */
     picking: Boolean?,
+    eraseMode: EraseMode,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
+    onEraseMode: (EraseMode) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onSelecting: (Boolean) -> Unit,
@@ -116,12 +119,14 @@ fun SelectionButton(
                 hasSelection = hasSelection,
                 floating = floating,
                 picking = picking,
+                eraseMode = eraseMode,
                 onShape = {
                     onShape(it)
                     onSelecting(true)
                 },
                 onMode = onMode,
                 onPicking = onPicking,
+                onEraseMode = onEraseMode,
                 onOp = onOp,
                 onFloatOp = onFloatOp,
                 onDismiss = { open = false },
@@ -142,9 +147,11 @@ private fun SelectionPanel(
     hasSelection: Boolean,
     floating: Boolean,
     picking: Boolean?,
+    eraseMode: EraseMode,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
+    onEraseMode: (EraseMode) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onDismiss: () -> Unit,
@@ -170,9 +177,11 @@ private fun SelectionPanel(
                 hasSelection = hasSelection,
                 floating = floating,
                 picking = picking,
+                eraseMode = eraseMode,
                 onShape = onShape,
                 onMode = onMode,
                 onPicking = onPicking,
+                onEraseMode = onEraseMode,
                 onOp = onOp,
                 // Lifting closes the panel: the transform box is on the canvas
                 // and this card would be sitting over the pixels it moves.
@@ -206,9 +215,11 @@ fun SelectionPanelCard(
     hasSelection: Boolean,
     floating: Boolean,
     picking: Boolean?,
+    eraseMode: EraseMode,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
+    onEraseMode: (EraseMode) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
 ) {
@@ -219,9 +230,11 @@ fun SelectionPanelCard(
         hasSelection = hasSelection,
         floating = floating,
         picking = picking,
+        eraseMode = eraseMode,
         onShape = onShape,
         onMode = onMode,
         onPicking = onPicking,
+        onEraseMode = onEraseMode,
         onOp = onOp,
         onFloatOp = onFloatOp,
         onFixate = null,
@@ -244,9 +257,11 @@ private fun SelectionBody(
     hasSelection: Boolean,
     floating: Boolean,
     picking: Boolean?,
+    eraseMode: EraseMode,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
     onPicking: (Boolean) -> Unit,
+    onEraseMode: (EraseMode) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onFixate: (() -> Unit)?,
@@ -302,6 +317,32 @@ private fun SelectionBody(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Choice(ToolIcons.marquee, "Select pixels", !picking) { onPicking(false) }
                 Choice(ToolIcons.addVector, "Select strokes", picking) { onPicking(true) }
+            }
+
+            // The eraser's three modes, here because this is the panel that
+            // talks about strokes and there is nowhere else that does. It says
+            // "Eraser" out loud so that a control about the *rubber* sitting in
+            // the *selection* panel is a label rather than a surprise.
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Eraser",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 2.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Choice(ToolIcons.eraser, "Whole stroke", eraseMode == EraseMode.WHOLE) {
+                    onEraseMode(EraseMode.WHOLE)
+                }
+                Choice(
+                    ToolIcons.selectIntersect,
+                    "Back to the junction",
+                    eraseMode == EraseMode.TO_JUNCTION,
+                ) { onEraseMode(EraseMode.TO_JUNCTION) }
+                Choice(ToolIcons.softEraser, "Just what it touches", eraseMode == EraseMode.PART) {
+                    onEraseMode(EraseMode.PART)
+                }
             }
         }
 

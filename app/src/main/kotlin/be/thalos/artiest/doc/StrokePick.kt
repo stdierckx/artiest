@@ -5,15 +5,21 @@ import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.StrokeRecord
 
 /**
- * What a stroke-picking gesture asks for, on its way to the render thread.
+ * What a gesture asks of a sheet's strokes, on its way to the render thread:
+ * which ones are picked, and which ones the eraser took.
  *
  * A sealed hierarchy beside `SelectOp` rather than more members of it, because
  * the two answer different questions — *which pixels* and *which strokes* — and
  * a single type would mean every consumer of either had a `when` with half its
  * branches saying "not mine". They share the queue, which is the thing that
- * actually has to be shared: "select this" means *after everything I have
- * drawn*, and a pick applied straight from the UI thread would land in front of
- * a stroke the render thread has not stamped yet and fail to find it.
+ * actually has to be shared: "select this" and "rub that out" both mean *after
+ * everything I have drawn*, and either applied straight from the UI thread
+ * would land in front of a stroke the render thread has not stamped yet — and
+ * then fail to find it, which looks like the app ignoring the pen.
+ *
+ * Picking and erasing are one hierarchy rather than two because they arrive
+ * from the same gestures, through the same queue, against the same sheet, and
+ * because the eraser's own "take the picked strokes" is both at once.
  */
 sealed interface StrokeOp {
 
@@ -50,6 +56,53 @@ sealed interface StrokeOp {
 
     /** Everything that was not picked, and nothing that was. */
     object Invert : StrokeOp
+
+    /**
+     * The eraser, in one of its three modes.
+     *
+     * [path] is the eraser's own centreline in document space and [radiusDoc]
+     * is how wide its nib is, so "what it touched" is the same question the
+     * pen's own dabs answer. The path is copied for the reason [Lasso]'s is.
+     *
+     * **Three modes and not three ops**, because they differ only in how much
+     * of a touched stroke goes: the search for *which* strokes were touched and
+     * the machinery that replaces them are the same in all three, and three
+     * classes would be three copies of that.
+     */
+    class Erase(path: Path, val radiusDoc: Float, val mode: EraseMode) : StrokeOp {
+        val path: Path = Path(path)
+    }
+
+    /** Take the picked strokes off the sheet. */
+    object DeletePicked : StrokeOp
+}
+
+/**
+ * How much of a stroke the eraser takes.
+ *
+ * `docs/inker-plan.md` calls the middle one *"the single most-praised vector
+ * feature in CSP and the reason inkers use vector layers at all"*, and the
+ * reason is the gesture it replaces: an inker overshoots a junction on purpose,
+ * because stopping exactly on one makes a timid line, and then rubs the
+ * overshoot back. On a raster sheet that is a careful second gesture; here it
+ * is a tap.
+ */
+enum class EraseMode {
+    /** Anything the eraser touches goes, whole. */
+    WHOLE,
+
+    /**
+     * The stretch between the crossings either side of the touch.
+     *
+     * Falling off the end is the normal case rather than a failure: a tail
+     * sticking out past a junction has a crossing on one side and the end of
+     * the stroke on the other, and taking the whole tail is what the hand
+     * meant.
+     */
+    TO_JUNCTION,
+
+    /** Exactly the stretch the eraser passed over. */
+    PART,
 }
 
 /**
@@ -146,6 +199,10 @@ class StrokePick {
                 ids = LinkedHashSet()
                 for (r in sheet.strokes) if (!kept.contains(r.id)) ids.add(r.id)
             }
+            // The two that edit the sheet rather than the set. They come here
+            // only to be refused: `StrokeEraser` owns them, and the pruning
+            // afterwards is what moves this object.
+            is StrokeOp.Erase, StrokeOp.DeletePicked -> return false
         }
         if (ids.size == before && (was == null || was == ids)) return false
         publish(sheet)

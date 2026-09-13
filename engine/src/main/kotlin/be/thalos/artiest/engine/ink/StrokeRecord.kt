@@ -28,6 +28,7 @@ import be.thalos.artiest.engine.brush.Brush
  * ```
  *   0..3   int32   x of sample 0, in 1/16 document pixels
  *   4..7   int32   y of sample 0, likewise
+ *   8..11  int32   time of sample 0, in 1/8 ms from the pen going down
  *   then, per sample, nine bytes:
  *     0..1  int16  dx from the previous sample, in 1/16 document pixels
  *     2..3  int16  dy
@@ -42,6 +43,12 @@ import be.thalos.artiest.engine.brush.Brush
  * bytes spent to keep every sample the same width, because a special case at
  * index 0 is a special case in the decoder, in the encoder, in the splitter
  * Ik8 adds and in every test of all three. On a 250-sample stroke it is 0.2%.
+ *
+ * **The time is an origin and not a zero**, which it became at Ik8. A record
+ * can start part-way through a stroke — that is what a split is — and a tail
+ * whose clock restarted would get a fresh onset ramp, so the pen would appear
+ * to lift and land again at the cut. [startMillis] is that origin, and it is
+ * zero for a stroke as drawn.
  *
  * ## The quantisation, and the drift that is not here
  *
@@ -182,6 +189,13 @@ class StrokeRecord(
      * milliseconds. Zero for a record with fewer than two samples.
      */
     val durationMillis: Float get() = StrokeCodec.durationMillisOf(packed, sampleCount)
+
+    /**
+     * When this record's first sample happened, in milliseconds from the pen
+     * going down on the stroke it came from. Zero for a stroke as drawn,
+     * non-zero for every piece of a split but the first. See the class note.
+     */
+    val startMillis: Float get() = StrokeCodec.startMillisOf(packed)
 
     /**
      * The centreline this record's ink lies along, simplified, for hit testing.

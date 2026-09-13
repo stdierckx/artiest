@@ -543,6 +543,15 @@ private fun CanvasScreen(
      */
     var pickStrokes by remember { mutableStateOf(true) }
 
+    /**
+     * How much of a stroke the eraser takes on an ink sheet. Ik8.
+     *
+     * **Whole by default**, because it is the mode a person guesses at: the
+     * eraser takes what it touches. To-the-junction is the one an inker learns
+     * and then reaches for constantly, and it is one tap away.
+     */
+    var eraseMode by remember { mutableStateOf(be.thalos.artiest.doc.EraseMode.WHOLE) }
+
     /** The highlight, republished by the render thread. See `StrokePickInfo`. */
     var pickInfo by remember { mutableStateOf(be.thalos.artiest.doc.StrokePickInfo.NONE) }
 
@@ -563,8 +572,10 @@ private fun CanvasScreen(
     // The view is told once, here, rather than at each of the places that could
     // change the answer. A select gesture on a sheet with no strokes must not
     // pick, whatever the panel last said.
-    LaunchedEffect(activeKeepsStrokes, pickStrokes, surface) {
+    LaunchedEffect(activeKeepsStrokes, pickStrokes, eraseMode, surface) {
         surface?.pickingStrokes = activeKeepsStrokes && pickStrokes
+        surface?.vectorSheetActive = activeKeepsStrokes
+        surface?.eraseMode = eraseMode
     }
     var layersOpen by remember { mutableStateOf(false) }
 
@@ -997,12 +1008,21 @@ private fun CanvasScreen(
     // takes half a second to light up reads as a button that did not work.
     // Closed, nothing here runs at all -- the button itself shows no state.
     LaunchedEffect(document, layersOpen) {
-        if (!layersOpen) return@LaunchedEffect
+        // **It runs with the popup closed too, more slowly.** The panel can
+        // also be *kept* — fixated onto a bar as `ToolItem.LAYERS_PANEL` — and
+        // that copy was reading a list and an active id that had stopped
+        // refreshing, so its Delete and Duplicate named whichever sheet was
+        // active when the popup was last open. Found while deleting a layer
+        // from the kept card and watching nothing happen four times.
+        //
+        // A tenth of a second while it is being watched, a third of one
+        // otherwise: the comparison is two reference checks against a snapshot
+        // the render thread republishes only when something changes.
         while (true) {
             val snap = document.layers.snapshot
             if (snap !== layerRows) layerRows = snap
             if (activeLayer != document.layers.activeId) activeLayer = document.layers.activeId
-            kotlinx.coroutines.delay(100)
+            kotlinx.coroutines.delay(if (layersOpen) 100 else 333)
         }
     }
 
@@ -1684,6 +1704,12 @@ private fun CanvasScreen(
                         surface?.pickingStrokes = it
                         generation++
                     },
+                    eraseMode = eraseMode,
+                    onEraseMode = {
+                        eraseMode = it
+                        surface?.eraseMode = it
+                        generation++
+                    },
                     onSelecting = { on ->
                         setSelecting(on)
                         generation++
@@ -1876,6 +1902,8 @@ private fun ToolSlot(
     /** See `InkSurfaceView.pickingStrokes`. Null when the sheet keeps no strokes. */
     picking: Boolean?,
     onPicking: (Boolean) -> Unit,
+    eraseMode: be.thalos.artiest.doc.EraseMode,
+    onEraseMode: (be.thalos.artiest.doc.EraseMode) -> Unit,
     onSelecting: (Boolean) -> Unit,
     marqueeShape: MarqueeShape,
     onMarqueeShape: (MarqueeShape) -> Unit,
@@ -2066,9 +2094,11 @@ private fun ToolSlot(
             hasSelection = hasSelection,
             floating = floating,
             picking = picking,
+            eraseMode = eraseMode,
             onShape = onMarqueeShape,
             onMode = onMarqueeMode,
             onPicking = onPicking,
+            onEraseMode = onEraseMode,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
             onSelecting = onSelecting,
@@ -2083,9 +2113,11 @@ private fun ToolSlot(
             hasSelection = hasSelection,
             floating = floating,
             picking = picking,
+            eraseMode = eraseMode,
             onShape = { onMarqueeShape(it); onSelecting(true) },
             onMode = onMarqueeMode,
             onPicking = onPicking,
+            onEraseMode = onEraseMode,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
         )

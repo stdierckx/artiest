@@ -573,7 +573,7 @@ class PngExporterTest {
                 document.selection.apply(op)
             }
 
-            override fun onPick(op: StrokeOp) = Unit
+            override fun onStrokeOp(op: StrokeOp) = Unit
             override fun onFloat(op: be.thalos.artiest.doc.FloatOp) {
                 document.applyFloat(op)
             }

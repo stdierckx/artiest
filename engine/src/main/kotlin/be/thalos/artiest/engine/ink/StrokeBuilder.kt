@@ -79,6 +79,9 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
     private var nextSeed: Int = 0
     private var strokeRandom: Float = 0f
+
+    /** See [begin]'s `startMillis`. Added to every elapsed time this run. */
+    private var elapsedBase: Float = 0f
     private var lastSpeed: Float = 0f
     private var lastDirection: Float = 0f
     private var lastSampleNanos: Long = 0L
@@ -155,9 +158,17 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
      * has to go on drawing what it drew as part of the parent, which means its
      * first dab must be dab *k* of the original and not dab 0 of a new stroke.
      * With the hash and a `dabBase` of *k*, it is.
+     *
+     * [startMillis] is the same idea for the *clock*. Elapsed time is counted
+     * from the first sample, so a tail that started counting at zero would get
+     * a fresh onset ramp — `Brush.onsetMillis` would lift its first dabs again
+     * and the pen would appear to have lifted and landed at the cut. Passing
+     * the record's `startMillis` puts the tail back where it was in the stroke.
      */
-    fun begin(colorArgb: Int, seed: Int, dabBase: Int = 0) {
+    fun begin(colorArgb: Int, seed: Int, dabBase: Int = 0, startMillis: Float = 0f) {
         require(dabBase >= 0) { "dabBase was $dabBase" }
+        require(startMillis.isFinite() && startMillis >= 0f) { "startMillis was $startMillis" }
+        elapsedBase = startMillis
         if (stabilizer.strength != pen.stabilization) {
             stabilizer = Stabilizer(pen.stabilization)
         }
@@ -275,7 +286,7 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         if (sampleCount == 0) downTimeNanos = eventTimeNanos
         sampleCount++
         stabilizer.push(xDoc, yDoc, pressure, eventTimeNanos)
-        val elapsedMillis = (eventTimeNanos - downTimeNanos) / 1_000_000f
+        val elapsedMillis = elapsedBase + (eventTimeNanos - downTimeNanos) / 1_000_000f
         resampler.add(stabilizer.x, stabilizer.y, stabilizer.pressure, elapsedMillis)
     }
 

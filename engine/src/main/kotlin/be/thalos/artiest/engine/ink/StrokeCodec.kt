@@ -59,15 +59,28 @@ object StrokeCodec {
     const val MAGIC: String = "ARTINK"
 
     /**
-     * 1. Bumped by any change to the sample packing, the channel set or the
-     * record header. Never bumped for a change that only adds an optional
-     * trailing field — there are none, and the format has no room for one by
-     * design, because "optional" is how a format becomes ambiguous.
+     * **2 since Ik8**, which widened the origin from eight bytes to twelve so
+     * that a sample buffer carries the time its first sample happened at, not
+     * only where it was. A split record's samples start part-way through a
+     * stroke, and a tail whose clock restarted at zero would get a fresh onset
+     * ramp — the pen would appear to lift and land again at the cut.
+     *
+     * Bumped by any change to the sample packing, the channel set or the record
+     * header. Never bumped for a change that only adds an optional trailing
+     * field — there are none, and the format has no room for one by design,
+     * because "optional" is how a format becomes ambiguous.
      */
-    const val VERSION: Int = 1
+    const val VERSION: Int = 2
 
-    /** Bytes before the first sample: two int32 origin coordinates. */
-    const val ORIGIN_BYTES: Int = 8
+    /**
+     * Bytes before the first sample: two int32 origin coordinates and one
+     * int32 origin *time*, in the same 1/8 ms units the per-sample delta uses.
+     *
+     * The time is an origin for the same reason the coordinates are, and it
+     * became one for a reason the first version did not have to think about: a
+     * record can start part-way through a stroke. See [VERSION].
+     */
+    const val ORIGIN_BYTES: Int = 12
 
     /** Bytes per sample. See [StrokeRecord]'s layout note. */
     const val SAMPLE_BYTES: Int = 9
@@ -143,6 +156,7 @@ object StrokeCodec {
         var prevT = quantiseTime(samples[offset + 5])
         putInt(out, 0, prevX)
         putInt(out, 4, prevY)
+        putInt(out, 8, prevT)
 
         for (i in 0 until count) {
             val s = offset + i * StrokeRecord.STRIDE
@@ -190,7 +204,7 @@ object StrokeCodec {
         if (count == 0) return 0
         var x = getInt(packed, 0)
         var y = getInt(packed, 4)
-        var t = 0
+        var t = getInt(packed, 8)
         for (i in 0 until count) {
             val o = ORIGIN_BYTES + i * SAMPLE_BYTES
             x += getShort(packed, o)
@@ -210,6 +224,9 @@ object StrokeCodec {
     /** First sample to last, in milliseconds. Walks the time column only. */
     internal fun durationMillisOf(packed: ByteArray, count: Int): Float {
         if (count < 2) return 0f
+        // From the *origin*, not from zero: a split record's samples start
+        // part-way through a stroke, and its duration is its own span rather
+        // than its distance from the pen going down.
         var t = 0
         for (i in 0 until count) {
             val o = ORIGIN_BYTES + i * SAMPLE_BYTES
@@ -217,6 +234,13 @@ object StrokeCodec {
         }
         return t * TIME_QUANTUM_MS
     }
+
+    /**
+     * When this record's first sample happened, in milliseconds from the pen
+     * going down on the stroke it belongs to. Zero for a stroke as drawn.
+     */
+    internal fun startMillisOf(packed: ByteArray): Float =
+        if (packed.size < ORIGIN_BYTES) 0f else getInt(packed, 8) * TIME_QUANTUM_MS
 
     // ------------------------------------------------------------------- file
 

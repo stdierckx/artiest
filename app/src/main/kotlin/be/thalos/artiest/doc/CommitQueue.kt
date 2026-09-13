@@ -130,7 +130,7 @@ class CommitQueue {
          * the render thread has not stamped yet — and then fail to find it,
          * which on a tap looks like the app ignoring the pen.
          */
-        class Pick(val op: StrokeOp) : Commit
+        class Strokes(val op: StrokeOp) : Commit
     }
 
     /**
@@ -149,7 +149,7 @@ class CommitQueue {
         fun onLayers(op: LayerOp)
         fun onSelect(op: SelectOp)
         fun onFloat(op: FloatOp)
-        fun onPick(op: StrokeOp)
+        fun onStrokeOp(op: StrokeOp)
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
@@ -158,8 +158,8 @@ class CommitQueue {
     val pending: Int get() = queue.size
 
     /** UI thread, from a picking gesture. See [Commit.Pick]. */
-    fun pick(op: StrokeOp) {
-        queue.add(Commit.Pick(op))
+    fun strokeOp(op: StrokeOp) {
+        queue.add(Commit.Strokes(op))
     }
 
     /** UI thread, at pen-up. */
@@ -226,7 +226,7 @@ class CommitQueue {
                 is Commit.Layers -> sink.onLayers(commit.op)
                 is Commit.Select -> sink.onSelect(commit.op)
                 is Commit.Float -> sink.onFloat(commit.op)
-                is Commit.Pick -> sink.onPick(commit.op)
+                is Commit.Strokes -> sink.onStrokeOp(commit.op)
             }
             applied++
         }

@@ -71,7 +71,7 @@ class ProjectRoundTripTest {
         override fun onUndo() = Unit
         override fun onRedo() = Unit
         override fun onSelect(op: SelectOp) = Unit
-        override fun onPick(op: StrokeOp) = Unit
+        override fun onStrokeOp(op: StrokeOp) = Unit
         override fun onFloat(op: FloatOp) = Unit
         override fun onLayers(op: LayerOp) {
             if (!document.layers.apply(op)) return

@@ -166,7 +166,10 @@ class StrokePolylineTest {
     @Test
     fun `a long stroke costs a few hundred bytes of centreline`() {
         val line = polylineOf(700) { i -> Triple(100f + i, 300f, 1f) }
-        assertTrue(line.byteCount < 5000, "${line.byteCount} bytes for 700 px")
+        // Four floats a point since Ik8 added the sample index, which is what
+        // makes a cut expressible. 5.6 KB for the longest stroke in Ik0's
+        // scene, against records that are already kilobytes.
+        assertTrue(line.byteCount < 6000, "${line.byteCount} bytes for 700 px")
         assertTrue(abs(line.pointCount - 350) < 20, "${line.pointCount} points")
     }
 

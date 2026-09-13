@@ -24,7 +24,9 @@ import be.thalos.artiest.doc.PendingStroke
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
+import be.thalos.artiest.doc.EraseMode
 import be.thalos.artiest.doc.SheetRebuilder
+import be.thalos.artiest.doc.StrokeEraser
 import be.thalos.artiest.doc.StrokeOp
 import be.thalos.artiest.doc.VectorSheet
 import be.thalos.artiest.doc.VectorStep
@@ -1019,6 +1021,54 @@ class InkSurfaceView(
     var pickingStrokes: Boolean = false
 
     /**
+     * How much of a stroke the eraser takes on a sheet that keeps strokes. UI
+     * thread; read on the render thread at pen-up, so it is volatile.
+     */
+    @Volatile
+    var eraseMode: EraseMode = EraseMode.WHOLE
+
+    /**
+     * One per view, reused: the eraser's own scratch lists are the point of it
+     * being an object rather than a function, and an erase drag asks it the
+     * same question of fifty strokes.
+     */
+    private val eraser = StrokeEraser()
+
+    /**
+     * Whether the sheet the pen is on keeps its strokes. UI thread, set by the
+     * chrome; read at pen-up, so it is volatile.
+     *
+     * Mirrored rather than read from the stack, for the reason `pickingStrokes`
+     * is: the stack belongs to the render thread, and the decision has to be
+     * made on the thread the gesture ends on.
+     */
+    @Volatile
+    var vectorSheetActive: Boolean = false
+
+    /**
+     * A finished stroke's centreline, as a document-space path.
+     *
+     * The dab centres, which is where the nib actually went — close enough to
+     * the input to erase by and already in hand, where the samples are not: by
+     * pen-up the gesture is a `Stroke` and nothing keeps its samples unless the
+     * sheet asked for a record.
+     */
+    private fun pathOf(stroke: Stroke): Path {
+        val out = Path()
+        if (stroke.dabCount == 0) return out
+        out.moveTo(stroke.x(0), stroke.y(0))
+        for (i in 1 until stroke.dabCount) out.lineTo(stroke.x(i), stroke.y(i))
+        return out
+    }
+
+    /** The widest the eraser's nib got, which is how far its rub reached. */
+    private fun eraseReach(stroke: Stroke): Float {
+        var r = 0f
+        for (i in 0 until stroke.dabCount) if (stroke.radius(i) > r) r = stroke.radius(i)
+        return r
+    }
+
+    /**
      * The one implementation of [SheetRebuilder], handed to the document so
      * that a `VectorStep` can repaint without knowing about the rasterizer or
      * the scratch buffer.
@@ -1284,7 +1334,7 @@ class InkSurfaceView(
          * moved between the gesture and the drain, and dropping the pick is a
          * better answer to that than picking on the wrong sheet.
          */
-        override fun onPick(op: StrokeOp) {
+        override fun onStrokeOp(op: StrokeOp) {
             val entry = document.layers.active
             val sheet = entry.vector
             // Posted, not called: this runs on the render thread and the
@@ -1293,7 +1343,57 @@ class InkSurfaceView(
                 if (document.picked.clear()) post { onPickChanged?.invoke() }
                 return
             }
-            if (document.picked.apply(op, sheet, entry.id)) post { onPickChanged?.invoke() }
+            if (!sheet.intact) return
+            when (op) {
+                is StrokeOp.Erase -> edit(eraser.plan(op, sheet, entry.id), sheet, entry)
+                StrokeOp.DeletePicked ->
+                    edit(eraser.planDelete(document.picked.toArray(), sheet, entry.id), sheet, entry)
+                else ->
+                    if (document.picked.apply(op, sheet, entry.id)) post { onPickChanged?.invoke() }
+            }
+        }
+
+        /**
+         * Apply a planned edit: change the list, record the undo step, repaint
+         * what it touched, and drop any picked id that is now gone.
+         *
+         * In that order, and the order is the invariant. The step is recorded
+         * **after** the list moves so that it describes what happened rather
+         * than what was about to; the repaint is asked for after both, so it
+         * paints the list as it now is; and the pruning is last because it
+         * reads the list.
+         */
+        private fun edit(
+            step: VectorStep?,
+            sheet: be.thalos.artiest.doc.VectorSheet,
+            entry: LayerStack.Entry,
+        ) {
+            if (step == null) return
+            // The edit, in the log, because it is the one thing about Ik8 that
+            // a screenshot cannot show: which records went, which took their
+            // place, and over what rectangle. `docs/inker-plan.md`'s fourth
+            // stop condition is about whether the junction it picked is the one
+            // the hand meant, and that is a question about the records.
+            android.util.Log.i(
+                "artiest.ik8",
+                "erase ${eraseMode.name}: -${step.removed.size} +${step.added.size}  " +
+                    "damage ${step.damage()}  " +
+                    "removed ${step.removed.map { "${it.id}:${it.sampleCount}" }}  " +
+                    "added ${step.added.map { "${it.id}:${it.sampleCount}@${it.dabBase}" }}",
+            )
+            eraser.apply(step, sheet)
+            document.recordVectorEdit(step)
+            rebuild(entry, step.damage())
+            document.layers.touchActive()
+            // **And ask for a frame.** This runs inside the commit drain, which
+            // is itself inside a render pass, so the pixels it just changed are
+            // behind the compositor rather than in front of it: without this
+            // the sheet is correct and the screen goes on showing the stroke
+            // that was rubbed out until something else asks for a redraw.
+            // Found on the tablet, where the records were right and the ink
+            // stayed put.
+            redrawDry()
+            if (document.picked.prune(sheet)) post { onPickChanged?.invoke() }
         }
 
         override fun onFloat(op: FloatOp) {
@@ -1731,7 +1831,29 @@ class InkSurfaceView(
      */
     private val wetInk = object : StackCompositor.Wet {
         override val position: Int get() = document.layers.activePosition
-        override val isOpen: Boolean get() = scratch.isOpen
+
+        /**
+         * Open **and belonging to the stroke in hand**.
+         *
+         * The epoch check is not decoration. `ScratchLayer.isOpen` stays true
+         * after a stroke ends — nothing closes it, because keeping the buffer
+         * is the point — so on its own it says "there is a buffer", not "there
+         * is wet ink". For an ordinary stroke the difference is invisible: the
+         * buffer holds the stroke that was just committed, so compositing it
+         * again paints the same pixels twice in the same place.
+         *
+         * It stops being invisible the moment a stroke is *abandoned* rather
+         * than committed, which is what Ik8's eraser does on a sheet that keeps
+         * its strokes: the sheet repaints itself correctly and the stale buffer
+         * goes on being drawn over the top, so the screen shows the stroke that
+         * was just rubbed out. Found on the tablet, and only by restarting the
+         * app and seeing the drawing come back right.
+         *
+         * `strokeEpoch` is bumped at every pen-down and at every abandon, so
+         * this is exactly the same guard the commit path and the wet pass
+         * already use — it was the one reader that had been left out.
+         */
+        override val isOpen: Boolean get() = scratch.isOpen && scratchEpoch == strokeEpoch
         override val erases: Boolean get() = pen.erase
         override fun draw(canvas: Canvas) {
             if (pen.erase) {
@@ -3109,6 +3231,39 @@ class InkSurfaceView(
             }
             lastStrokeWidthMin = if (wMin == Float.MAX_VALUE) 0f else wMin
             lastStrokeWidthMax = wMax
+            // **An erase on a sheet that keeps its strokes is an edit, not
+            // ink.** The wet pass has already shown the grey going down, which
+            // is the right feedback; what must not happen is the pixels being
+            // committed, because on this sheet the truth is the record list and
+            // a rubbed-out stroke has to leave it. The stroke is thrown away
+            // and the sheet repaints itself from what is left.
+            if (vectorSheetActive && (pen.erase || this@InkSurfaceView.erasingNow)) {
+                document.requestStrokeOp(
+                    StrokeOp.Erase(pathOf(stroke), eraseReach(stroke), eraseMode),
+                )
+                strokeOpen = false
+                this@InkSurfaceView.strokeOpen = false
+                releaseTransform()
+                // **Cancel the wet stroke rather than abandoning it**, because
+                // only `cancel()` hides the front buffer. Abandoning drops the
+                // ink but leaves the front buffer showing the last thing drawn
+                // into it, which sits on top of the sheet — so the rebuild was
+                // correct in the layer and the screen went on showing the
+                // stroke that had just been rubbed out until the app was
+                // restarted. Found on the tablet, and only by restarting it.
+                val r = this@InkSurfaceView.renderer
+                if (r == null || !surfaceAlive) {
+                    batches.releaseAll()
+                } else {
+                    commitWatermark = batches.issuedCount
+                    r.cancel()
+                }
+                // The epoch, so the scratch buffer's contents are not mistaken
+                // for the next stroke's. `abandonStroke` did this as well.
+                strokeEpoch++
+                redrawDry()
+                return
+            }
             commitStroke(stroke, pendingRecord(stroke))
             val commitEnd = heapUsed()
             strokeOpen = false
@@ -3279,11 +3434,11 @@ class InkSurfaceView(
                 val tap = shape.isEmpty ||
                     (box.width() <= TAP_SLOP_DOC && box.height() <= TAP_SLOP_DOC)
                 if (tap) {
-                    document.requestPick(
+                    document.requestStrokeOp(
                         StrokeOp.Tap(marqueeDownX, marqueeDownY, TAP_SLOP_DOC, marqueeMode),
                     )
                 } else {
-                    document.requestPick(StrokeOp.Lasso(shape, marqueeMode))
+                    document.requestStrokeOp(StrokeOp.Lasso(shape, marqueeMode))
                 }
                 renderer?.commit()
                 return

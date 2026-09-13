@@ -500,8 +500,8 @@ class Document(
     }
 
     /** Queue a change to which strokes are picked. UI thread. See [StrokeOp]. */
-    fun requestPick(op: StrokeOp) {
-        commits.pick(op)
+    fun requestStrokeOp(op: StrokeOp) {
+        commits.strokeOp(op)
     }
 
     /**

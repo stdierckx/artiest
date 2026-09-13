@@ -174,7 +174,7 @@ class DocumentTest {
             log.append('M')
         }
 
-        override fun onPick(op: StrokeOp) = Unit
+        override fun onStrokeOp(op: StrokeOp) = Unit
         override fun onFloat(op: FloatOp) {
             log.append('F')
         }

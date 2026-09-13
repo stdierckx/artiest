@@ -263,7 +263,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik5** | **DONE.** `DocStep`, the exchange moved onto the step, `VectorStep`, `SheetRebuilder`, and undo/redo of a vector edit. Two of Ik3's three spoilers are gone. See **What Ik5 built**. | `:app` | Med | Ik4 | 4–6 |
 | **Ik6** | **DONE.** `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2, `PathText` for the clip table, save on the same debounce, load into `LayerOp.Open`. The PNG stays. See **What Ik6 built**. | `:app` | Med | Ik1, Ik3 | 4–6 |
 | **Ik7** | **DONE.** `StrokeOp`, `StrokePick`, `CommitQueue.Commit.Pick`, the strokes/pixels toggle in the selection panel, and the highlight in the overlay. See **What Ik7 built**. | `:app` | Med | Ik3 | 4–6 |
-| **Ik8** | **The three eraser modes.** Whole stroke; to the nearest intersection; and an ordinary partial rub that splits a record. `StrokeGeometry.intersections` in `:engine`, JVM-tested. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
+| **Ik8** | **DONE.** `StrokeGeometry`, `StrokeSplitter`, `StrokeEraser`, `EraseMode`, the record's time origin, and the mode selector. See **What Ik8 built**. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
 | **Ik9** | Move, rotate and scale the selected strokes, through `TransformBox` over records instead of pixels. Drop is a `VectorStep`; grain regenerates where it lands. | `:app` | Med | Ik7, Ik5 | 4–6 |
 | **Ik10** | Restyle: recolour, re-brush, scale the width, re-stabilise. Four operations, one panel, all of them one field on a record and a re-render. | `:app` | Low | Ik4, Ik7 | 3–5 |
 | **Ik11** | **Sharp at any zoom**, and export at any scale: re-render the visible region at view scale on a zoom settle, and let `PngExporter` ask a vector sheet for 2x or 4x. **Gated on Ik0.** | `:app` | **High** | Ik4 | 5–8 |
@@ -956,6 +956,82 @@ Centrelines and not outlines: a stroke's outline is the expensive derived thing
 this whole design avoids computing, and a line along the spine is what a vector
 editor's own highlight is.
 
+## What Ik8 built
+
+> 2026-09-13. `StrokeGeometry` and `StrokeSplitter` in `:engine`,
+> `StrokeEraser` in `:app`. 38 tests, plus the tablet.
+
+Three eraser modes on a sheet that keeps its strokes: take the whole stroke,
+take the stretch the eraser passed over, or take from the crossing before the
+touch to the crossing after it.
+
+### The junction cut, measured on the device
+
+A 1 200-pixel line crossed by another at two thirds of its length, one tap on
+the overshoot with **Back to the junction**:
+
+```
+erase TO_JUNCTION: -1 +1  removed [1:62]  added [3:40@0]
+```
+
+Sixty-two samples in, forty out — the cut landed at sample 40 of 62, which is
+the crossing. The stop condition asked whether *"the junction it picks is the
+junction the hand meant"*, and it is.
+
+### `dabBase` is why a cut stroke keeps its grain
+
+A piece cut from the middle of a stroke has to go on drawing what it drew as
+part of the stroke. Its scatter, jitter and grain are a hash of (seed, **dab
+index**, channel) since Ik2, so all a piece needs is the dab index its first dab
+carries — and **that number cannot be estimated from the sample index**, because
+dabs are laid by arc length and a slow stretch of a stroke lays far more of them
+than a fast one. So `StrokeSplitter` re-runs the parent's own dab loop and reads
+`dabCount` at the cut, which is exact by construction.
+
+The test is the risk table's: a brush that jitters its size and nothing else, at
+flat pressure, where every dab would be the same radius but for the jitter. A
+piece cut from the middle lays the parent's own radii — 90% of them exactly, the
+rest being the four dabs either side of the cut where the spline sees different
+neighbours. The counterfactual is beside it: the same piece told it starts at
+dab 0 matches fewer than ten.
+
+### The record grew a clock, and the format went to version 2
+
+A tail whose time restarted at zero gets a **fresh onset ramp**: the pen appears
+to lift and land again at the cut, which is the most visible thing a split could
+get wrong. So the packed buffer's origin widened from eight bytes to twelve and
+now carries the time of its first sample, and `StrokeBuilder.begin` takes a
+`startMillis` that is added to every elapsed time.
+
+### Two defects found on the tablet that were not Ik8's
+
+Both were old, both were invisible until an erase made them matter, and both are
+the kind that only a device finds.
+
+**A kept layers panel was acting on a stale active layer.** `layerRows` and
+`activeLayer` only refreshed while the *popup* was open, so the panel fixated
+onto a bar sent `LayerOp.Delete` naming whichever sheet was active when the popup
+was last closed — and the stack refused it silently. Found by pressing Delete
+four times and watching nothing happen. The poll now runs with the popup closed
+too, at a third of the rate.
+
+**The wet scratch was composited past its own stroke.** `StackCompositor.Wet`
+asked `scratch.isOpen`, which stays true after a stroke ends because keeping the
+buffer is the point. For an ordinary stroke that is invisible — the buffer holds
+the stroke that was just committed, so it paints the same pixels twice in the
+same place — but a stroke that is *abandoned* rather than committed leaves the
+sheet repainting correctly underneath a stale buffer. The epoch check every
+other reader of the scratch already used was the one that had been left out.
+
+### And a note for the next person with a screenshot
+
+**`adb shell screencap` does not tell the truth about this surface.** With every
+layer hidden, a screenshot still showed the drawing. The canvas is a front
+buffered layer — a hardware overlay — and the capture can return what was in it
+some time ago. An afternoon went into chasing a repaint bug that was not there.
+Read the drawing from the readout, from the log, or from a screenshot taken
+after a restart; do not read it from a screencap taken a second after a gesture.
+
 ## Stop conditions
 
 The phase's, in the order they can fire.
@@ -979,11 +1055,12 @@ The phase's, in the order they can fire.
    `ScratchLayer` and `DabRasterizer`. What it needed instead was a way to
    confine a stroke to a rectangle and to the record's own clip, which is a
    canvas clip and eleven lines. See **What Ik4 built**.
-4. **Ik8's erase-to-intersection is not the feature people mean.** It is the
-   single most-praised vector feature in CSP and the reason inkers use vector
-   layers at all. If, on the tablet, the junction it picks is not the junction
-   the hand meant, the rest of Tier 1 is not worth building alone — say so and
-   stop rather than adding features around a tool that misses.
+4. ~~**Ik8's erase-to-intersection is not the feature people mean.**~~
+   **Cleared on the arithmetic, and it wants a hand on it.** On the tablet a tap
+   on an overshoot cut the stroke at sample 40 of 62, which is exactly where the
+   crossing is. What a log cannot answer is whether it *feels* like the right
+   junction when the lines are not two ruled strokes — that is Ik16's, with the
+   pen in a hand. See **What Ik8 built**.
 5. **Ik13 needs a gesture that races the canvas.** See above; the answer is
    arrange mode, and a second answer is a stop condition, not a design.
 6. **The chrome measurement regresses.** `U10`'s rule — `recompose N/s` reads 0
