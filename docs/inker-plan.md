@@ -260,7 +260,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik2** | **DONE, and the pencil is at zero.** Seed as an input, per-dab random as a hash of (seed, dab index, channel), `dabBase`. See **What Ik2 changed**. | `:engine`, `:app` | Med | Ik1 | 2–3 |
 | **Ik3** | **DONE.** `VectorSheet`, `PendingStroke`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, the commit path appending a record beside the pixels, and **`VectorSheet.intact`** — which is the part the plan did not foresee. See **What Ik3 built**. | `:app` | Med | Ik1 | 5–7 |
 | **Ik4** | **DONE, and "identical" turned out to be the wrong word.** `InkSurfaceView.rebuild`, `Confinement`, `Layer.blank(rect)`, a coalescing throttle, and the clip table in use. See **What Ik4 built**. | `:app` | **High** | Ik3, Ik2 | 5–8 |
-| **Ik5** | `DocStep`, the exchange moved onto the step, `VectorStep`, and undo/redo of a vector edit. | `:app` | Med | Ik4 | 4–6 |
+| **Ik5** | **DONE.** `DocStep`, the exchange moved onto the step, `VectorStep`, `SheetRebuilder`, and undo/redo of a vector edit. Two of Ik3's three spoilers are gone. See **What Ik5 built**. | `:app` | Med | Ik4 | 4–6 |
 | **Ik6** | Persistence: `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2 with a `kind` per sheet, save on the same debounce, load into `LayerOp.Open`. **The PNG stays** and is still written — see below. | `:app` | Med | Ik1, Ik3 | 4–6 |
 | **Ik7** | Picking strokes: tap, lasso (the marquee gesture, a different hit test), the selected set, and the highlight in the overlay. | `:app` | Med | Ik3 | 4–6 |
 | **Ik8** | **The three eraser modes.** Whole stroke; to the nearest intersection; and an ordinary partial rub that splits a record. `StrokeGeometry.intersections` in `:engine`, JVM-tested. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
@@ -758,6 +758,79 @@ Bn3's 256 px overshoot means a rebuild rarely reallocates. **One buffer for the
 whole patch** is wrong: two overlapping translucent strokes accumulated into one
 buffer and composited once are a different drawing from two strokes composited
 one at a time, and not being that is the entire reason the buffer exists.
+
+## What Ik5 built
+
+> 2026-09-13. `:app`. Verified on the DTH-A116.
+
+`Document` used to hold a `(PixelPatch) -> PixelPatch` lambda, which had exactly
+one kind of step in it by construction. The exchange moved **onto the step**:
+
+```kotlin
+interface DocStep : UndoStep {
+    fun exchange(doc: Document): DocStep
+}
+```
+
+`PixelPatch` implements it with the body that lambda had. `VectorStep` implements
+it by removing what it added and adding back what it removed, then repainting the
+union of their bounds through `SheetRebuilder` — one interface with one method,
+so `Document` can ask for a rebuild without knowing about the rasterizer or the
+scratch buffer, and so there is still exactly one implementation of it.
+
+`Document.exchange` is now `{ step -> step.exchange(this) }`. There is no `when`
+in the undo path, no second stack, and no question about which history a mixed
+sequence walks back through — which is `docs/vector-plan.md` trap 3, and is
+tested against the real `Document` rather than against `UndoHistory`, because
+what could go wrong is not the deque but somebody adding a second history later.
+
+### The number
+
+On the tablet, three pencil strokes on an ordinary sheet and then three on an
+ink sheet:
+
+| | Steps | History |
+|---|---|---|
+| Three raster strokes (plus a clear) | 4 | **30.3 MiB** |
+| Three ink strokes on top of those | 7 | **30.3 MiB** |
+
+Three vector strokes added about a kilobyte where three raster ones cost roughly
+7.6 MiB each. The 48 MiB cap and the 32-step depth stay as they are; on an ink
+sheet the *depth* is what will bite, which `UndoHistory` says is the correct end.
+
+Undo and redo, measured on the device: **45.5 ms** and **49.8 ms** to take a
+stroke off, **80.0 ms** to put one back. The redo repaints two strokes rather
+than one, because the rectangle it dirtied also contains a neighbour — which is
+the damage rectangle working, not a mistake.
+
+### A stroke gets its step at a different moment depending on the sheet
+
+On an ordinary sheet the patch is captured **before** the ink lands, because
+that is the last moment the region exists in its pre-stroke state. On an ink
+sheet the step is recorded **after**, because the record does not exist until
+then. One branch in `commitSink.onStroke`, where both the sheet and the stroke
+are known.
+
+### Two of Ik3's three spoilers are gone
+
+Ik3 spoiled **every** vector sheet on **any** undo, because a `PixelPatch`
+restores pixels the record list cannot follow. Ik5 makes that precise: a
+`VectorStep` moves the list and repaints, so nothing disagrees and nothing is
+spoiled; a `PixelPatch` spoils the sheet **it lands on**, from inside its own
+`exchange`, where the layer id is known.
+
+What is left spoiling a sheet is a clear inside a selection and a float drop —
+Ik8's and a later item's. The flag is doing what it was built for: shrinking.
+
+### One thing worth knowing about the repaint
+
+A rebuild repaints *every* stroke overlapping the rectangle, not only the ones
+the step touched, so a neighbour is re-rendered from its record too. That is
+real and it is bounded: Ik4 measured a record's re-render against the live
+drawing at under 0.4% of the total ink, and after the first rebuild the pixels
+come from the records — so a second rebuild of the same region is
+pixel-identical. It converges after one press rather than drifting with every
+press.
 
 ## Stop conditions
 

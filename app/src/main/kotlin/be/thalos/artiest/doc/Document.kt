@@ -136,7 +136,7 @@ class Document(
      * The undo chains. **Render thread only** — see [UndoHistory]'s threading
      * note. Every entry point that touches it below says so in its own KDoc.
      */
-    private val history = UndoHistory<PixelPatch>()
+    private val history = UndoHistory<DocStep>()
 
     /** How many sheets the drawing has. Diagnostic; the panel reads the snapshot. */
     val layerCount: Int get() = layers.snapshot.size
@@ -367,30 +367,45 @@ class Document(
     }
 
     /**
-     * Restore a patch and hand back what was under it, in one step.
+     * Apply a step and take back its inverse.
      *
-     * Stored rather than written inline at both call sites because it is
-     * identical in both directions — undo and redo differ only in which chain
-     * they pull from — and because a capturing lambda per press would allocate
-     * on the render thread, which is the one path in this app with a measured
-     * budget.
+     * **Ik5 moved the body of this onto the step**, and what is left is one
+     * call. Undo and redo differ only in which chain they pull from, so one
+     * field serves both; it is a field rather than a lambda written at each
+     * call site because a capturing lambda per press would allocate on the
+     * render thread, which is the one path in this app with a measured budget.
      *
-     * The recapture happens **before** the restore. Reversed, the inverse would
-     * be a copy of the patch itself and redo would put back what undo had just
-     * removed.
+     * There is no `when` here and there must not be one. `PixelPatch` restores
+     * pixels, `VectorStep` edits a stroke list and repaints; both are
+     * `DocStep`s in one history, in the order the user made them. Two stacks
+     * would mean an undo press that walks back through one of two interleaved
+     * sequences with nothing on screen to say which — `docs/vector-plan.md`
+     * trap 3.
      */
-    private val exchange: (PixelPatch) -> PixelPatch = { patch ->
-        // Against the stack and not against `layer`: a patch knows which sheet
-        // it came from, and undoing a stroke made on a sheet the pen has since
-        // left must put those pixels back where they were rather than onto
-        // whatever is under the pen now. A patch whose sheet has been deleted
-        // recaptures nothing and restores nothing, and is still consumed --
-        // pressing Undo past a deleted layer walks over it rather than stopping
-        // on it.
-        val inverse = patch.recapture(layers) ?: patch
-        patch.restoreInto(layers)
-        layers.touchAll()
-        inverse
+    private val exchange: (DocStep) -> DocStep = { step -> step.exchange(this) }
+
+    /**
+     * How a sheet is repainted from the strokes that made it. Set once by the
+     * view that owns the rasterizer and the scratch buffer.
+     *
+     * A hook rather than a call, because `docs/inker-plan.md`'s third stop
+     * condition says there is exactly one compositor and it lives with those
+     * two. Null in a unit test, where a `VectorStep` still edits the list
+     * correctly and simply paints nothing.
+     */
+    var rebuilder: SheetRebuilder? = null
+
+    /**
+     * Record a vector edit. **Render thread**, from inside the commit.
+     *
+     * Separate from [snapshotBeforeStroke] rather than a branch inside it,
+     * because the two happen at opposite ends of the commit: a pixel patch has
+     * to be captured *before* the ink lands, and a vector step describes a
+     * record that does not exist until *after* it has.
+     */
+    fun recordVectorEdit(step: VectorStep) {
+        history.record(step)
+        publishHistory()
     }
 
     /** **Render thread.** Publish the history's state for the UI to read. */

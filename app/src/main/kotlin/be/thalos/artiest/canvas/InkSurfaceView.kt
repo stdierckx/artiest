@@ -24,7 +24,9 @@ import be.thalos.artiest.doc.PendingStroke
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
+import be.thalos.artiest.doc.SheetRebuilder
 import be.thalos.artiest.doc.VectorSheet
+import be.thalos.artiest.doc.VectorStep
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
@@ -700,10 +702,10 @@ class InkSurfaceView(
      * an empty record would be a stroke in the list that the rebuild draws
      * nothing for, which is harmless until Ik7 lets somebody select it.
      */
-    private fun keepRecord(record: PendingStroke?, stroke: Stroke) {
-        if (record == null || stroke.dabCount == 0) return
-        val sheet = document.layers.active.vector ?: return
-        sheet.append(record, document.selection.snapshot.path)
+    private fun keepRecord(record: PendingStroke?, stroke: Stroke): StrokeRecord? {
+        if (record == null || stroke.dabCount == 0) return null
+        val sheet = document.layers.active.vector ?: return null
+        return sheet.append(record, document.selection.snapshot.path)
     }
 
     /**
@@ -995,6 +997,24 @@ class InkSurfaceView(
     }
 
     /**
+     * The one implementation of [SheetRebuilder], handed to the document so
+     * that a `VectorStep` can repaint without knowing about the rasterizer or
+     * the scratch buffer.
+     *
+     * An object rather than a lambda so it can be installed once in [init]
+     * rather than captured; it holds nothing but the view.
+     */
+    private val sheetRebuilder = object : SheetRebuilder {
+        override fun rebuild(entry: LayerStack.Entry, damage: Bounds) {
+            this@InkSurfaceView.rebuild(entry, damage)
+        }
+    }
+
+    init {
+        document.rebuilder = sheetRebuilder
+    }
+
+    /**
      * Repaint the whole active sheet from its records. **UI thread**, from the
      * debug row.
      *
@@ -1072,10 +1092,17 @@ class InkSurfaceView(
 
     private val commitSink = object : CommitQueue.Sink {
         override fun onStroke(stroke: Stroke, record: PendingStroke?) {
-            // The snapshot first, and it is not merely ordering: this is the
-            // last moment the region exists in its pre-stroke state. Taken
-            // after the rasterise it would record the stroke as its own undo.
-            document.snapshotBeforeStroke(stroke.bounds)
+            // **Which kind of undo step this stroke gets**, decided here
+            // because here is the only place that knows both the sheet and the
+            // stroke. On a sheet that keeps its strokes the answer is a
+            // `VectorStep` of a few kilobytes, recorded *after* the ink lands
+            // because the record does not exist until then. On any other sheet
+            // it is a `PixelPatch` of up to 28 MB, captured *before*, because
+            // this is the last moment the region exists in its pre-stroke
+            // state -- taken afterwards it would record the stroke as its own
+            // undo.
+            val keeping = record != null && document.layers.active.vector?.intact == true
+            if (!keeping) document.snapshotBeforeStroke(stroke.bounds)
             // W6's indirect path. The wet pass has usually already accumulated
             // this stroke onto the scratch. Reuse it when it has: re-laying
             // every dab would double the paint on a translucent brush, which is
@@ -1102,7 +1129,12 @@ class InkSurfaceView(
             } else {
                 stampStroke(stroke, document.layer)
             }
-            keepRecord(record, stroke)
+            val kept = keepRecord(record, stroke)
+            if (kept != null) {
+                document.recordVectorEdit(
+                    VectorStep(document.layers.active.id, added = listOf(kept), removed = emptyList()),
+                )
+            }
             document.layers.touchActive()
         }
 
@@ -1139,13 +1171,16 @@ class InkSurfaceView(
             for (i in 0 until stack.size) stack.entryAt(i).vector?.spoil(reason)
         }
 
+        // No `spoilVectors` here any more. Ik5 made the answer precise: a
+        // `VectorStep` moves the record list and repaints, so nothing
+        // disagrees; a `PixelPatch` that lands on a sheet which keeps strokes
+        // spoils *that* sheet, from inside `PixelPatch.exchange`, where the
+        // layer id is known.
         override fun onUndo() {
-            spoilVectors("an undo")
             document.applyUndo()
         }
 
         override fun onRedo() {
-            spoilVectors("a redo")
             document.applyRedo()
         }
 

@@ -18,6 +18,44 @@ interface UndoStep {
 }
 
 /**
+ * An [UndoStep] that knows how to apply itself to a [Document].
+ *
+ * **Ik5, and the change is that the exchange moved off the document and onto
+ * the step.** `Document` used to hold a `(PixelPatch) -> PixelPatch` lambda, and
+ * that arrangement had exactly one kind of step in it by construction. A vector
+ * edit undoes by *removing what it added and adding back what it removed*,
+ * which is a different body over a different payload — and the wrong way to fit
+ * it in is a second history, or a `when` in the undo path.
+ *
+ * `docs/vector-plan.md` trap 3 is about the failure that produces: two stacks
+ * mean an undo press that walks back through one of two interleaved sequences,
+ * and the user cannot tell which. One history, one order, one press.
+ *
+ * The budget arithmetic improves, and that is worth saying because the memory
+ * conversation in this repo has always run the other way: a vector edit's step
+ * is **kilobytes** where a [PixelPatch] is up to 28 MB. The 48 MiB cap and the
+ * 32-step depth stay as they are; on a vector sheet the depth is what will bite,
+ * which is the correct end.
+ */
+interface DocStep : UndoStep {
+
+    /**
+     * Apply this step and hand back the step that undoes it. **Render thread.**
+     *
+     * One call rather than a peek and a push, for the reason [UndoHistory.undo]
+     * gives: a half-applied undo — a change made with no inverse recorded — is
+     * a redo that does the wrong thing, and the shape of the API is what makes
+     * that unwritable.
+     *
+     * Returning `this` is legal and means "I am my own inverse"; the history
+     * then does not recycle it. A step whose target has been deleted should do
+     * nothing and return itself, so that pressing undo past a deleted sheet
+     * walks over it rather than stopping on it.
+     */
+    fun exchange(doc: Document): DocStep
+}
+
+/**
  * The undo and redo chains, with a memory budget.
  *
  * ## Why this is region snapshots and not a stroke list

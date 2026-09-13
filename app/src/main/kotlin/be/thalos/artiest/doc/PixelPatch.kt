@@ -28,9 +28,38 @@ class PixelPatch private constructor(
     private val x: Int,
     private val y: Int,
     private val pixels: Bitmap,
-) : UndoStep {
+) : DocStep {
 
     override val bytes: Long get() = pixels.allocationByteCount.toLong()
+
+    /**
+     * Recapture, restore, and hand back the recapture — the body that used to
+     * be `Document.exchange`, moved here by Ik5 and otherwise unchanged.
+     *
+     * The recapture happens **before** the restore. Reversed, the inverse would
+     * be a copy of the patch itself and redo would put back what undo had just
+     * removed.
+     *
+     * Against the stack and not against the active layer: a patch knows which
+     * sheet it came from, and undoing a stroke made on a sheet the pen has
+     * since left must put those pixels back where they were rather than onto
+     * whatever is under the pen now. A patch whose sheet has been deleted
+     * recaptures nothing and restores nothing, and is still consumed.
+     *
+     * **It spoils a vector sheet it lands on**, and only that one. Restoring a
+     * rectangle of pixels moves nothing in the sheet's record list, so after
+     * this the two disagree — see `VectorSheet.intact`. Ik5 removed the *coarse*
+     * spoil that fired on every undo; what is left is precise, and it fires only
+     * where a patch is genuinely repainting a sheet that keeps strokes, which
+     * after Ik5 means a float drop or a stencil clear rather than a stroke.
+     */
+    override fun exchange(doc: Document): DocStep {
+        val inverse = recapture(doc.layers) ?: this
+        doc.layers.byId(layerId)?.vector?.spoil("pixels restored by undo")
+        restoreInto(doc.layers)
+        doc.layers.touchAll()
+        return inverse
+    }
 
     override fun recycle() {
         if (!pixels.isRecycled) pixels.recycle()
