@@ -146,7 +146,12 @@ class MaskCacheBenchTest {
         var best = Double.MAX_VALUE
         var masks = 0
         var kib = 0L
-        repeat(3) {
+        // Best of eight rather than best of three. The claim is unchanged —
+        // best-of-N measures the same thing — but three tries is not enough to
+        // get one clean run when the machine is also compiling, and a timing
+        // assertion that fails for that reason is the failure `DabLoopBench`'s
+        // rule warns about. Eight passes of a 20 ms loop is still nothing.
+        repeat(8) {
             val cache = MaskCache()
             val t0 = System.nanoTime()
             for (i in 0 until stroke.dabCount) {

@@ -257,7 +257,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 |---|---|---|---|---|---|
 | **Ik0** | **DONE, and it refuted something.** `VectorStress` beside `StrokeStress`: draw N strokes through the real path, then re-render the whole sheet from the records and report the cost. On the tablet. See **What Ik0 measured**. | `:app`, device | Low | — | 1 |
 | **Ik1** | **DONE.** `StrokeRecord`, `SampleLog`, `StrokeCodec`, `StrokePolyline`, `StrokeGrid`, `IdList`, and `Bounds.intersects`. Pure, JVM, no pixels. See **What Ik1 built**. | `:engine` | Low | — | 4–6 |
-| **Ik2** | Determinism: seed as an input, per-dab random as a hash of (seed, dab index), `dabBase`. Golden test across processes. **Ik0 priced the problem**: a nib with no scatter and no jitter is already deterministic, and the pencil differs by 105 052 pixels per million. | `:engine`, `:app` | Med | Ik1 | 2–3 |
+| **Ik2** | **DONE, and the pencil is at zero.** Seed as an input, per-dab random as a hash of (seed, dab index, channel), `dabBase`. See **What Ik2 changed**. | `:engine`, `:app` | Med | Ik1 | 2–3 |
 | **Ik3** | `VectorSheet`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, and the commit path appending a record beside the pixels it already stamps. A vector sheet you can draw on, that looks like a raster sheet and behaves like one. | `:app` | Med | Ik1 | 5–7 |
 | **Ik4** | Re-render: damage rectangles, the redraw loop, the throttle, and the clip table. Nothing visible yet — the sheet can be rebuilt and is proved identical to what drawing it produced. **Ik0 moved this item's centre of gravity**: the rectangle is the design, it has to be tight, and the rebuild opens *one* scratch buffer for the whole patch rather than one per stroke. | `:app` | **High** | Ik3, Ik2 | 5–8 |
 | **Ik5** | `DocStep`, the exchange moved onto the step, `VectorStep`, and undo/redo of a vector edit. | `:app` | Med | Ik4 | 4–6 |
@@ -518,6 +518,69 @@ It is added **at the test and not baked into the stored band**, because Ik8's
 split has to be exact about where the ink is and merging the two numbers would
 quietly widen it.
 
+## What Ik2 changed
+
+> 2026-09-13. `StrokeBuilder` in `:engine`, `StrokeRedrawGoldenTest` in `:app`
+> under Robolectric with native graphics.
+
+`UndoHistory`'s header refuses stroke-list undo on the ground that *"replay has
+to be deterministic, and Phase 2's brush will not be"*. That sentence is now
+false, and two changes made it false.
+
+**The seed is an input.** `begin(colorArgb, seed, dabBase = 0)`. The unseeded
+`begin` is still there and still gives every stroke its own look — it hands out
+the next counter value as a seed — so nothing about drawing by hand changes.
+
+**The per-dab random is a hash, not a stream.** `randomFor(index, channel)` is
+`fmix32` over the seed, the dab's index and a channel number. A stream's value
+depends on how many draws came before it, which means a dab's scatter depended
+on whether the brush also jittered, on whether the previous dab happened to take
+the `throwPx > 0f` branch, and on where in the stroke the render started. Each
+of those is a way for a re-render to draw something else.
+
+The four channels are numbered rather than drawn in order, so that **adding a
+fifth never moves the other four** — which would change every drawing already on
+the device.
+
+### The golden, and the number it replaces
+
+Ik0 measured the same records rendered twice and counted the pixels that
+differed: pen 0, fineliner 0, **pencil 105 052 per million**, one tenth of the
+page. `StrokeRedrawGoldenTest` renders twelve strokes of `VectorStress`'s scene
+from **packed records** — so the packing, the delta code, the hash and the dab
+loop are all on the path — and counts the same thing. All three nibs are at
+**zero**, and the allowed number is zero, because the stop condition says *"do
+not proceed on 'close enough'."*
+
+The two renders are separated by five unrelated strokes drawn with other seeds
+into a throwaway sheet. That is the part a back-to-back comparison would miss:
+the defect is state carried *between* strokes, and two renders in a row do not
+disturb it.
+
+Three more tests exist so that the golden cannot pass for the wrong reason. A
+different seed must draw a different page; a `dabBase` must shift the grain; and
+the pen and the fineliner — which were already at zero — must stay there, which
+is what catches a "fix" that made every stroke identical to every other.
+
+### What the seed reaches, which is more than decoration
+
+A changed seed changes the **dab count**, not just where the dabs sit: size
+jitter changes the radius, the radius feeds `spacingFor`, and the spacing
+decides where the next dab lands. So a stroke's seed is part of its geometry,
+which is another way of saying a record that lost its seed would not be a
+record of anything.
+
+### The hash is checked as a random, not only as a function
+
+A hash that is a poor one passes every test above and ruins the pencil: grain
+that repeats every few dabs reads as a pattern, and grain with a bias reads as a
+stroke quietly thinner than the slider says. So 4 000 draws are checked for mean
+(within 0.02 of 0.5), for spread (ten buckets, each within a fifth of its share)
+and for the absence of any cycle up to a period of 64. And the scatter and
+jitter channels are checked for correlation — under 0.1 over 900 dabs — because
+a brush whose ink flies furthest exactly where the dab is thinnest looks like a
+deliberate effect and is a bug.
+
 ## Stop conditions
 
 The phase's, in the order they can fire.
@@ -529,10 +592,13 @@ The phase's, in the order they can fire.
    than as an optimisation**, and a tight one. See **What Ik0 measured**. Left
    in the list rather than rewritten, because a stop condition that fired and
    changed the plan is the most valuable line in the document.
-2. **Ik2's golden cannot be made to pass.** If a record cannot be re-rendered
-   pixel-identically, the whole plan is unsound: stop, and fall back to storing
-   the *dabs* rather than the input, which costs roughly six times the bytes and
-   loses re-brushing and re-stabilisation. Do not proceed on "close enough".
+2. ~~**Ik2's golden cannot be made to pass.**~~ **Cleared.** A record
+   re-renders pixel-identically, for the pencil as well as for the opaque nibs —
+   0 differing pixels where Ik0 measured 105 052 per million. See **What Ik2
+   changed**. The fallback it named, storing the *dabs* rather than the input at
+   roughly six times the bytes and losing re-brushing and re-stabilisation, is
+   not needed. Left in the list because a stop condition that was cleared on
+   evidence is worth as much as one that fired.
 3. **Ik4 forces a second compositor.** If re-rendering cannot go through
    `ScratchLayer` and `DabRasterizer` as the commit path does — if it needs its
    own loop — stop. Phase 3 bought one compositor deliberately, and two that

@@ -339,7 +339,7 @@ class MainActivity : ComponentActivity() {
  * now and neither existed when the plan was written. An id that is not
  * installed is skipped rather than failing the run.
  */
-private val IK0_NIBS = listOf("pen", "pencil", "airbrush-soft")
+private val IK0_NIBS = listOf("pen", "pencil", "airbrush-soft", "chalk-details")
 
 /** The two stress shapes the readout is meant to be compared across. */
 private val STRESS_MODES = listOf(

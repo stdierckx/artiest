@@ -77,8 +77,7 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     /** Reused per dab; nothing retains it. See [DabContext]. */
     private val context = DabContext()
 
-    private var randomState: Int = 1
-    private var strokeSeed: Int = 0
+    private var nextSeed: Int = 0
     private var strokeRandom: Float = 0f
     private var lastSpeed: Float = 0f
     private var lastDirection: Float = 0f
@@ -100,6 +99,18 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
     private var sampleCount: Int = 0
 
+    /**
+     * The seed of the stroke in flight. `StrokeRecord.seed` is a copy of it,
+     * and handing it back to [begin] is what makes a re-render the same
+     * drawing.
+     */
+    var strokeSeed: Int = 0
+        private set
+
+    /** See [begin]. The index the first dab of this run carries. */
+    var dabBase: Int = 0
+        private set
+
     private var open: Boolean = false
 
     /** True between [begin] and [end]. W8 checks it before reading dabs. */
@@ -115,16 +126,49 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
      * user has since changed makes the stroke jump colour at pen-up.
      */
     fun begin(colorArgb: Int) {
+        nextSeed++
+        begin(colorArgb, nextSeed, 0)
+    }
+
+    /**
+     * Start a stroke whose random draws are a function of [seed] and of the
+     * index each dab carries, counting from [dabBase].
+     *
+     * **This is Ik2, and it is what makes a vector sheet possible.** Before it,
+     * `begin` bumped a counter and derived an xorshift state from it, so a dab's
+     * scatter and jitter depended on *how many dabs preceded it in this run*.
+     * Re-rendering the same input then drew a similar stroke rather than the
+     * same one — measured on the tablet at 105 052 pixels per million for the
+     * pencil, one tenth of the page — and undo, redo, moving a stroke, changing
+     * its colour and zooming in would each have quietly altered the drawing
+     * with nothing to say which of them did it.
+     *
+     * Two changes make it a function instead:
+     *
+     * - The seed is an **input**. `StrokeRecord.seed` holds it, the commit path
+     *   writes it at pen-down, and a replay passes it back.
+     * - The per-dab random is a **hash of (seed, dab index, channel)** rather
+     *   than the next value of a stream. See [randomFor].
+     *
+     * [dabBase] is the index the first dab of this run carries, and it is the
+     * half that is easy to leave out. Ik8 splits a stroke in two; the tail half
+     * has to go on drawing what it drew as part of the parent, which means its
+     * first dab must be dab *k* of the original and not dab 0 of a new stroke.
+     * With the hash and a `dabBase` of *k*, it is.
+     */
+    fun begin(colorArgb: Int, seed: Int, dabBase: Int = 0) {
+        require(dabBase >= 0) { "dabBase was $dabBase" }
         if (stabilizer.strength != pen.stabilization) {
             stabilizer = Stabilizer(pen.stabilization)
         }
         stabilizer.reset()
         tilt.reset()
-        // Seeded from the stroke counter, so two strokes differ but a replay of
-        // the same stroke does not.
-        strokeSeed++
-        randomState = 0x9E3779B9.toInt() * strokeSeed + 0x85EBCA6B.toInt()
-        strokeRandom = nextRandom()
+        strokeSeed = seed
+        this.dabBase = dabBase
+        if (seed >= nextSeed) nextSeed = seed
+        // The stroke-wide draw is channel [CH_STROKE] at a dab index of -1, so
+        // it cannot collide with any dab's own draw however long the stroke is.
+        strokeRandom = randomFor(-1, CH_STROKE)
         lastSpeed = 0f
         lastDirection = 0f
         lastSampleNanos = 0L
@@ -327,7 +371,8 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
             c.orientationRad = tilt.orientationRad
             c.speedDocPxPerMs = lastSpeed
             c.directionRad = lastDirection
-            c.randomDab = nextRandom()
+            val index = dabBase + dabCount
+            c.randomDab = randomFor(index, CH_DAB)
             c.randomStroke = strokeRandom
             // Size through the option when it has sensors, so tilt can widen
             // the mark the way laying a pencil over does. Without a sensor the
@@ -338,10 +383,10 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
             aspect = pen.aspect.valueFor(c).coerceIn(ASPECT_MIN, 1f)
             rotation = pen.rotation.valueFor(c)
             val jitter = pen.sizeJitter.valueFor(c)
-            if (jitter > 0f) radius *= 1f - jitter * nextRandom()
+            if (jitter > 0f) radius *= 1f - jitter * randomFor(index, CH_JITTER)
             val throwPx = pen.scatter.valueFor(c)
             if (throwPx > 0f) {
-                val a = nextRandom() * TWO_PI
+                val a = randomFor(index, CH_SCATTER) * TWO_PI
                 px += throwPx * cos(a)
                 py += throwPx * sin(a)
             }
@@ -417,15 +462,6 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
     }
 
     /**
-     * A deterministic 0..1 for scatter and jitter.
-     *
-     * Its own generator rather than `Math.random`, seeded per stroke, because
-     * the dab goldens have to be reproducible: a stroke replayed from the same
-     * samples must produce the same dabs, and a shared global generator makes
-     * that depend on what else in the process drew first. xorshift because it
-     * is four operations and this runs twice a dab.
-     */
-    /**
      * Speed and heading, from consecutive raw samples.
      *
      * Raw rather than smoothed on purpose: [Sensor.SPEED] is asking how fast
@@ -450,13 +486,36 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
         lastSampleNanos = eventTimeNanos
     }
 
-    private fun nextRandom(): Float {
-        var v = randomState
-        v = v xor (v shl 13)
-        v = v xor (v ushr 17)
-        v = v xor (v shl 5)
-        randomState = v
-        return (v ushr 8 and 0xFFFFFF).toFloat() / 0xFFFFFF.toFloat()
+    /**
+     * A deterministic 0..1 for [channel] of dab [index].
+     *
+     * **A hash and not a stream**, which is the whole of Ik2. A stream's value
+     * depends on how many draws came before it, so a dab's scatter depends on
+     * whether the brush also jitters, on whether the dab before it happened to
+     * take the `throwPx > 0f` branch, and on where in the stroke the render
+     * started. Every one of those is a way for a re-render to draw something
+     * else. A hash depends on nothing but its three arguments.
+     *
+     * The mixing is `fmix32` from MurmurHash3, applied to the three inputs
+     * folded together with odd constants. It is nine operations against
+     * xorshift's four, and it runs at most three times a dab against a dab that
+     * already builds a mask and blits it — `DabLoopBench` is where that claim
+     * would fail, and it does not.
+     *
+     * The channel is what keeps a scattered dab's angle independent of its own
+     * size jitter. Without it both would be the same number, and a brush that
+     * did both would scatter furthest exactly where it was thinnest.
+     */
+    private fun randomFor(index: Int, channel: Int): Float {
+        var h = strokeSeed * -0x61c88647          // 2654435769, the golden ratio
+        h = h xor (index * -0x3361d2af)           // 2246822519
+        h = h xor (channel * -0x7ee3623b)         // 2166136261, FNV's offset basis
+        h = h xor (h ushr 16)
+        h *= -0x7a143595                          // 2246822507
+        h = h xor (h ushr 13)
+        h *= -0x3d4d51cb                          // 3266489909
+        h = h xor (h ushr 16)
+        return (h ushr 8 and 0xFFFFFF).toFloat() / 0xFFFFFF.toFloat()
     }
 
     /**
@@ -489,6 +548,18 @@ class StrokeBuilder(val pen: Brush = Brush()) : DabEmitter {
 
         /** The flattest a dab may get. Below this an ellipse is a line and the mask is empty. */
         const val ASPECT_MIN = 0.05f
+
+        /**
+         * The four independent random draws, as channel numbers.
+         *
+         * They are separate values rather than draws from one stream so that
+         * adding a fifth never moves the other four — which would change every
+         * drawing already on the device. See `randomFor`.
+         */
+        const val CH_DAB: Int = 0
+        const val CH_JITTER: Int = 1
+        const val CH_SCATTER: Int = 2
+        const val CH_STROKE: Int = 3
 
         private const val TWO_PI = (2.0 * Math.PI).toFloat()
 

@@ -563,11 +563,13 @@ class InkSurfaceView(
         val right = left + PATCH_DOC
         val bottom = top + PATCH_DOC
         val out = ArrayList<VectorStress.Record>()
-        for (record in scene) {
+        for ((i, record) in scene.withIndex()) {
             // Built rather than estimated, because the question is whether the
             // stroke's *ink* meets the patch and only the dab loop knows how
-            // wide the ink is. The building is setup and is not timed.
-            val bounds = build(record, builder).bounds
+            // wide the ink is. The building is setup and is not timed. The seed
+            // is the one `renderScene` will use, so the bounds measured here is
+            // the bounds of the stroke that will actually be drawn.
+            val bounds = build(record, builder, IK0_SEED_BASE + i).bounds
             if (bounds.right >= left && bounds.left <= right &&
                 bounds.bottom >= top && bounds.top <= bottom
             ) {
@@ -588,8 +590,12 @@ class InkSurfaceView(
     ): Pair<Double, Int> {
         var dabs = 0
         val t0 = System.nanoTime()
-        for (record in scene) {
-            val stroke = build(record, builder)
+        for ((i, record) in scene.withIndex()) {
+            // The seed is the stroke's index, which is what makes drawing the
+            // scene twice the same drawing twice. Before Ik2 the builder took
+            // its seed from a counter, and `driftOf` measured the pencil at
+            // 105 052 pixels per million because of it.
+            val stroke = build(record, builder, IK0_SEED_BASE + i)
             dabs += stroke.dabCount
             stampStroke(stroke, into)
         }
@@ -650,8 +656,8 @@ class InkSurfaceView(
     }
 
     /** One record through the real builder. The heart of what Ik0 prices. */
-    private fun build(record: VectorStress.Record, builder: StrokeBuilder): Stroke {
-        builder.begin(inkColorArgb)
+    private fun build(record: VectorStress.Record, builder: StrokeBuilder, seed: Int): Stroke {
+        builder.begin(inkColorArgb, seed)
         for (i in 0 until record.count) {
             val nanos = downNanos + (record.timeMillis(i) * 1_000_000f).toLong()
             builder.addTilt(record.tilt(i), record.orientation(i), nanos)
@@ -2870,6 +2876,14 @@ class InkSurfaceView(
          * one.
          */
         private const val PATCH_DOC: Float = 1000f
+
+        /**
+         * Where the re-render bench's stroke seeds start. Arbitrary and fixed:
+         * what matters is that stroke *i* of one run gets the same seed as
+         * stroke *i* of the run it is compared against, which is what makes
+         * `driftOf` a measurement of the engine rather than of a counter.
+         */
+        private const val IK0_SEED_BASE: Int = 700_000
 
 
         /**
