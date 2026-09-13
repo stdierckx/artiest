@@ -302,7 +302,7 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 |---|---|---|---|---|---|
 | **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
 | **Ik13** | **DONE.** `GuideSet`, `Guideline`, `NearestGuide`, `GuideOverlay`, `GuideHandles`, the guides panel, `StrokeRecord.guide` and format 3 on both files. See **What Ik13 built**. | `:app` | **High** | Ik12 | 8–12 |
-| **Ik14** | **DONE, except the curve.** `ParallelGuide` and `EllipseGuide`, and the `Guide.begin` the first of them needed. The straight ruler and the falloff came with Ik13 and Ik12. See **What Ik14 built**. | `:engine`, `:app` | Med | Ik13 | 5–8 |
+| **Ik14** | **DONE.** `ParallelGuide`, `EllipseGuide`, `CurveGuide`, the `Guide.begin` the first needed, and *Trace that stroke*. The straight ruler and the falloff came with Ik13 and Ik12. See **What Ik14 built**. | `:engine`, `:app` | Med | Ik13 | 5–8 |
 | **Ik15** | **Perspective:** a horizon, one to three vanishing points, rays, infinitising a point, an isometric grid, and the ray-choice rule — whichever ray is closest to the stroke's own direction, with a manual override. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
 | **Ik16** | The feel pass on the tablet, by the person holding the pen, and the reconcile of this document against what was measured. | device, docs | Low | all | 1–2 |
 
@@ -1386,12 +1386,35 @@ stroke drawn against a parallel ruler re-renders exactly and **nothing extra is
 stored to make it so** — which is the one place Ik13's guide table did not have
 to grow.
 
+### The curve, which is items 12 and 15 at once
+
+`docs/guides-plan.md` lists *curve guide* and *guide from a drawn stroke* as two
+entries, and they are one: the interesting half of a French curve is not
+projecting onto a polyline, it is **getting the polyline**, and the honest
+answer to "where would a default French curve go" is *you draw one*. Ik7 picks a
+stroke and Ik1 keeps its centreline, so the panel grows one button and the
+feature is the join between two that already existed.
+
+Two things had to give, and both were the float-array geometry paying off a
+second time. `GuideKind.points` gained `ANY`, because a curve's point count is
+its shape rather than a property of its kind — and only the model and the codec
+branch on it. `GuideKind.handles` is new and false for the curve: a traced curve
+has hundreds of points, a knob on each would bury it, and a French curve is a
+thing you *slide* rather than reshape.
+
+It clamps at its ends. The line follows the curve and stops where the curve
+stops, which reads as a stop and not a blob because the dab emitter spaces by
+arc length. Answering false past the end instead would jump the ink from the end
+of the curve to wherever the hand had got to — a kink at the moment the hand is
+going fastest.
+
 ### What is left
 
-The curve guide (item 12) and "guide from a drawn stroke" (item 15), which are
-the same item twice: the interesting half of a French curve is not projecting
-onto a polyline, it is *getting the polyline*, and Ik7 already picks a stroke
-whose centreline is one. That is the cheap way in and it is not built.
+Nothing in Ik14. The four kinds `docs/guides-plan.md` asks for at Tier 1 — 8,
+10, 12 and 13 — are built, item 14's falloff came with Ik12's `Snap`, and item
+15 came free with the curve. Item 9's 2D grid and item 11's radial ruler are not
+built and are each one `buildGuide` branch and one `outline` branch, which is
+the price the framework was designed to make them cost.
 
 ## The Inker workspace, which is what all of this was for
 
