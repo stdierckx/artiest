@@ -256,7 +256,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | **Ik0** | **DONE, and it refuted something.** `VectorStress` beside `StrokeStress`: draw N strokes through the real path, then re-render the whole sheet from the records and report the cost. On the tablet. See **What Ik0 measured**. | `:app`, device | Low | — | 1 |
-| **Ik1** | `StrokeRecord`, `StrokeCodec`, the packed sample buffer, the derived polyline, the grid index. Pure, JVM, no pixels. | `:engine` | Low | — | 4–6 |
+| **Ik1** | **DONE.** `StrokeRecord`, `SampleLog`, `StrokeCodec`, `StrokePolyline`, `StrokeGrid`, `IdList`, and `Bounds.intersects`. Pure, JVM, no pixels. See **What Ik1 built**. | `:engine` | Low | — | 4–6 |
 | **Ik2** | Determinism: seed as an input, per-dab random as a hash of (seed, dab index), `dabBase`. Golden test across processes. **Ik0 priced the problem**: a nib with no scatter and no jitter is already deterministic, and the pencil differs by 105 052 pixels per million. | `:engine`, `:app` | Med | Ik1 | 2–3 |
 | **Ik3** | `VectorSheet`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, and the commit path appending a record beside the pixels it already stamps. A vector sheet you can draw on, that looks like a raster sheet and behaves like one. | `:app` | Med | Ik1 | 5–7 |
 | **Ik4** | Re-render: damage rectangles, the redraw loop, the throttle, and the clip table. Nothing visible yet — the sheet can be rebuilt and is proved identical to what drawing it produced. **Ik0 moved this item's centre of gravity**: the rectangle is the design, it has to be tight, and the rebuild opens *one* scratch buffer for the whole patch rather than one per stroke. | `:app` | **High** | Ik3, Ik2 | 5–8 |
@@ -438,6 +438,85 @@ it.
   stalled, which smells of large-bitmap allocation churn rather than compute.
   The second run, with the same code and two counts, did the same work per nib
   in seconds. Worth knowing before Ik4 opens buffers in a loop.
+
+## What Ik1 built
+
+> 2026-09-13. `:engine`, `be.thalos.artiest.engine.ink`, 48 tests, no device.
+
+Five types and one method, and the numbers the plan predicted came out where it
+said they would.
+
+| Type | What it is |
+|---|---|
+| `StrokeRecord` | The value: id, brush table index, colour, erase, seed, `dabBase`, clip index, painted bounds, and the packed samples. Immutable; every edit is a new record. |
+| `SampleLog` | The growing buffer samples are appended to while the pen is down, reset rather than reallocated, packed at pen-up. |
+| `StrokeCodec` | Both layers of the format: the nine-bytes-a-sample packing, and the file `strokes/<n>.ink` will be. |
+| `StrokePolyline` | The derived centreline — thinned to 2 document pixels, a half-width at each point — that a tap is answered against. |
+| `StrokeGrid`, `IdList` | The uniform index, 256 px cells, plus the unboxed id list a query fills without allocating. |
+| `Bounds.intersects` | Closed rather than half-open, so a zero-area rectangle still meets things. The one new method on an existing type. |
+
+### The packing, and the drift that is not in it
+
+Nine bytes a sample after an eight-byte origin, exactly as predicted: x and y as
+int16 deltas at 1/16 document pixel, pressure, tilt and orientation as bytes,
+and time as a uint16 delta at 1/8 ms. A three-second stroke at the pen's own
+321.75 Hz is 965 samples and **8 693 bytes**, against the 8.7 KB the plan
+reserved. Ik0's 300-stroke page is **663 KiB** of samples and **678 KiB** as a
+file with every header included.
+
+The one thing the plan did not say, and the thing most likely to have gone wrong
+unnoticed: **a delta code that rounds each difference on its own drifts.** The
+error random-walks, so a thousand-sample stroke ends somewhere the hand did not
+put it — and it is invisible on any stroke short enough to write a test for by
+hand. The encoder therefore quantises the *absolute* coordinate and stores the
+difference of the quantised values, so the decoder recovers the quantised
+absolute exactly and the error is half a quantum at every sample whatever the
+length. `StrokeRecordTest` pins it at a thousand samples along a path whose
+steps are deliberately 0.6 of a quantum, which is the case that drifts fastest.
+
+The other three channels are quantised against what *consumes* them rather than
+against what produces them, which is what makes a byte defensible:
+
+- **Orientation to 1.41 degrees**, which is finer than `MaskTolerance`'s own
+  rotation bucket of 2.81 degrees. So a chisel nib replayed from a record asks
+  the mask cache for the same mask it asked for live.
+- **Pressure to 1/255**, which moves a 24 px nib by 0.09 px — a quarter of the
+  mask cache's 3% size bucket.
+- **Tilt to 0.35 degrees.**
+
+**What is still open, and it belongs to Ik4.** Position is stored to 1/16 px, so
+a replayed dab can sit up to 1/32 px from where the live one sat. Whether that
+is *visible* is a different question from whether it is small, and nobody has
+counted it. `StrokeCodec.VERSION` is the escape hatch: a finer fixed point is one
+constant and a version bump, and old files then refuse to load rather than
+decoding as a different drawing.
+
+### The index, measured against Ik0's own page
+
+A tap on a 300-stroke page laid out the way `VectorStress` lays one out measures
+**at most 12 strokes**, not 300 — asserted over a sweep of 380 tap positions
+rather than at one lucky point. 3300x2160 in 256 px cells is 13 by 9, the 117
+the plan's memory table counted.
+
+The grid holds every stroke's bounds itself rather than being handed them back
+at removal time. That is four floats a stroke against the failure it prevents: a
+caller that passes a slightly different rectangle to `remove` leaves the id filed
+in a cell forever, and the symptom is a deleted stroke that a tap still selects,
+in a drawing that has since been saved a hundred times.
+
+### The hit band is wider than the stroke, on purpose
+
+`StrokePolyline` stores `Brush.sizeFor(pressure, elapsed) / 2` at each point,
+which is the nominal size response. A brush that scatters paints up to
+`scatter.max` outside that band and a size driven by tilt or speed can evaluate
+above it, so `maxOvershoot` is added to every hit test. Wrong in the safe
+direction costs a tap that selects a stroke whose ink is a pixel away; wrong in
+the other direction costs a tap on visible ink that selects nothing, which is
+the one users report.
+
+It is added **at the test and not baked into the stored band**, because Ik8's
+split has to be exact about where the ink is and merging the two numbers would
+quietly widen it.
 
 ## Stop conditions
 

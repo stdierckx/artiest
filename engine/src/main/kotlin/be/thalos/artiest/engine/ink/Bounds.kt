@@ -94,6 +94,29 @@ class Bounds private constructor(
     }
 
     /**
+     * True when the two rectangles share any point, edges included.
+     *
+     * **Closed rather than half-open**, and the two callers that care both want
+     * it that way. A zero-area [Bounds] is legal — one zero-radius dab — and a
+     * strict comparison would make it meet nothing, so a tap could never pick
+     * it and a redraw would never include it. And the users of this are coarse
+     * filters: `StrokeGrid` narrowing a damage rectangle down to the strokes
+     * worth re-rendering, and a hit test narrowing to the strokes worth
+     * measuring. Both are allowed to answer yes one pixel too often; neither is
+     * allowed to answer no.
+     *
+     * [EMPTY] meets nothing, including itself, through `left > right`.
+     */
+    fun intersects(other: Bounds): Boolean =
+        !isEmpty && !other.isEmpty &&
+            left <= other.right && other.left <= right &&
+            top <= other.bottom && other.top <= bottom
+
+    /** True when the point lies in the rectangle, edges included. See [intersects]. */
+    fun contains(x: Float, y: Float): Boolean =
+        !isEmpty && x >= left && x <= right && y >= top && y <= bottom
+
+    /**
      * The integer pixel rectangle this covers, clipped to a [clipWidth] x
      * [clipHeight] page, written into [out] at [offset] as left, top, right,
      * bottom — `android.graphics.Rect`'s constructor order, so `:app` copies it
