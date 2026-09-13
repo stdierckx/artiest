@@ -301,8 +301,8 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
 | **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
-| **Ik13** | **The guide framework.** `GuideSet` on the document, `GuideOverlay` as a second pass in the chrome beside `SelectionOverlay`, handles that are dragged **in arrange mode only**, on/off per guide, and persistence in `project.json`. | `:app` | **High** | Ik12 | 8–12 |
-| **Ik14** | The rulers: straight and infinite, parallel, ellipse, curve, and **snap falloff** — strength that fades with distance instead of an on/off, which is what separates a ruler you lean on from one that fights you. | `:engine`, `:app` | Med | Ik13 | 8–12 |
+| **Ik13** | **DONE.** `GuideSet`, `Guideline`, `NearestGuide`, `GuideOverlay`, `GuideHandles`, the guides panel, `StrokeRecord.guide` and format 3 on both files. See **What Ik13 built**. | `:app` | **High** | Ik12 | 8–12 |
+| **Ik14** | The rulers: parallel, ellipse and curve. The straight one and **snap falloff** came with Ik13 — the falloff because `Snap` carried it from Ik12, and the straight ruler because a framework with nothing standing on it cannot be tested. Each remaining kind is one `buildGuide` branch and one `outline` branch. | `:engine`, `:app` | Med | Ik13 | 5–8 |
 | **Ik15** | **Perspective:** a horizon, one to three vanishing points, rays, infinitising a point, an isometric grid, and the ray-choice rule — whichever ray is closest to the stroke's own direction, with a manual override. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
 | **Ik16** | The feel pass on the tablet, by the person holding the pen, and the reconcile of this document against what was measured. | device, docs | Low | all | 1–2 |
 
@@ -1206,6 +1206,161 @@ exactly on it.
 jumps back"*, and the tail is the part of the stroke the eye is on. The fork
 that copies the stabilizer now has a twin that applies the snap, and
 `drawPredictedTail` uses it.
+
+## What Ik13 built
+
+> 2026-09-13. `:app`, plus `NearestGuide` in `:engine`. Seventy-two tests and a
+> tablet. Two commits: the model and the format, then the chrome.
+
+`docs/guides-plan.md` prices the guide framework at 8–12 days *before item 16
+draws a single ray*, and this plan took that price. What it did not price, and
+what turned out to be the half that mattered, is that **a guide is a filter on
+the input and a stroke has to remember which filter it was drawn through**.
+
+### The three types, and why the geometry is a float array
+
+| | What it is | Where |
+|---|---|---|
+| `Guideline` | A kind, a list of document points, and whether it is on | `:app doc` |
+| `GuideSet` | The guides on the document, and one `Snap` for the page | `:app doc` |
+| `NearestGuide` | Several guides as one: whichever projects nearest wins | `:engine guide` |
+
+The obvious shape for `Guideline` is one subclass per kind with named fields — a
+ruler with two endpoints, an ellipse with a centre and two radii. It is not what
+is there, and the reason is the three things that have to be written **once**
+rather than once per kind: the codec, the overlay's handles, and dragging. All
+three want *the points of this guide* and none of them wants to know what the
+points mean; a `when` over kinds in each of them is three places to forget
+Ik15's vanishing point. What is genuinely kind-specific is two methods —
+`buildGuide` and `outline` — and those are the two that differ.
+
+One kind ships. `RULER` is `LineGuide` with two draggable ends, which is items
+7 and 8 of `docs/guides-plan.md` together, and two points rather than a point
+and an angle because that is what a hand edits.
+
+`NearestGuide` exists because `StrokeBuilder` takes one `Snap` and a page can
+carry a horizon, two vanishing points and a ruler at once. Its own KDoc says
+where nearest-projection stops being enough, and it is worth repeating here
+because it is Ik15's first problem: **with three vanishing points live, every
+ray of every point passes through the pen sooner or later**, so "nearest ray" is
+nearly always the ray you are standing on rather than the one you are drawing
+along. Item 18's rule — *closest to the stroke's own direction* — needs
+something the `Guide` interface deliberately does not have, which is where the
+stroke came from. That belongs to the perspective guide itself, and
+`NearestGuide` is what it will be **one of** rather than what it will replace.
+
+### A stroke keeps the ruler it was drawn against, and it had to
+
+This is the part the plan did not see coming, and it is not optional.
+
+A record stores the **raw** samples. The snap is applied on the way to the dabs,
+between the smoothing and the curve fit — which is Ik12's whole argument and is
+not negotiable. So a record that did not name its guide would re-render *off*
+the ruler the first time anything repainted the rectangle it is in. What repaints
+a rectangle is an undo three strokes later: silently, and nowhere near the thing
+that caused it.
+
+That is word for word the failure the clip table was invented to prevent, so it
+gets the clip table's answer: `StrokeRecord.guide`, an index into a per-sheet
+table of `GuideText` lines, `NO_GUIDE` for the freehand stroke that is nearly
+all of them. Interned **whole** rather than per ruler, because every stroke of a
+sitting is drawn against the same set — a page of inking against one ruler is
+one table entry. `StrokeCodec` goes to version 3 and `ProjectJson` to format 3;
+a version 2 file decodes with `NO_GUIDE`, and that is not a default standing in
+for a lost value, because there was no guide to draw against.
+
+**The stabilizer needs no such field**, and the reason is why the guide is the
+only filter with the problem: smoothing is a weighted average of past points, an
+affine map distributes over one, so the two commute. A projection does not.
+
+That same fact is the whole of why a dragged stroke needs its ruler dragged with
+it. A record stores the mapped raw samples, so a rebuild computes
+`snap(smooth(M·x))`; that equals `M·snap(smooth(x))` only when the guide is
+mapped too. Leave it alone and a moved line springs back onto the ruler it was
+drawn along, the first time anything repaints it. `GuideText.mapSnap` is the
+twenty lines that fix it, and the reach scales with the stroke because a reach
+is a distance in document pixels.
+
+`StrokePolyline` takes the snap for the same reason pointing the other way: it
+is meant to be *where the ink is*, and the ink of a ruled stroke is on the ruler.
+Without it a tap on a ruled line misses by however far the hand was from the
+ruler, and Ik7's highlight is drawn beside the line rather than along it.
+
+### The one interface decision, which was made in advance
+
+`docs/guides-plan.md` trap 4 says dragging a guide competes with panning and
+that deciding it late means rewriting it. This plan decided it before writing a
+line — **handles in arrange mode, and only there** — and the section above that
+says so is unchanged by what was built.
+
+What is worth adding is how it coexists with the dock, because arrange mode is
+*also* where toolbars are dragged and shapes are painted. `GuideHandles` uses
+`awaitEachGesture` rather than `detectDragGestures` and tests the **down** event
+against the guides before consuming it. A layer that swallowed every pointer
+over the canvas in arrange mode would have broken both other things.
+
+### What the tablet found, which was the same defect twice
+
+Both are about *saying so*, and both are now tests.
+
+**A drawing opened with its guides live and nothing on screen to say why.** The
+pen really was snapping. `GuideSet` is a plain mutable object — deliberately: it
+is read on the render thread at pen-down and a Compose snapshot would not
+survive that crossing — so the overlay and the panel both hang off a counter,
+and nothing bumped it when a project arrived.
+
+**Laying a ruler down was not a change worth saving.** `ProjectSaver.dirty` is a
+poll rather than a hook, and its KDoc says why: every alternative means
+remembering to call something from a stroke, a clear, an undo, a layer
+operation, an import *and whatever the next feature adds*. The guides are the
+next feature, they are the page's rather than a sheet's, and they touch no layer
+and no stroke list — so the poll answered "nothing to write" and a grid somebody
+spent five minutes placing was gone on the next launch. The fix is one counter
+compared beside the eight longs, which is what the poll was shaped for.
+
+### What is left for Ik14
+
+The framework carries `strength` and `reachDoc` already and the panel has both
+on sliders, so item 14 — snap falloff — is **done** rather than pending; what
+Ik14 owns is the other guide *kinds*, and each of them is `Guideline` plus one
+`buildGuide` branch and one `outline` branch.
+
+There is no per-guide strength, and that is a deliberate absence rather than an
+oversight: a perspective grid to lean on and a ruler to obey, on one page, is a
+real thing to want, and it is not there because nothing today would read it.
+
+## The Inker workspace, which is what all of this was for
+
+> 2026-09-13, on the user's ask: *"create a nice worklayout for the inker."*
+
+`ShippedWorkspaces` has said since workspaces landed that *Inker*, *Painter*,
+*Webtoon* and *Animator* ship when the tools behind them do and not before,
+because **a workspace with a name and nothing behind it is the one way that
+feature can make the app feel worse instead of better**. Ik1–Ik13 are what was
+missing. Before them, *Select* meant pixels and there was nothing to lean a line
+against; *Inker* would have been *Sketcher* with the buttons in another order.
+
+Four bars, and the three arguable decisions are argued in the KDoc rather than
+left as taste:
+
+- **No pencil and no soft eraser on the bar.** Ink is a hard edge, and a soft
+  eraser fades a passage — which is what the end of an ink line must not do.
+  Both are still offered and both are one tap away on the shelf; the two cells
+  buy the marquee and the selection panel, on the side the free hand rests on.
+- **The marquee is in the tool column**, which is the one place this disagrees
+  with `DockLayout.STARTER`. On an ink sheet the marquee picks *strokes*, so
+  rubbing a line back to its junction is done with it. That is a tool.
+- **Guides are in the tool column too**, and the same disagreement for the same
+  reason: an inker lays a ruler down and inks along it.
+- **Stabilisation is the first slider**, where Sketcher has size first, and it
+  arrives at 0.55 against the app's own 0.15. A sketcher wants the wobble; an
+  inker is trying to get rid of it.
+
+It is also the first workspace with anything in its `defaults`, which made
+`WorkspaceStore`'s long-standing promise — *"apply whichever defaults have a
+subsystem to receive them"* — true for the first time. **On arrival and not on
+every launch**: a `LaunchedEffect` keyed on the workspace would re-apply them
+each time the app opened and quietly undo the tuning done in the session before.
 
 ## Stop conditions
 
