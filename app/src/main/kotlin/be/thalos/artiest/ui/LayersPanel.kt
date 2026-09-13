@@ -96,6 +96,7 @@ fun LayersButton(
     maxLayers: Int,
     onOp: (LayerOp) -> Unit,
     onAdd: () -> Unit,
+    onAddVector: () -> Unit,
     onDuplicate: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
     onFixate: (Cell) -> Unit,
@@ -132,6 +133,7 @@ fun LayersButton(
                 maxLayers = maxLayers,
                 onOp = onOp,
                 onAdd = onAdd,
+                onAddVector = onAddVector,
                 onDuplicate = onDuplicate,
                 onDismiss = { open = false },
                 onFixate = {
@@ -150,6 +152,7 @@ private fun LayersPanel(
     maxLayers: Int,
     onOp: (LayerOp) -> Unit,
     onAdd: () -> Unit,
+    onAddVector: () -> Unit,
     onDuplicate: () -> Unit,
     onDismiss: () -> Unit,
     onFixate: () -> Unit,
@@ -173,6 +176,7 @@ private fun LayersPanel(
                 maxLayers = maxLayers,
                 onOp = onOp,
                 onAdd = onAdd,
+                onAddVector = onAddVector,
                 onDuplicate = onDuplicate,
             ) {
                 // The whole of "fixate" for this panel, and it is the same one
@@ -218,6 +222,7 @@ private fun LayersBody(
     maxLayers: Int,
     onOp: (LayerOp) -> Unit,
     onAdd: () -> Unit,
+    onAddVector: () -> Unit,
     onDuplicate: () -> Unit,
     modifier: Modifier = Modifier,
     listMaxHeight: Dp = LIST_MAX_HEIGHT,
@@ -351,6 +356,12 @@ private fun LayersBody(
                     onClick = onAdd,
                 )
                 PanelAction(
+                    ToolIcons.addVector,
+                    "New ink layer",
+                    enabled = layers.size < maxLayers,
+                    onClick = onAddVector,
+                )
+                PanelAction(
                     ToolIcons.duplicate,
                     "Duplicate layer",
                     enabled = layers.size < maxLayers,
@@ -389,6 +400,7 @@ fun LayersPanelCard(
     maxLayers: Int,
     onOp: (LayerOp) -> Unit,
     onAdd: () -> Unit,
+    onAddVector: () -> Unit,
     onDuplicate: () -> Unit,
     onOpenChange: (Boolean) -> Unit,
 ) {
@@ -403,6 +415,7 @@ fun LayersPanelCard(
             maxLayers = maxLayers,
             onOp = onOp,
             onAdd = onAdd,
+                onAddVector = onAddVector,
             onDuplicate = onDuplicate,
             modifier = Modifier.fillMaxSize(),
             // Whatever is left once the fixed parts have had theirs. The number

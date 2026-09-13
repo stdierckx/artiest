@@ -101,6 +101,22 @@ class LayerStack(
 
         /** Whether [thumbnail] is older than the pixels. See [refreshThumbnails]. */
         var thumbDirty: Boolean = true
+
+        /**
+         * The strokes that made these pixels, or null for an ordinary sheet.
+         *
+         * **One nullable field is the whole of `docs/vector-plan.md`'s "vector
+         * layer type".** Nothing downstream of a layer changes: the compositor,
+         * the exporter, the thumbnails, the blend modes, the `.ora` write and
+         * the project file all go on reading [layer], because the pixels are
+         * still there and are still the truth about what the sheet looks like.
+         * What the sheet gains is the ability to say which strokes painted any
+         * rectangle of itself.
+         *
+         * Render thread, like everything else on this class. The UI sees
+         * `LayerInfo.vector`, which is a boolean.
+         */
+        var vector: VectorSheet? = null
     }
 
     private val entries = ArrayList<Entry>()
@@ -219,6 +235,19 @@ class LayerStack(
                 // left above.
                 val at = activePosition + 1
                 entries.add(at, Entry(nextId++, op.layer, op.name, 1f, true))
+                activeIndex = at
+                true
+            }
+        }
+
+        is LayerOp.AddVector -> {
+            if (entries.size >= MAX_LAYERS) {
+                false
+            } else {
+                val at = activePosition + 1
+                val entry = Entry(nextId++, op.layer, op.name, 1f, true)
+                entry.vector = VectorSheet(widthPx, heightPx)
+                entries.add(at, entry)
                 activeIndex = at
                 true
             }
@@ -441,7 +470,12 @@ class LayerStack(
         val list = ArrayList<LayerInfo>(entries.size)
         for (i in entries.indices) {
             val e = entries[i]
-            list.add(LayerInfo(e.id, e.name, e.opacity, e.visible, e.blend, e.thumbnail))
+            list.add(
+                LayerInfo(
+                    e.id, e.name, e.opacity, e.visible, e.blend, e.thumbnail,
+                    vector = e.vector != null,
+                )
+            )
         }
         snapshot = list
         activeId = active.id
@@ -534,6 +568,15 @@ data class LayerInfo(
     val visible: Boolean,
     val blend: LayerBlend,
     val thumbnail: Bitmap?,
+    /**
+     * Whether this sheet keeps the strokes drawn on it. See
+     * `LayerStack.Entry.vector`.
+     *
+     * A boolean and not the sheet: the panel needs to show which sheets are
+     * which, and handing the UI thread a `VectorSheet` would hand it a mutable
+     * object the render thread is editing.
+     */
+    val vector: Boolean = false,
 )
 
 /**
@@ -569,6 +612,19 @@ sealed interface LayerOp {
 
     /** A new empty sheet above the active one. */
     class Add(val layer: Layer, val name: String) : Carrying {
+        override val carried: List<Layer> get() = listOf(layer)
+    }
+
+    /**
+     * The same, but the sheet keeps the strokes drawn on it.
+     *
+     * Its own operation rather than a flag on [Add], because the two produce
+     * sheets that behave differently for the rest of the drawing's life and a
+     * boolean parameter at the call site is the kind of thing that gets passed
+     * the wrong way round once. The [VectorSheet] is built on the render thread
+     * where it will live, so nothing about it crosses a thread.
+     */
+    class AddVector(val layer: Layer, val name: String) : Carrying {
         override val carried: List<Layer> get() = listOf(layer)
     }
 

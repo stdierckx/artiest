@@ -913,6 +913,26 @@ object ToolIcons {
         }
     }
 
+    /**
+     * A sheet with a stroke across it: a layer that keeps what was drawn on it.
+     *
+     * A plus in the corner rather than a second glyph, so that it reads as
+     * "new, of this kind" beside [add] rather than as a different action.
+     */
+    val addVector: ImageVector by lazy {
+        icon("add-vector") {
+            stroke {
+                rect(3.2f, 3.2f, 16.4f, 20.8f)
+                moveTo(6.4f, 16.8f)
+                curveTo(9.2f, 8.4f, 12.4f, 18.4f, 15.2f, 9.6f)
+                moveTo(19.6f, 3.6f)
+                lineTo(19.6f, 10.4f)
+                moveTo(16.2f, 7f)
+                lineTo(23f, 7f)
+            }
+        }
+    }
+
     /** Two sheets, one behind the other. Duplicate. */
     val duplicate: ImageVector by lazy {
         icon("duplicate") {

@@ -258,7 +258,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik0** | **DONE, and it refuted something.** `VectorStress` beside `StrokeStress`: draw N strokes through the real path, then re-render the whole sheet from the records and report the cost. On the tablet. See **What Ik0 measured**. | `:app`, device | Low | — | 1 |
 | **Ik1** | **DONE.** `StrokeRecord`, `SampleLog`, `StrokeCodec`, `StrokePolyline`, `StrokeGrid`, `IdList`, and `Bounds.intersects`. Pure, JVM, no pixels. See **What Ik1 built**. | `:engine` | Low | — | 4–6 |
 | **Ik2** | **DONE, and the pencil is at zero.** Seed as an input, per-dab random as a hash of (seed, dab index, channel), `dabBase`. See **What Ik2 changed**. | `:engine`, `:app` | Med | Ik1 | 2–3 |
-| **Ik3** | `VectorSheet`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, and the commit path appending a record beside the pixels it already stamps. A vector sheet you can draw on, that looks like a raster sheet and behaves like one. | `:app` | Med | Ik1 | 5–7 |
+| **Ik3** | **DONE.** `VectorSheet`, `PendingStroke`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, the commit path appending a record beside the pixels, and **`VectorSheet.intact`** — which is the part the plan did not foresee. See **What Ik3 built**. | `:app` | Med | Ik1 | 5–7 |
 | **Ik4** | Re-render: damage rectangles, the redraw loop, the throttle, and the clip table. Nothing visible yet — the sheet can be rebuilt and is proved identical to what drawing it produced. **Ik0 moved this item's centre of gravity**: the rectangle is the design, it has to be tight, and the rebuild opens *one* scratch buffer for the whole patch rather than one per stroke. | `:app` | **High** | Ik3, Ik2 | 5–8 |
 | **Ik5** | `DocStep`, the exchange moved onto the step, `VectorStep`, and undo/redo of a vector edit. | `:app` | Med | Ik4 | 4–6 |
 | **Ik6** | Persistence: `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2 with a `kind` per sheet, save on the same debounce, load into `LayerOp.Open`. **The PNG stays** and is still written — see below. | `:app` | Med | Ik1, Ik3 | 4–6 |
@@ -355,6 +355,13 @@ against W0's measured 4.4 GiB free.
 | **Pen** | direct, `drawCircle` | 3.6 – 3.8 | **1.09 s** | 281 ms (70 of 300) | **0** |
 | **Pencil** | indirect, grain | 20.8 – 21.4 | **6.41 s** | 1.69 s (72 of 300) | **105 052 ppm** |
 | **Ink-2 Fineliner** | indirect | 37.9 – 41.0 | ~11 s (2.27 s at 60) | 664 ms (15 of 60) | 0 |
+| **Chalk Details** (tipped) | indirect, tip | 25.9 – 26.1 | **7.82 s** | 2.04 s (72 of 300) | 0 |
+| **Airbrush Soft** (600 px) | indirect | 8.4 | 2.54 s | 1.30 s (146 of 300) | 0 |
+
+> The last two rows were measured on 2026-09-13 with Ik2's build, which is why
+> their drift reads 0 where the pencil's original run read 105 052. The pencil
+> and the pen were re-measured in the same run and their costs did not move.
+
 
 Per-stroke cost is flat with the count — the pen reads 3.80, 3.71 and 3.65 ms at
 100, 300 and 1000 strokes — so the rebuild is linear and these figures scale.
@@ -428,11 +435,18 @@ it.
 
 ### What Ik0 did not settle
 
-- **`chalk-details`, the tipped nib**, has no row. It was in the run that took a
-  quarter of an hour and never reached it; the run was restarted with two counts
-  instead of three and the tipped nib is still unmeasured. Wb5 shipped tipped
-  brushes after this plan was written, and a tip's mask is dearer to build than
-  an ellipse's, so it is an open number rather than an assumed one.
+- ~~**`chalk-details`, the tipped nib**, has no row.~~ **Measured, 2026-09-13,
+  with Ik2's build.** It is the dearest nib in the app: **26.0 ms a stroke**,
+  **7.82 s** to rebuild 300 strokes and **2.04 s** for the 1000 px patch, above
+  the pencil's 21.7 / 6.50 / 1.69. It lays 80 321 dabs against the pencil's
+  88 182, so once again the dab loop is not where the money goes — a tip's mask
+  is dearer to build than an ellipse's, and it is on the indirect path with a
+  scratch buffer and a composite per stroke like the pencil. It changes no
+  conclusion: damage rectangles were already the design, and this is the nib
+  that needs them most. The airbrush, measured in the same run, is **8.4 ms a
+  stroke** — cheap per stroke because a 600 px nib lays 2 418 dabs for 300
+  strokes, and dear per *pixel*, which is `docs/big-nib-plan.md`'s subject
+  rather than this one's.
 - **Why the first run was pathologically slow.** Four nibs at three counts spent
   fifteen minutes at about five per cent CPU — the render thread was running but
   stalled, which smells of large-bitmap allocation churn rather than compute.
@@ -580,6 +594,73 @@ and for the absence of any cycle up to a period of 64. And the scatter and
 jitter channels are checked for correlation — under 0.1 over 900 dabs — because
 a brush whose ink flies furthest exactly where the dab is thinnest looks like a
 deliberate effect and is a bug.
+
+## What Ik3 built
+
+> 2026-09-13. `:app`, `be.thalos.artiest.doc`, plus the commit path in
+> `InkSurfaceView`.
+
+An ink layer is made from the layers panel, drawn on exactly as any sheet is,
+and keeps what was drawn on it. The readout's `ink` line says how many strokes
+each one holds and what they cost.
+
+| What | Where |
+|---|---|
+| `VectorSheet` | The strokes in draw order, the brush table, the clip table, the grid. No pixels: the pixels are the `Layer` beside it, as they always were. |
+| `PendingStroke` | One stroke's input crossing from the UI thread, in `CommitQueue.Commit.Draw` beside the pixels. |
+| `LayerStack.Entry.vector` | One nullable field, which is the whole of `docs/vector-plan.md`'s "vector layer type". |
+| `LayerOp.AddVector`, `LayerInfo.vector` | A sheet that keeps strokes, and the panel knowing which sheets those are. |
+| `Document.vectorNote()` | The readout line. |
+
+### Why the record crosses the thread in two halves
+
+Three of a record's fields are the sheet's to assign — the id, the brush table
+index and the clip table index — and the sheet lives on the render thread. So
+the UI thread hands over the samples, the seed, the colour, the erase flag, the
+bounds and the brush **as text**, and the sheet interns the rest.
+
+That is also what makes `docs/inker-plan.md`'s risk-table line true rather than
+intended: *"the record names a table entry, not a library id; retuning a preset
+does not reach back."* A test moves `sizeMax` from 18 to 120 after the stroke is
+recorded and asserts the record still reads 18.
+
+The record is packed on **every** stroke, including on ordinary raster sheets
+where it is thrown away. The UI thread does not know which sheet the stroke will
+land on, so the choice was between six float writes a sample that are sometimes
+wasted and a boolean mirrored across a thread boundary that is sometimes stale.
+The first is cheap and cannot be wrong.
+
+### `VectorSheet.intact`, which the plan did not foresee
+
+Ik3 ships before Ik5 and Ik8, and there are three things that move a sheet's
+pixels without moving its records:
+
+- **Undo and redo**, which restore a rectangle through `PixelPatch`. Ik5's.
+- **A clear inside a selection**, which on a record list is a *partial erase* —
+  Ik8's split, not a deletion.
+- **Dropping floating pixels**, which paints something that was never a stroke.
+
+The pixels are the truth about what a sheet looks like; the records are what it
+can be *rebuilt* from. After any of the three they disagree, and a rebuild would
+repaint the drawing into something the user did not draw — the defect somebody
+finds months later in a file they have already sent somewhere.
+
+So a sheet that has had one of them done to it is **spoiled**, says so in the
+readout, and Ik4 will refuse to rebuild it. Spoiling is deliberately coarse —
+anything that spoils one sheet spoils all of them — because an over-cautious
+refusal costs a feature that has not shipped, and a missed one costs a drawing.
+A *whole* clear is the one pixel operation outside drawing that a record list
+can express exactly, so it empties the list and un-spoils.
+
+**Ik5 and Ik8 remove the three callers. When the last one goes, so does the
+flag.** It is not a permanent part of the design and it should not become one.
+
+### The one ordering rule
+
+The record is appended **after** the pixels land, not before. If stamping throws
+— an out-of-memory opening the scratch buffer is the real case — the record must
+not be left describing ink that is not on the page. The same invariant
+`Document.clearHistory` already keeps for the stroke bounds.
 
 ## Stop conditions
 

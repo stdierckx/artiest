@@ -189,12 +189,31 @@ class StrokeRecordTest {
         assertTrue(abs(out[StrokeRecord.STRIDE] - (StrokeCodec.MAX_STEP_DOC - 1f)) <= quantum)
     }
 
+    /**
+     * A backwards timestamp is **held, not refused**, and the asymmetry with
+     * the refusals above is the point: a NaN coordinate is a bug upstream that
+     * has to be found, while a glitched clock is something to absorb rather
+     * than a reason to lose the stroke the user just drew. Holding the previous
+     * time is also what makes `pack()` unable to throw on the commit path.
+     */
     @Test
-    fun `time going backwards is refused`() {
+    fun `time that goes backwards is held rather than costing the stroke`() {
         val log = SampleLog()
         log.add(0f, 0f, 1f, 0f, 0f, 10f)
         log.add(1f, 0f, 1f, 0f, 0f, 5f)
-        assertFailsWith<IllegalArgumentException> { log.pack() }
+        log.add(2f, 0f, 1f, 0f, 0f, 12f)
+        val out = FloatArray(3 * StrokeRecord.STRIDE)
+        recordOf(log.pack(), 3).decodeInto(out)
+        assertEquals(0f, out[5])
+        assertEquals(0f, out[StrokeRecord.STRIDE + 5])
+        assertEquals(2f, out[2 * StrokeRecord.STRIDE + 5], 0.2f)
+    }
+
+    @Test
+    fun `a negative sample time is still refused`() {
+        assertFailsWith<IllegalArgumentException> {
+            SampleLog().add(0f, 0f, 1f, 0f, 0f, -1f)
+        }
     }
 
     @Test

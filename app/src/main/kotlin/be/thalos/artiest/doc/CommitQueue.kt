@@ -43,8 +43,22 @@ class CommitQueue {
 
     /** One layer mutation. */
     sealed interface Commit {
-        /** Stamp [stroke] into the layer, in document space. */
-        class Draw(val stroke: Stroke) : Commit
+        /**
+         * Stamp [stroke] into the layer, in document space.
+         *
+         * [record] is the same stroke's *input*, packed, or null when there is
+         * none to keep. It travels here rather than in a queue of its own for
+         * the reason every other operation is in this queue: the pixels and the
+         * record are two halves of one event, and two queues is two orders.
+         *
+         * It is nullable rather than always present because the UI thread does
+         * not know which sheet the stroke will land on — the stack is the
+         * render thread's — so it packs one whenever a sheet *might* want it
+         * and the render thread throws it away when none does. The packing is a
+         * few kilobytes of memcpy at pen-up; the alternative is a flag mirrored
+         * across a thread boundary, which is a thing that goes stale.
+         */
+        class Draw(val stroke: Stroke, val record: PendingStroke? = null) : Commit
 
         /** Blank the layer. A singleton: it carries nothing. */
         object Clear : Commit
@@ -117,7 +131,7 @@ class CommitQueue {
      * measured and budgeted, and there is no reason to spend it here.
      */
     interface Sink {
-        fun onStroke(stroke: Stroke)
+        fun onStroke(stroke: Stroke, record: PendingStroke?)
         fun onClear()
         fun onUndo()
         fun onRedo()
@@ -132,8 +146,8 @@ class CommitQueue {
     val pending: Int get() = queue.size
 
     /** UI thread, at pen-up. */
-    fun commit(stroke: Stroke) {
-        queue.add(Commit.Draw(stroke))
+    fun commit(stroke: Stroke, record: PendingStroke? = null) {
+        queue.add(Commit.Draw(stroke, record))
     }
 
     /**
@@ -188,7 +202,7 @@ class CommitQueue {
         while (true) {
             val commit = queue.poll() ?: return applied
             when (commit) {
-                is Commit.Draw -> sink.onStroke(commit.stroke)
+                is Commit.Draw -> sink.onStroke(commit.stroke, commit.record)
                 Commit.Clear -> sink.onClear()
                 Commit.Undo -> sink.onUndo()
                 Commit.Redo -> sink.onRedo()

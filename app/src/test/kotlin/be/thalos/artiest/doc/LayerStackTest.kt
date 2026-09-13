@@ -366,4 +366,44 @@ class LayerStackTest {
         assertFalse(s.refreshThumbnails())
         s.close()
     }
+    // ---- Ik3: the sheet that keeps its strokes -----------------------------
+
+    /**
+     * The whole of `docs/vector-plan.md`'s "vector layer type" is one nullable
+     * field, and these three tests are what that claim costs: an ink sheet is
+     * an ordinary sheet in every respect the stack knows about, except that it
+     * has a `VectorSheet` and says so to the panel.
+     */
+    @Test
+    fun `an ink layer is an ordinary sheet that keeps its strokes`() {
+        val s = stack()
+        val ordinary = s.active
+        assertTrue(s.apply(LayerOp.AddVector(s.newLayer(), "Ink 1")))
+        assertNull(ordinary.vector)
+        assertNotNull(s.active.vector)
+        assertEquals("Ink 1", s.active.name)
+        assertEquals(2, s.size)
+        // Above the active one, like Add, and the pen moves to it.
+        assertEquals(1, s.activePosition)
+    }
+
+    @Test
+    fun `the panel is told which sheets keep their strokes`() {
+        val s = stack()
+        s.apply(LayerOp.AddVector(s.newLayer(), "Ink 1"))
+        val rows = s.snapshot
+        assertEquals(2, rows.size)
+        assertFalse(rows[0].vector)
+        assertTrue(rows[1].vector)
+    }
+
+    @Test
+    fun `an ink layer refused at the cap releases its pixels like any other`() {
+        val s = stack()
+        while (s.size < LayerStack.MAX_LAYERS) s.apply(LayerOp.Add(s.newLayer(), "L"))
+        val spare = s.newLayer()
+        assertFalse(s.apply(LayerOp.AddVector(spare, "Ink")))
+        assertFalse(spare.isOpen, "the refused ink layer's 27 MiB was leaked")
+        s.close()
+    }
 }

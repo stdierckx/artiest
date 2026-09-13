@@ -1,5 +1,6 @@
 package be.thalos.artiest.project
 
+import be.thalos.artiest.doc.PendingStroke
 import android.graphics.Color
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
@@ -56,7 +57,7 @@ class ProjectRoundTripTest {
 
     /** The render thread's half, for layer operations. See the class header. */
     private class Render(private val document: Document) : CommitQueue.Sink {
-        override fun onStroke(stroke: Stroke) = Unit
+        override fun onStroke(stroke: Stroke, record: PendingStroke?) = Unit
         override fun onClear() = Unit
         override fun onUndo() = Unit
         override fun onRedo() = Unit

@@ -1,5 +1,6 @@
 package be.thalos.artiest.io
 
+import be.thalos.artiest.doc.PendingStroke
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
@@ -553,7 +554,7 @@ class PngExporterTest {
     private fun drain(document: Document) {
         val rasterizer = DabRasterizer(document.widthPx, document.heightPx)
         document.drainCommits(object : CommitQueue.Sink {
-            override fun onStroke(stroke: Stroke) {
+            override fun onStroke(stroke: Stroke, record: PendingStroke?) {
                 document.snapshotBeforeStroke(stroke.bounds)
                 document.layer.write { rasterizer.drawDry(it, stroke) }
             }

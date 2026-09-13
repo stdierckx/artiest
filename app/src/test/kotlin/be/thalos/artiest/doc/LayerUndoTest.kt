@@ -47,7 +47,7 @@ class LayerUndoTest {
 
     private fun drain(doc: Document) {
         doc.drainCommits(object : CommitQueue.Sink {
-            override fun onStroke(stroke: Stroke) {
+            override fun onStroke(stroke: Stroke, record: PendingStroke?) {
                 doc.snapshotBeforeStroke(stroke.bounds)
                 val paint = Paint().apply {
                     color = stroke.colorArgb

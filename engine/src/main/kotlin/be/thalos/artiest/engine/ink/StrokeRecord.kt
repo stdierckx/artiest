@@ -262,9 +262,12 @@ class SampleLog {
     var count: Int = 0
         private set
 
+    private var lastTimeMillis: Float = 0f
+
     /** Back to empty, keeping the buffer. Call at pen-down. */
     fun reset() {
         count = 0
+        lastTimeMillis = 0f
     }
 
     /**
@@ -288,6 +291,16 @@ class SampleLog {
             "sample $count carried a non-finite pressure, tilt or orientation"
         }
         require(timeMillis.isFinite() && timeMillis >= 0f) { "sample $count time was $timeMillis" }
+        // Held rather than refused, and that is a deliberate asymmetry with the
+        // three checks above. A repeated timestamp is normal — samples inside
+        // one `MotionEvent` batch can share one — and a *backwards* one is a
+        // digitizer glitch, which must not cost the user the stroke they just
+        // drew. Holding the previous time makes the packing total with respect
+        // to time, so `pack()` cannot throw on the commit path. The three
+        // checks above are refusals because a NaN coordinate is a bug upstream
+        // that has to be found, not a glitch to absorb.
+        val t = if (timeMillis < lastTimeMillis) lastTimeMillis else timeMillis
+        lastTimeMillis = t
         val needed = (count + 1) * StrokeRecord.STRIDE
         if (needed > buffer.size) {
             check(count < MAX_SAMPLES) {
@@ -304,7 +317,7 @@ class SampleLog {
         buffer[o + 2] = pressure
         buffer[o + 3] = tiltRad
         buffer[o + 4] = orientationRad
-        buffer[o + 5] = timeMillis
+        buffer[o + 5] = t
         count++
     }
 

@@ -241,10 +241,10 @@ class Document(
      * the skew. Nothing reads both: `PngExporter` reads the layer, undo reads
      * the bounds, and the readout is a readout.
      */
-    fun commitStroke(stroke: Stroke): Boolean {
+    fun commitStroke(stroke: Stroke, record: PendingStroke? = null): Boolean {
         if (stroke.dabCount == 0) return false
         recordStroke(stroke.bounds)
-        commits.commit(stroke)
+        commits.commit(stroke, record)
         return true
     }
 
@@ -581,6 +581,30 @@ class Document(
 
     /** The next unused sheet name built on [base]. UI thread. */
     fun suggestLayerName(base: String = "Layer"): String = layers.suggestName(base)
+
+    /**
+     * One line about the sheets that keep their strokes, for the readout.
+     *
+     * Reads the render thread's own `VectorSheet` from the UI thread, which is
+     * a race — and a deliberate one, in the same class as every other number in
+     * that readout. A stroke count that is one behind is a diagnostic that is
+     * one behind; the alternative is publishing a mirror of it across the
+     * thread boundary for the sake of a debug line.
+     */
+    fun vectorNote(): String {
+        val sb = StringBuilder()
+        var any = false
+        for (i in 0 until layers.size) {
+            val v = layers.entryAt(i).vector ?: continue
+            any = true
+            if (sb.isNotEmpty()) sb.append("   ")
+            sb.append(layers.entryAt(i).name).append(' ')
+                .append(v.size).append(" strokes ")
+                .append(v.byteCount / 1024).append(" KiB")
+            if (!v.intact) sb.append(" SPOILED by ").append(v.spoiledBy)
+        }
+        return if (any) sb.toString() else "no ink layers"
+    }
 
     /** Drop queued commits without applying them. Teardown only. */
     fun abandonCommits() {

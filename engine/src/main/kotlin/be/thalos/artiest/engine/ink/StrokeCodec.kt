@@ -76,10 +76,24 @@ object StrokeCodec {
      * The document-space grid positions are snapped to, in pixels.
      *
      * 1/16. With an int16 delta that is a reach of +-2047.9 px between
-     * consecutive samples, against a worst case nowhere near it: the pen
-     * reports every 3.1 ms, a fast hand moves about 5000 view px a second, and
-     * even at a zoom of 0.1 that is 155 document px a sample. See
-     * [packSamples]'s refusal for what happens if that reasoning is ever wrong.
+     * consecutive samples, and the worst case has a sixteen-fold margin on it.
+     * The arithmetic, because "surely that is enough" is how a format grows a
+     * failure nobody can reproduce:
+     *
+     * - The gap between two consecutive samples of one stroke is the
+     *   digitizer's own period, 3.1 ms at the measured 321.75 Hz. **A stall
+     *   does not widen it**: `MotionEvent` carries its history, so a frame lost
+     *   to a hitch delivers every sample that happened during it rather than
+     *   skipping to the newest.
+     * - A pen on glass tops out around 2 m/s, which is about 10 000 view pixels
+     *   a second on this panel: 31 view pixels in 3.1 ms.
+     * - `CanvasTransform.MIN_SCALE` is 0.25, so one view pixel is at most four
+     *   document pixels. 124 document pixels a sample, against 2047.
+     *
+     * See [packSamples]'s refusal for what happens if that reasoning is ever
+     * wrong — it throws rather than clamping, because a clamped step is ink
+     * moved somewhere the hand did not put it and nothing downstream would say
+     * so.
      */
     const val QUANTUM_DOC: Float = 1f / 16f
 

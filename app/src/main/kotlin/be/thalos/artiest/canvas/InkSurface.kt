@@ -1,6 +1,7 @@
 package be.thalos.artiest.canvas
 
 import android.graphics.Matrix
+import be.thalos.artiest.doc.PendingStroke
 import be.thalos.artiest.engine.ink.Stroke
 
 /**
@@ -69,7 +70,11 @@ interface InkSurface {
      * Pen-up: the stroke becomes dry ink in the layer and the wet buffer is
      * released.
      */
-    fun commitStroke(stroke: Stroke)
+    /**
+     * [record] is the same stroke's input, packed, or null when there is none.
+     * See `CommitQueue.Commit.Draw` for why the two travel together.
+     */
+    fun commitStroke(stroke: Stroke, record: PendingStroke? = null)
 
     /** Abandon the open stroke and drop its wet ink without committing. */
     fun cancelStroke()

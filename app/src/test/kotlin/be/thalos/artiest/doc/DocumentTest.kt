@@ -147,7 +147,7 @@ class DocumentTest {
 
     private class Applied : CommitQueue.Sink {
         val log = StringBuilder()
-        override fun onStroke(stroke: Stroke) {
+        override fun onStroke(stroke: Stroke, record: PendingStroke?) {
             log.append('S')
         }
 

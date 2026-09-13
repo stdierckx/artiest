@@ -1586,6 +1586,15 @@ private fun CanvasScreen(
                         // drawing into.
                         onLayerOp(LayerOp.Add(document.newLayer(), document.suggestLayerName()))
                     },
+                    onLayerAddVector = {
+                        // The same allocation on the same thread as
+                        // `onLayerAdd`; what differs is that the entry gets a
+                        // `VectorSheet` on the other side, which is built there
+                        // because that is where it lives.
+                        onLayerOp(
+                            LayerOp.AddVector(document.newLayer(), document.suggestLayerName("Ink")),
+                        )
+                    },
                     onLayerDuplicate = {
                         onLayerOp(
                             LayerOp.Duplicate(
@@ -1793,6 +1802,7 @@ private fun ToolSlot(
     activeLayer: Int,
     onLayerOp: (LayerOp) -> Unit,
     onLayerAdd: () -> Unit,
+    onLayerAddVector: () -> Unit,
     onLayerDuplicate: () -> Unit,
     onLayersOpen: (Boolean) -> Unit,
     selecting: Boolean,
@@ -2011,6 +2021,7 @@ private fun ToolSlot(
             maxLayers = LayerStack.MAX_LAYERS,
             onOp = onLayerOp,
             onAdd = onLayerAdd,
+            onAddVector = onLayerAddVector,
             onDuplicate = onLayerDuplicate,
             onOpenChange = onLayersOpen,
             onFixate = { onFixate(ToolItem.LAYERS_PANEL, it) },
@@ -2023,6 +2034,7 @@ private fun ToolSlot(
             maxLayers = LayerStack.MAX_LAYERS,
             onOp = onLayerOp,
             onAdd = onLayerAdd,
+            onAddVector = onLayerAddVector,
             onDuplicate = onLayerDuplicate,
             onOpenChange = onLayersOpen,
         )
@@ -2294,6 +2306,11 @@ private fun readout(
         "peak ${ProjectCounters.openPeak} MiB\n" +
         "doc      ${document.widthPx}x${document.heightPx}   " +
         "strokes ${document.strokeCount}   t $generation\n" +
+        // Ik3. Read off the render thread's own object, which is the only
+        // place the truth lives -- `LayerInfo.vector` would say whether the
+        // sheet keeps strokes and not how many it has, and how many is the
+        // number that says whether the commit path is actually appending.
+        "ink      ${document.vectorNote()}\n" +
         // The undo budget, which is the number that decides whether a long
         // session quietly stops being undoable. Both caps are visible so it is
         // obvious which one bit.

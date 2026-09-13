@@ -17,6 +17,7 @@ import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.Layer
+import be.thalos.artiest.doc.PendingStroke
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
@@ -27,6 +28,7 @@ import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.adoptBrush
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
+import be.thalos.artiest.engine.ink.SampleLog
 import be.thalos.artiest.engine.ink.StrokeBuilder
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PredictionGate
@@ -672,6 +674,33 @@ class InkSurfaceView(
     private fun fmt2(v: Float): String = "%.2f".format(v)
 
     /**
+     * Append [record] to the active sheet's stroke list, if that sheet keeps
+     * one. **Render thread**, from inside the commit.
+     *
+     * After the pixels and not before, and the order is not cosmetic: if
+     * stamping throws — an out-of-memory opening the scratch buffer is the real
+     * case — the record must not be left describing ink that is not on the
+     * page. A sheet whose strokes say more than its pixels do is a sheet that
+     * repaints itself into something the user did not draw the next time
+     * anything touches it.
+     *
+     * The clip is resolved here rather than on the UI thread because
+     * `Selection` is the render thread's, like the stack. A stroke drawn into a
+     * selection is clipped pixels, and a record that forgot that would
+     * re-render outside the stencil the first time it was touched.
+     *
+     * A record whose stroke laid no dabs is dropped. `Document.commitStroke`
+     * already refuses those, so this is the second line of the same defence:
+     * an empty record would be a stroke in the list that the rebuild draws
+     * nothing for, which is harmless until Ik7 lets somebody select it.
+     */
+    private fun keepRecord(record: PendingStroke?, stroke: Stroke) {
+        if (record == null || stroke.dabCount == 0) return
+        val sheet = document.layers.active.vector ?: return
+        sheet.append(record, document.selection.snapshot.path)
+    }
+
+    /**
      * Put [stroke] into [into], by whichever path the brush in the hand needs.
      *
      * **The one place a stroke becomes pixels**, and that is the point of it
@@ -737,7 +766,7 @@ class InkSurfaceView(
     }
 
     private val commitSink = object : CommitQueue.Sink {
-        override fun onStroke(stroke: Stroke) {
+        override fun onStroke(stroke: Stroke, record: PendingStroke?) {
             // The snapshot first, and it is not merely ordering: this is the
             // last moment the region exists in its pre-stroke state. Taken
             // after the rasterise it would record the stroke as its own undo.
@@ -768,6 +797,7 @@ class InkSurfaceView(
             } else {
                 stampStroke(stroke, document.layer)
             }
+            keepRecord(record, stroke)
             document.layers.touchActive()
         }
 
@@ -782,14 +812,35 @@ class InkSurfaceView(
             document.snapshotBeforeClear()
             val stencil = document.selection.maskBitmap()
             if (stencil != null) document.layer.blank(stencil) else document.layer.blank()
+            // A whole clear empties the record list too, and the two halves
+            // have to move together or the sheet's strokes describe ink that is
+            // no longer in it -- the same invariant `Document.clearHistory`
+            // keeps for the stroke bounds. A clear *inside a selection* is a
+            // partial erase, which a record list cannot express until Ik8
+            // splits strokes, so it spoils instead. See `VectorSheet.intact`.
+            document.layers.active.vector?.let {
+                if (stencil != null) it.spoil("a clear inside a selection") else it.clear()
+            }
             document.layers.touchActive()
         }
 
+        /**
+         * Undo, redo and a float drop all move pixels the record list has no
+         * way to follow. See `VectorSheet.intact`: they spoil every vector
+         * sheet rather than leaving the two halves quietly disagreeing.
+         */
+        private fun spoilVectors(reason: String) {
+            val stack = document.layers
+            for (i in 0 until stack.size) stack.entryAt(i).vector?.spoil(reason)
+        }
+
         override fun onUndo() {
+            spoilVectors("an undo")
             document.applyUndo()
         }
 
         override fun onRedo() {
+            spoilVectors("a redo")
             document.applyRedo()
         }
 
@@ -835,6 +886,11 @@ class InkSurfaceView(
          * one place a float actually writes pixels.
          */
         override fun onFloat(op: FloatOp) {
+            // A lift reads pixels and a drop writes them, and neither is a
+            // stroke. See `VectorSheet.intact`. Spoiled on every float op
+            // rather than only on the drop, because a lift has already taken
+            // ink off the sheet by the time the drop lands.
+            spoilVectors("moving pixels")
             document.applyFloat(op)
         }
     }
@@ -1811,9 +1867,9 @@ class InkSurfaceView(
      * the transaction lands, and it is the only call that releases the front
      * buffer's accumulated pixels.
      */
-    override fun commitStroke(stroke: Stroke) {
+    override fun commitStroke(stroke: Stroke, record: PendingStroke?) {
         commitWatermark = batches.issuedCount
-        document.commitStroke(stroke)
+        document.commitStroke(stroke, record)
         val r = renderer
         if (r == null || !surfaceAlive) return
         r.commit()
@@ -2292,6 +2348,30 @@ class InkSurfaceView(
         /** Stroke start, for the tail's elapsed time. See `Brush.sizeFor`. */
         private var downTimeNanos = 0L
 
+        /**
+         * The stroke's input, kept in case the sheet it lands on wants it.
+         *
+         * One instance for the life of the view, reset at pen-down: at 321.75
+         * Hz a per-stroke allocation here would be an allocation in the window
+         * `StrokeStats` measures, and the buffer a long stroke grew is the
+         * buffer every later stroke uses.
+         *
+         * Named `sampleLog` and not `samples`, because `onStrokeSamples` takes
+         * a parameter of that name and the shadowing compiles into a call that
+         * is looking at the wrong thing.
+         *
+         * **Filled unconditionally, even when the sheet is an ordinary raster
+         * one.** The UI thread does not know which sheet the stroke will land
+         * on — the stack belongs to the render thread — so the choice is
+         * between six float writes a sample that are sometimes wasted and a
+         * boolean mirrored across a thread boundary that is sometimes stale.
+         * The first is cheap and cannot be wrong.
+         */
+        private val sampleLog = SampleLog()
+
+        /** `BrushCodec.encode(pen)` as of pen-down. See [samples]. */
+        private var strokeBrushText: String = ""
+
         /** The last real sample in document space, for the lead measurement. */
         private var lastRealDocX = 0f
         private var lastRealDocY = 0f
@@ -2367,6 +2447,14 @@ class InkSurfaceView(
             // [applyEraseFor] does on the first sample and never again.
             eraseDecided = false
             builder.begin(inkColorArgb)
+            // Reset, never reallocated: this is filled one sample at a time at
+            // 321.75 Hz, and it is the only new per-sample work Ik3 adds.
+            sampleLog.reset()
+            // The brush as it is *now*, because a record names the parameters
+            // the stroke was drawn with and the user can move a slider before
+            // the next one. Encoding costs a string per pen-up; the sheet then
+            // interns it, so twenty strokes with one nib hold one copy.
+            strokeBrushText = BrushCodec.encode(pen)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
             // GC count first: reading it allocates a String, and taking it
@@ -2427,6 +2515,19 @@ class InkSurfaceView(
                 if (s.pressure > strokePressureMax) strokePressureMax = s.pressure
                 builder.addTilt(s.tilt, s.orientation, s.eventTimeNanos)
                 builder.add(docPoint[0], docPoint[1], s.pressure, s.eventTimeNanos)
+                // The same six numbers the builder just saw, and that is the
+                // whole requirement: a record is replayed by feeding these back
+                // through this builder, so anything logged that the builder did
+                // not see, or seen that was not logged, is a re-render that
+                // draws something else.
+                sampleLog.add(
+                    docPoint[0],
+                    docPoint[1],
+                    s.pressure,
+                    s.tilt,
+                    s.orientation,
+                    (s.eventTimeNanos - downTimeNanos) / 1_000_000f,
+                )
                 // Stabilized and in document space, which is what the gate has
                 // to see: raw samples carry the digitizer's jitter, and jitter
                 // read as curvature suppresses prediction on exactly the slow
@@ -2583,7 +2684,7 @@ class InkSurfaceView(
             }
             lastStrokeWidthMin = if (wMin == Float.MAX_VALUE) 0f else wMin
             lastStrokeWidthMax = wMax
-            commitStroke(stroke)
+            commitStroke(stroke, pendingRecord(stroke))
             val commitEnd = heapUsed()
             strokeOpen = false
             releaseTransform()
@@ -2592,6 +2693,32 @@ class InkSurfaceView(
                 dragSamples = seen,
                 commitBytes = commitEnd - commitStart,
                 gcs = gcCount() - gcAtBegin,
+            )
+        }
+
+        /**
+         * The stroke's input, packed, for whichever sheet wants it.
+         *
+         * The seed comes off the builder rather than being generated here,
+         * because the builder is what drew the stroke: `begin(colorArgb)` hands
+         * itself the next counter value and `strokeSeed` reads back the one it
+         * used. Generating a second number here would produce a record that
+         * replays as a *different* stroke, which is the exact defect Ik2 exists
+         * to remove, reintroduced one layer up.
+         *
+         * Null for a stroke with no samples, which is what a cancelled or
+         * zero-length gesture leaves behind.
+         */
+        private fun pendingRecord(stroke: Stroke): PendingStroke? {
+            if (sampleLog.count == 0) return null
+            return PendingStroke(
+                samples = sampleLog.pack(),
+                sampleCount = sampleLog.count,
+                seed = builder.strokeSeed,
+                colorArgb = inkColorArgb,
+                erase = pen.erase,
+                brushText = strokeBrushText,
+                bounds = stroke.bounds,
             )
         }
 

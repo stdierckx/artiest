@@ -41,7 +41,7 @@ class CommitQueueTest {
         val strokes = ArrayList<Stroke>()
         val log = StringBuilder()
 
-        override fun onStroke(stroke: Stroke) {
+        override fun onStroke(stroke: Stroke, record: PendingStroke?) {
             strokes.add(stroke)
             log.append('S')
         }
@@ -207,7 +207,7 @@ class CommitQueueTest {
         val total = 5_000
         val seen = ArrayList<Stroke>(total)
         val sink = object : CommitQueue.Sink {
-            override fun onStroke(stroke: Stroke) {
+            override fun onStroke(stroke: Stroke, record: PendingStroke?) {
                 seen.add(stroke)
             }
 
