@@ -648,7 +648,7 @@ class InkSurfaceView(
      */
     private fun indirectNeeded(): Boolean =
         pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f ||
-            pen.grain.isActive || pen.erase || document.selection.active
+            pen.tip != null || pen.grain.isActive || pen.erase || document.selection.active
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -1129,6 +1129,11 @@ class InkSurfaceView(
     private fun armRasterizer() {
         rasterizer.hardness = pen.hardness
         rasterizer.solid = borrowedRubber
+        // Resolved here and not per dab: this runs once a stroke and the dab
+        // loop runs two hundred times an event. A name nothing answers to
+        // leaves null, and the brush draws with the procedural nib — see
+        // `Brush.tip`.
+        rasterizer.tip = be.thalos.artiest.ink.Tips.find(pen.tip)
     }
 
     /**

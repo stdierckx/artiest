@@ -46,6 +46,11 @@ object BrushCodec {
         b.append("spacing ").append(brush.spacing).append('\n')
         b.append("isotropic ").append(if (brush.isotropicSpacing) 1 else 0).append('\n')
         b.append("hardness ").append(brush.hardness).append('\n')
+        // Written only when there is one, so every brush this engine shipped
+        // with encodes to exactly the bytes it did before tips existed — which
+        // is what `BrushCodecTest`'s round trips and the shelf's modified mark
+        // both compare against.
+        brush.tip?.let { b.append("tip ").append(word(it)).append('\n') }
         b.append("opacity ").append(brush.opacity).append('\n')
         // Two lines because they are two parameters: `flow` is the ceiling a
         // slider owns and `flowMin` is the floor a preset owns. The floor had
@@ -217,6 +222,10 @@ object BrushCodec {
             "spacing" -> f(p, 1)?.let { brush.spacing = it }
             "isotropic" -> brush.isotropicSpacing = p.getOrNull(1) == "1"
             "hardness" -> f(p, 1)?.let { brush.hardness = it }
+            // `tip` with no name clears it rather than being skipped: a file
+            // that says a brush has no picture is saying something, and the
+            // brush it is decoded into is fresh anyway.
+            "tip" -> brush.tip = p.getOrNull(1)?.takeIf { it.isNotEmpty() }
             "opacity" -> f(p, 1)?.let { brush.opacity = it }
             "flow" -> f(p, 1)?.let { brush.flow = it }
             "flowMin" -> f(p, 1)?.let { brush.flowOption.min = it }

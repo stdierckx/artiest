@@ -31,7 +31,12 @@ import java.io.FileOutputStream
  *     ./gradlew :app:testDebugUnitTest --tests '*KritaSheetTool*' \
  *       -Dartiest.sheet.in=<converted dir> \
  *       -Dartiest.sheet.krita=<preview dir> \
+ *       -Dartiest.sheet.tips=<tips dir> \
  *       -Dartiest.sheet.out=<sheet.png>
+ *
+ * Wb6 is the same pass over the brushes that stamp a picture, and `sheet.tips`
+ * is the whole of what it adds: without it a tipped brush has no tip, falls
+ * back to the procedural nib, and the sheet quietly judges the wrong thing.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -43,6 +48,9 @@ class KritaSheetTool {
         val inDir = System.getProperty("artiest.sheet.in") ?: return
         val kritaDir = System.getProperty("artiest.sheet.krita")
         val out = System.getProperty("artiest.sheet.out") ?: return
+        System.getProperty("artiest.sheet.tips")?.let {
+            println("TIPS ${Tips.loadDirectory(File(it))} loaded")
+        }
 
         val files = File(inDir).listFiles { f: File -> f.name.endsWith(".brush") }
             ?.sortedBy { it.name } ?: return
@@ -80,7 +88,8 @@ class KritaSheetTool {
             )
             canvas.drawText(
                 "aspect ${"%.2f".format(brush.aspect.max)}  " +
-                    "sensors ${brush.size.inputCount}/${brush.flowOption.inputCount}",
+                    "sensors ${brush.size.inputCount}/${brush.flowOption.inputCount}" +
+                    (brush.tip?.let { "  tip $it" } ?: ""),
                 12f, (top + 104).toFloat(), small,
             )
 

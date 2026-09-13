@@ -414,6 +414,14 @@ private fun CanvasScreen(
      * It is a handful of two-kilobyte text files; see `BrushFiles`.
      */
     val brushFiles = remember(brushCtx) { BrushFiles(java.io.File(brushCtx.filesDir, "brushes")) }
+    // The pictures the tipped brushes stamp, read before the library that names
+    // them. The order matters only for the swatches: a brush whose tip is not
+    // yet loaded renders as an ellipse and would be cached that way.
+    remember(brushCtx) {
+        be.thalos.artiest.ink.Tips.loadDirectory(
+            be.thalos.artiest.ink.Tips.directoryIn(brushCtx.filesDir),
+        )
+    }
     var library by remember { mutableStateOf(brushFiles.library()) }
 
     /** W10, and now Wb1. Which brush is in the hand, restored from last time. */

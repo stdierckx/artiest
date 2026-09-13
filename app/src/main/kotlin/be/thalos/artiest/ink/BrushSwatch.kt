@@ -108,6 +108,7 @@ object BrushSwatch {
         // which is the failure a swatch is for catching.
         rasterizer.mode = DabRasterizer.Mode.STAMP
         rasterizer.hardness = brush.hardness
+        rasterizer.tip = Tips.find(brush.tip)
 
         if (!indirectNeeded(brush)) {
             rasterizer.drawDry(canvas, stroke)
@@ -206,7 +207,8 @@ object BrushSwatch {
      * erasing should still be a swatch of the brush.
      */
     private fun indirectNeeded(brush: Brush): Boolean =
-        brush.opacity < 1f || brush.flow < 1f || brush.hardness < 1f || brush.grain.isActive
+        brush.opacity < 1f || brush.flow < 1f || brush.hardness < 1f ||
+            brush.tip != null || brush.grain.isActive
 
     /**
      * The sample stroke: one S-curve, pressure up and off, tilt upright to

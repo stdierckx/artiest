@@ -1,5 +1,6 @@
 package be.thalos.artiest.engine.brush
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
@@ -102,7 +103,11 @@ object MaskGenerator {
     /** One pixel of margin each side, so the antialiased rim is never clipped. */
     const val PAD: Int = 1
 
+    /** Subsamples per axis for a tipped dab. See [stamp]. */
+    const val TIP_SUB: Int = 2
+
     fun generate(spec: MaskSpec): AlphaMask {
+        spec.tip?.let { return stamp(spec, it) }
         val extent = ceil(spec.diameter).toInt() + 2 * PAD
         val w = if (extent < 1) 1 else extent
         val out = ByteArray(w * w)
@@ -149,6 +154,108 @@ object MaskGenerator {
                 }
                 val v = (acc * norm * 255f + 0.5f).toInt().coerceIn(0, 255)
                 out[i++] = v.toByte()
+            }
+        }
+        return AlphaMask(w, w, out, spec)
+    }
+
+    /**
+     * A dab stamped from a picture instead of solved from an ellipse.
+     *
+     * ## The geometry, in the order it is applied
+     *
+     * The tip's **longest side** is what [MaskSpec.diameter] measures, so a
+     * 200x120 tip at diameter 40 is 40 wide and 24 tall. The longest side and
+     * not the width, because a brush's size is the size of its mark and a
+     * sideways tip is not a smaller brush. Then [MaskSpec.aspect] squashes the
+     * tip's own vertical — the same axis tilt squashes an ellipse's minor — and
+     * [MaskSpec.rotationRad] turns the result.
+     *
+     * The mask is square and the tip is centred in it, so the hotspot is the
+     * middle and [AlphaMask.hotspotX] keeps meaning what it means for every
+     * other dab. A rectangular mask would be tighter for a long thin tip at
+     * zero rotation and would have to become square again the moment the stroke
+     * turned.
+     *
+     * ## Sampling
+     *
+     * [TIP_SUB]x[TIP_SUB] subsamples of a bilinear read, out of the mip level
+     * nearest the size being drawn. Supersampling alone is not enough for a
+     * 600-pixel tip at 9 pixels — even sixteen taps out of 4,400 texels per
+     * pixel is a lottery — and the mip alone is not enough either, because the
+     * residual is up to an octave and the dab's own edge is what an octave of
+     * error shows up in. Together they are what every renderer does, and the
+     * cost is paid once per cache bucket.
+     *
+     * **[TIP_SUB] is 2 where the ellipse uses 4, and it is matched rather than
+     * cheapened.** The mip level is chosen so that what is left to resolve is
+     * inside one octave, and two samples an axis is exactly one octave; the
+     * other two are redundant work over a picture that has already been
+     * filtered. They are not redundant over an ellipse, which is solved
+     * analytically at full resolution with no filtering underneath it.
+     *
+     * It is also the difference between this being affordable and not. The
+     * bench in `MaskCacheBenchTest` builds a 128-pixel tipped taper's 105 masks
+     * in about 4 ms at 2 and about 16 at 4, against a 20 ms budget — on a
+     * desktop, for a tablet.
+     *
+     * **The level is chosen from the squashed axis, but never more than an
+     * octave past the unsquashed one.** Picking it from the wider axis aliases
+     * a heavily tilted dab; picking it from the narrower one blurs a sliver
+     * across its whole length. Nothing the converter produces drives aspect at
+     * all today — every imported tip is `aspect 1 1` — so this is the cheap
+     * guess, and it is written down as one.
+     */
+    private fun stamp(spec: MaskSpec, tip: Tip): AlphaMask {
+        val scale = spec.diameter / tip.span          // dest px per tip px, major
+        val aspect = spec.aspect.coerceIn(0f, 1f)
+        val fw = tip.width * scale
+        val fh = tip.height * scale * aspect
+        val cosR = cos(spec.rotationRad)
+        val sinR = sin(spec.rotationRad)
+        val bw = abs(fw * cosR) + abs(fh * sinR)
+        val bh = abs(fw * sinR) + abs(fh * cosR)
+        val extent = ceil(if (bw > bh) bw else bh).toInt() + 2 * PAD
+        val w = if (extent < 1) 1 else extent
+        val out = ByteArray(w * w)
+
+        val level = tip.levelFor(scale * (if (aspect > 0.5f) aspect else 0.5f))
+        // The level's own pixels are coarser than the tip's by this much, and
+        // every coordinate below is in *level* space because that is what
+        // `Tip.sample` reads.
+        val lw = tip.levelWidth(level)
+        val lh = tip.levelHeight(level)
+        val sx = lw.toFloat() / tip.width
+        val sy = lh.toFloat() / tip.height
+
+        val c = w * 0.5f
+        val step = 1f / TIP_SUB
+        val half = step * 0.5f
+        val norm = 1f / (TIP_SUB * TIP_SUB)
+        // A degenerate squash — tilt driving aspect to zero — would divide by
+        // nothing. An empty mask is the honest answer and it is what the
+        // ellipse path produces for the same input.
+        val vScale = scale * aspect
+
+        var i = 0
+        for (py in 0 until w) {
+            for (px in 0 until w) {
+                var acc = 0f
+                if (scale > 0f && vScale > 0f) {
+                    for (ssy in 0 until TIP_SUB) {
+                        val fy = py + ssy * step + half - c
+                        for (ssx in 0 until TIP_SUB) {
+                            val fx = px + ssx * step + half - c
+                            val u = fx * cosR + fy * sinR
+                            val v = -fx * sinR + fy * cosR
+                            val tx = (u / scale + tip.width * 0.5f) * sx
+                            val ty = (v / vScale + tip.height * 0.5f) * sy
+                            acc += tip.sample(level, tx, ty)
+                        }
+                    }
+                }
+                val value = (acc * norm + 0.5f).toInt().coerceIn(0, 255)
+                out[i++] = value.toByte()
             }
         }
         return AlphaMask(w, w, out, spec)

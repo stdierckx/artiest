@@ -294,6 +294,7 @@ fun adoptBrush(from: Brush, to: Brush) {
     to.spacing = from.spacing
     to.isotropicSpacing = from.isotropicSpacing
     to.hardness = from.hardness
+    to.tip = from.tip
     to.opacity = from.opacity
     to.flow = from.flow
     to.stabilization = from.stabilization

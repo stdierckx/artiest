@@ -114,6 +114,24 @@ class Brush {
     var hardness: Float = 1f
 
     /**
+     * The [Tip] this brush stamps, by name, or null for the procedural nib.
+     *
+     * **A name and not the pixels**, because a brush is a text file and a text
+     * file cannot hold a picture. What turns the name into pixels is
+     * [TipLibrary], once, when the brush is picked up — see
+     * `InkSurfaceView.armRasterizer`.
+     *
+     * A name nothing answers to is not an error and must not be. A brush file
+     * written on a tablet that has the tip, opened on one that does not, draws
+     * with the ellipse: the mark is wrong and the drawing still happens, which
+     * is the same bargain every other unreadable line in `BrushCodec` strikes.
+     *
+     * A tipped nib has a soft rim by construction, so it goes down the indirect
+     * path exactly as [hardness] below 1 does. See `InkSurfaceView.indirectNeeded`.
+     */
+    var tip: String? = null
+
+    /**
      * The ceiling the whole stroke composites at, 0..1. A W7 slider.
      *
      * Applied **once**, to the finished stroke, which is what makes it a

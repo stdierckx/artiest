@@ -33,6 +33,25 @@ data class MaskSpec(
      * mysteriously poor hit rate rather than as a wrong pixel.
      */
     val rotationRad: Float,
+    /**
+     * The picture this dab is stamped from, or null for the procedural ellipse.
+     *
+     * **A whole second nib hanging off one nullable field**, and it is the
+     * smallest change that could work: everything upstream of here — the
+     * sensors, the curves, the spacing, the scratch buffer — asks the same
+     * questions of a bristle stub as of a round dab, and only the eleven lines
+     * that turn a size into coverage differ. See [Tip].
+     *
+     * It is the [Tip] and not its id because [MaskGenerator] needs the pixels
+     * and looking them up per dab would put a string hash on the path that runs
+     * two hundred times an event. The resolution happens once, when the brush
+     * is picked up.
+     *
+     * [hardness] is **ignored** when this is set. A picture brings its own
+     * edge, and there is nothing sensible for a hardness of 0.4 to mean over a
+     * splatter — Krita does not offer it there either.
+     */
+    val tip: Tip? = null,
 ) {
 
     init {
@@ -50,10 +69,26 @@ data class MaskSpec(
 
         val PI_F: Float = PI.toFloat()
 
-        /** [rotationRad] folded into 0..PI. */
+        val TWO_PI_F: Float = (PI * 2.0).toFloat()
+
+        /** [rotationRad] folded into 0..PI. An ellipse's own symmetry. */
         fun foldRotation(r: Float): Float {
             var v = r % PI_F
             if (v < 0f) v += PI_F
+            return v
+        }
+
+        /**
+         * [rotationRad] folded into 0..2PI, which is what a picture needs.
+         *
+         * An ellipse at an angle and at that angle plus half a turn are the
+         * same shape, and [foldRotation] exploits it. A tip is not symmetric —
+         * a bristle fan upside down is a different mark — so a tipped dab folds
+         * over the whole turn and pays for it with twice the rotation buckets.
+         */
+        fun foldTurn(r: Float): Float {
+            var v = r % TWO_PI_F
+            if (v < 0f) v += TWO_PI_F
             return v
         }
     }
@@ -127,24 +162,57 @@ data class MaskTolerance(
      * decided after quantisation. Testing the raw value would let an aspect of
      * 0.999 keep 64 rotation buckets of identical bitmaps.
      */
-    fun rotationBucket(rotationRad: Float, aspectBucket: Int): Int {
+    fun rotationBucket(rotationRad: Float, aspectBucket: Int, tip: Tip? = null): Int {
+        if (tip != null) {
+            // A picture has no symmetry to exploit, so it folds over the whole
+            // turn — and it keeps its buckets even when the dab is round,
+            // because "round" here describes the *squash*, not the mark. A
+            // round bristle stub still faces a direction.
+            val steps = rotationSteps * 2
+            val folded = MaskSpec.foldTurn(rotationRad)
+            val b = Math.round(folded / MaskSpec.TWO_PI_F * steps).toInt()
+            return if (b >= steps) 0 else b
+        }
         if (aspectBucket >= aspectSteps) return 0
         val folded = MaskSpec.foldRotation(rotationRad)
         val b = Math.round(folded / MaskSpec.PI_F * rotationSteps).toInt()
         return if (b >= rotationSteps) 0 else b   // PI and 0 are the same angle
     }
 
+    /**
+     * The angle a rotation bucket stands for, over whichever turn applies.
+     *
+     * Separate from [rotationBucket] rather than inlined into [quantize]
+     * because the two folds have to agree, and a quantised angle that lands in
+     * a different bucket than the one it came from is a cache that misses every
+     * dab while looking correct in every test of one dab.
+     */
+    fun rotationForBucket(bucket: Int, tip: Tip?): Float =
+        if (tip != null) bucket.toFloat() / (rotationSteps * 2) * MaskSpec.TWO_PI_F
+        else bucket.toFloat() / rotationSteps * MaskSpec.PI_F
+
+    /**
+     * The hardness bucket a spec actually uses: zero for a tip.
+     *
+     * [MaskGenerator] ignores hardness over a picture, so letting it into the
+     * key would build the same bitmap sixteen times for a brush whose hardness
+     * happens to be driven by pressure.
+     */
+    private fun effectiveHardness(spec: MaskSpec): Int =
+        if (spec.tip != null) 0 else hardnessBucket(spec.hardness)
+
     /** [spec] snapped to the nearest representable dab. */
     fun quantize(spec: MaskSpec): MaskSpec {
         val sb = sizeBucket(spec.diameter)
         val ab = aspectBucket(spec.aspect)
-        val hb = hardnessBucket(spec.hardness)
-        val rb = rotationBucket(spec.rotationRad, ab)
+        val hb = effectiveHardness(spec)
+        val rb = rotationBucket(spec.rotationRad, ab, spec.tip)
         return MaskSpec(
             diameter = sizeForBucket(sb),
             hardness = hb.toFloat() / hardnessSteps,
             aspect = ab.toFloat() / aspectSteps,
-            rotationRad = rb.toFloat() / rotationSteps * MaskSpec.PI_F,
+            rotationRad = rotationForBucket(rb, spec.tip),
+            tip = spec.tip,
         )
     }
 
@@ -158,10 +226,15 @@ data class MaskTolerance(
     fun key(spec: MaskSpec): Long {
         val ab = aspectBucket(spec.aspect)
         val sb = sizeBucket(spec.diameter)
-        val hb = hardnessBucket(spec.hardness)
-        val rb = rotationBucket(spec.rotationRad, ab)
-        // 20 bits of size (signed, biased), 8 each of the rest.
-        return ((sb + BIAS).toLong() shl 24) or
+        val hb = effectiveHardness(spec)
+        val rb = rotationBucket(spec.rotationRad, ab, spec.tip)
+        // 8 bits of tip slot, 20 of size (signed, biased), 8 each of the rest.
+        // The slot goes above the size rather than into the spare low bits,
+        // because zero has to mean "no tip" and a field that is zero for every
+        // procedural dab keeps every key this cache has ever produced exactly
+        // where it was.
+        return (((spec.tip?.slot ?: 0).toLong()) shl 44) or
+            ((sb + BIAS).toLong() shl 24) or
             (hb.toLong() shl 16) or
             (ab.toLong() shl 8) or
             rb.toLong()

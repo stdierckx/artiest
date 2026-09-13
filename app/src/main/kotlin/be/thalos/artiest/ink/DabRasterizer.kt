@@ -61,6 +61,19 @@ class DabRasterizer(
     var hardness: Float = 1f
 
     /**
+     * The picture this brush stamps, already resolved from its name.
+     *
+     * Here for the same reason [hardness] is: it is fixed for the whole stroke,
+     * and `Stroke`'s dab list is a golden file. `InkSurfaceView.armRasterizer`
+     * looks the name up in the `TipLibrary` once at stroke start, so nothing on
+     * the render thread ever hashes a string.
+     *
+     * A tip forces the stamp path, because `drawCircle` cannot express a
+     * picture at all — the same argument an elliptical dab makes.
+     */
+    var tip: be.thalos.artiest.engine.brush.Tip? = null
+
+    /**
      * Paint every dab at the ink's full alpha, ignoring flow.
      *
      * Set while erasing. An eraser is not a brush made of white paint: it takes
@@ -254,12 +267,12 @@ class DabRasterizer(
         // Hardness counts as shaped for exactly the reason aspect does:
         // `drawCircle` has no soft rim, so a CIRCLE-mode pencil at hardness
         // 0.72 drew a hard-edged dab and the setting did nothing visible.
-        val shaped = aspect < 1f || hardness < 1f
+        val shaped = aspect < 1f || hardness < 1f || tip != null
         if ((mode == Mode.CIRCLE && !shaped) || cache == null) {
             canvas.drawCircle(x, y, radius, paint)
             return
         }
-        val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, aspect, rotation))
+        val mask = cache.stampFor(MaskSpec(radius * 2f, hardness, aspect, rotation, tip))
         canvas.drawBitmap(cache.bitmapOf(mask), x - mask.hotspotX, y - mask.hotspotY, paint)
     }
 }

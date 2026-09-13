@@ -12,6 +12,11 @@
 > is at the bottom, under *"What the first import actually did"*. The short
 > version: 26 of 30 converted brushes read as themselves, which clears Wb4's
 > bar, and the four that do not each name a specific thing to fix.
+>
+> **2026-09-13: the engine grew a second kind of nib.** Wb5 and Wb6, under
+> *"The nib that is a picture"*. 76 of the bundle's 118 presets convert now and
+> 46 of them stamp a tip; 40 of those 46 read as themselves, and the six that do
+> not fail for one reason that is named there.
 
 ## The three questions, answered before anything else
 
@@ -222,8 +227,8 @@ Each item is separately useful, and the order puts the cheap refutations first.
 | **Wb2** | The reader: `.bundle`/`.kpp` parse, licence extraction, contact sheet, `picks.txt`. Read-only, no engine change. | If `meta.xml` licences turn out to be absent or unreliable across real bundles, shipping a curated set is off and only user-side import survives. |
 | **Wb3** | Converter for auto-tip pixel brushes: parameter and sensor mapping, curve translation, tilt/speed rescaling. | — |
 | **Wb4** | **First judgement pass.** Render `compare.png` over a picked set of ~30. | **If fewer than half read as their original, the mapping approach is wrong.** Fall back to using Krita presets as *inspiration* and hand-author a dozen the way the pencil was authored. That is a real outcome and not a failure of the phase. |
-| **Wb5** | Bitmap tips in the engine: mask source, cache key, tip budget, falloff shapes. | If tips push the dab loop past W0's measured budget, tips do not ship. Measure before believing. |
-| **Wb6** | Second judgement pass, over predefined-tip brushes. | Same bar as Wb4. |
+| **Wb5** | **DONE.** Bitmap tips in the engine: mask source, cache key, tip budget. Falloff shapes did not turn out to be part of it — see below. | **Cleared.** 1.10 ms for the largest mask a tip can produce, against a 16.6 ms frame. |
+| **Wb6** | **DONE.** Second judgement pass, over predefined-tip brushes. | **Cleared.** 40 of 46 read as themselves; the six that do not share one cause. |
 | **Wb7** | In-app import from `.bundle`/`.kpp`, with the swatch grid picker. | — |
 | **Wb8** | Ship a curated CC0 starter set (~10–20), `LICENSES`, `NOTICE` amendment. | Any brush whose licence cannot be traced to a sentence in a `meta.xml` or an author's own page is dropped. |
 
@@ -361,13 +366,131 @@ wrong and was chased down.
 ### What this does not answer
 
 - The spike is Python in `tools/`. Wb2 and Wb3 proper are Kotlin behind the
-  shelf's import button, and `.bundle` reading and the `picks.txt` contact sheet
-  are still to write.
+  shelf's import button, and the `picks.txt` contact sheet is still to write.
+  `.bundle` reading landed with Wb5, because a tip's size cannot be known
+  without the tip.
 - **Sizes are carried across 1:1 and that is a guess.** A Krita preset's
   diameter is in canvas pixels and its canvas is whatever the artist made; ours
   is a 3300 px page. A 5 px fineliner reads as a fineliner on both, so nothing
   obviously breaks — but nobody has drawn with one for an hour.
-- Wb6's judgement pass over predefined-tip brushes is untouched, because Wb5 is.
+
+## Wb5 and Wb6 — the nib that is a picture
+
+> 2026-09-13. `engine/…/brush/Tip.kt`, `MaskGenerator.stamp`, `ink/Tips.kt`, and
+> the converter's tip extraction. Measured against the same bundle.
+
+### What a tip is
+
+`Tip` is one byte of coverage per pixel and a chain of halved copies of itself,
+and `MaskSpec` gained one nullable field to point at one. That field is the
+whole of the feature: everything upstream — sensors, curves, spacing, the
+scratch buffer, the selection — asks a bristle stub exactly the questions it
+asks a round dab, and only the eleven lines that turn a size into coverage
+differ.
+
+Three things about the *cache* had to be re-derived, because every one of them
+was an ellipse's property rather than a dab's:
+
+- **Rotation folds over a whole turn, not half.** An ellipse at θ and at θ+π is
+  the same shape and `MaskTolerance` spends that symmetry; a bristle fan upside
+  down is a different mark. A tipped dab gets 128 rotation buckets over 2π where
+  an ellipse gets 64 over π — the same angular step, twice the buckets.
+- **A round tipped dab keeps its rotation.** The collapse that saves 64 buckets
+  for a circular ellipse describes the *squash*, not the mark. Applying it to a
+  picture would draw every fan pointing the same way.
+- **Hardness leaves the key.** A picture brings its own edge and
+  `MaskGenerator` ignores hardness over one, so letting it into the key would
+  build the same bitmap sixteen times for a brush whose hardness moves with
+  pressure.
+
+**Falloff shapes — item 6 of "what has to change" — did not turn out to be part
+of this.** The argument for them was that Krita's `gauss` and `soft` generators
+have edges our one smoothstep band cannot make. That is still true, and it is
+still worth doing, but it is about the *procedural* nib and has nothing to do
+with tips. Wb3's hardness ceiling stands in for it; the item moves rather than
+closing.
+
+### The mip chain, and what it costs
+
+A 600-pixel tip drawn at 9 pixels is a 66:1 minification, and bilinear sampling
+of that reads 81 texels out of 360,000 — so the dab flickers as the stroke
+moves, because *which* 81 changes. Halved copies, and sample the one nearest the
+size being drawn. A third more memory, built once, at registration.
+
+With the chain underneath it, two subsamples an axis is the *matched* number
+rather than a cheapened one: the level is chosen so what is left to resolve is
+inside one octave, and two samples an axis is exactly one octave. The ellipse
+keeps four, because it is solved analytically with no filtering underneath.
+
+Wb5's stop condition was *"if tips push the dab loop past W0's measured budget,
+tips do not ship."* Measured on the bench, with the biggest tip the bundle
+contains (454 px) at the biggest size anything asks for:
+
+| | |
+|---|---|
+| A 128 px tipped taper, 226 dabs, 105 masks, from cold | 9.9–13.8 ms |
+| The single largest mask — what one frame actually pays | **1.10 ms** |
+| Masks held | 112 KiB |
+
+A stroke crosses about one size bucket a frame, so a frame pays for one mask and
+not the stroke's whole bill. 1.10 ms against 16.6. **Tips ship.**
+
+### The reader, and the trap in it
+
+A tip arrives as a PNG and nothing in the file says which channel the mark is
+in. The rule is: a usable alpha channel is the tip, and otherwise `255 - grey`,
+which is GIMP's black-ink-on-white-paper convention.
+
+**"Usable" is a fraction and not "any", and the bundle taught that immediately.**
+The first version asked whether *any* pixel was less than opaque.
+`oil_knife.png` is a grey-plus-alpha PNG whose picture is entirely in the grey
+and whose alpha is opaque for all but 0.004% of its 90,000 pixels — four stray
+pixels, enough to send it down the alpha branch and turn a palette knife into a
+300-pixel solid slab. The floor is one pixel in 256; an antialiased rim on the
+smallest plausible tip clears it three times over.
+
+`.gbr` and `.gih` are GIMP's own containers and nothing on Android reads them,
+so the converter decodes them and writes grey-plus-alpha PNGs — black ink at the
+coverage's alpha, which is correct under *both* halves of the rule rather than
+relying on either.
+
+### Wb6's judgement pass
+
+Of the bundle's 118 presets, **76 now convert and 46 of those carry a tip**,
+against 30 before. Rendered beside Krita's own preview:
+
+**40 of 46 read as themselves.** The bristles are bristles, the chalks are
+grainy, the stamps are grass and mountains and sparkles, *Waterpaint Soft Edges*
+is a soft blob rather than the slab the alpha bug made of it.
+
+The six that do not **all fail the same way, and it is one cause**: *Chalk
+Grainy*, *Dry Bristles Eroded*, *Pencil-6 Quick Shade*, *Texture Wood Fiber*,
+*Waterpaint Hard Edges* and *Stamp Stylised Tree* show the tip repeating in a
+visible regular pattern where Krita's shows a dense irregular one.
+
+**A `.gih` is several tips, and this engine takes the first.** The bundle's
+`graphite_grain.gih` says `ncells:7 … sel0:random` — Krita picks a different
+cell for every dab, at random, and that is what breaks up the pattern. One tip
+per brush turns a seven-cell chalk into one chalk stamped 226 times. It is a
+real loss, it is named rather than fudged, and the fix is a tip that carries
+frames plus a per-dab pick — an engine change of the same size as this one, and
+not part of it.
+
+Two more are preview-scale rather than conversion problems, the same as *Airbrush
+Soft* in Wb4: *Texture Big* at 435 px and *Stamp Bokeh* at 384 px do not fit in a
+232-pixel swatch page. They are counted among the 40 because the stroke is right
+and the picture of it is too small.
+
+### Two corrections the eraser work made possible
+
+- **The converter writes `erase 1` now, and it used to refuse to.** The refusal
+  was right at the time: erasing was a mode a toolbar toggle owned and re-read at
+  every stroke, so a brush file claiming it made a claim nothing honoured. There
+  is no toggle any more. See `docs/ui-space-plan.md`, Us2.
+- **Wb4's second failure is fixed.** *"`Eraser Soft` converts correctly to
+  `erase 1`, and the swatch renderer draws erasers as ink, so the row is a black
+  slab."* `BrushSwatch.rubbedOut` punches the stroke through a wash now, so an
+  eraser's row shows the hole it makes.
 
 ## Sources
 

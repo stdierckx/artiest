@@ -116,6 +116,69 @@ class MaskCacheBenchTest {
     }
 
     /**
+     * Wb5's stop condition: *"if tips push the dab loop past W0's measured
+     * budget, tips do not ship. Measure before believing."*
+     *
+     * A tipped dab is the expensive one to build — a bilinear read out of a mip
+     * level, sixteen times a pixel, where the ellipse solves a quadratic — and a
+     * pressure ramp is the stroke that builds the most of them. So this is the
+     * ramp, with the largest tip the bundle actually contains (454 px) at the
+     * largest size anything asks for, which is the worst case that exists rather
+     * than a worst case invented for the test.
+     *
+     * The budget is the same 20 ms one the corpus above is held to, and for the
+     * same reason: a stroke lasts seconds, the misses are spread across it, and
+     * this is all off the critical path of a single frame because the mask is
+     * built before the dab is blitted, once per bucket.
+     */
+    @Test
+    fun `a tipped ramp builds its masks inside the budget`() {
+        // The bundle's biggest: `square_rough_lightgrey.png`, 454 x 448.
+        val tip = Tip("bench", 454, 448, ByteArray(454 * 448) { (it % 251).toByte() })
+        val samples = StrokeCorpus.all().getValue("taper")
+        val brush = Brush()
+        brush.sizeMax = 128f
+        val b = StrokeBuilder(brush)
+        b.begin(0xFF000000.toInt())
+        for (s in samples) b.add(s)
+        val stroke = b.end()
+
+        var best = Double.MAX_VALUE
+        var masks = 0
+        var kib = 0L
+        repeat(3) {
+            val cache = MaskCache()
+            val t0 = System.nanoTime()
+            for (i in 0 until stroke.dabCount) {
+                cache.get(MaskSpec(stroke.radius(i) * 2f, 1f, 1f, 0f, tip))
+            }
+            val ms = (System.nanoTime() - t0) / 1e6
+            if (ms < best) {
+                best = ms
+                masks = cache.size
+                kib = cache.byteCount / 1024
+            }
+        }
+        // The number a frame actually feels. A stroke crosses about one size
+        // bucket a frame, so what a frame pays is one mask, not the stroke's
+        // whole bill — and the biggest single one is the biggest dab.
+        var worst = Double.MAX_VALUE
+        repeat(5) {
+            val t0 = System.nanoTime()
+            MaskGenerator.generate(MaskSpec(128f, 1f, 1f, 0f, tip))
+            val ms = (System.nanoTime() - t0) / 1e6
+            if (ms < worst) worst = ms
+        }
+        println(
+            "tipped taper: ${stroke.dabCount} dabs, $masks masks, $kib KiB, " +
+                "%.2f ms total, %.2f ms for the largest".format(best, worst),
+        )
+        assertTrue(best < 20.0, "a tipped taper spent $best ms generating masks")
+        assertTrue(kib < 512, "a tipped taper needed $kib KiB")
+        assertTrue(worst < 4.0, "the largest tipped mask took $worst ms to build")
+    }
+
+    /**
      * The counterfactual that shows the geometric step is doing work: a
      * deliberately fine tolerance makes the ramps miss, which is the state the
      * plan warns about. If this ever passes with a high hit rate, the size key
