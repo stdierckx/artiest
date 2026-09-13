@@ -264,7 +264,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik6** | **DONE.** `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2, `PathText` for the clip table, save on the same debounce, load into `LayerOp.Open`. The PNG stays. See **What Ik6 built**. | `:app` | Med | Ik1, Ik3 | 4–6 |
 | **Ik7** | **DONE.** `StrokeOp`, `StrokePick`, `CommitQueue.Commit.Pick`, the strokes/pixels toggle in the selection panel, and the highlight in the overlay. See **What Ik7 built**. | `:app` | Med | Ik3 | 4–6 |
 | **Ik8** | **DONE.** `StrokeGeometry`, `StrokeSplitter`, `StrokeEraser`, `EraseMode`, the record's time origin, and the mode selector. See **What Ik8 built**. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
-| **Ik9** | Move, rotate and scale the selected strokes, through `TransformBox` over records instead of pixels. Drop is a `VectorStep`; grain regenerates where it lands. | `:app` | Med | Ik7, Ik5 | 4–6 |
+| **Ik9** | **DONE.** `StrokeTransform` in `:engine`, `StrokeMove` in `:app`, `TransformBox` over the picked strokes with a live highlight preview. See **What Ik9 built**. | `:app` | Med | Ik7, Ik5 | 4–6 |
 | **Ik10** | **DONE, and the four operations turned out to be one.** `StrokeOp.Restyle`, `StrokeRestyle`, and three buttons that appear only when strokes are picked. See **What Ik10 built**. | `:app` | Low | Ik4, Ik7 | 3–5 |
 | **Ik11** | **Sharp at any zoom**, and export at any scale: re-render the visible region at view scale on a zoom settle, and let `PngExporter` ask a vector sheet for 2x or 4x. **Gated on Ik0.** | `:app` | **High** | Ik4 | 5–8 |
 
@@ -1070,6 +1070,69 @@ A restyled stroke is a **new record with a new id**, because an undo step whose
 two halves name the same thing is a step that removes its own replacement. So
 `StrokePick.setTo` moves the selection onto the new ids; without it the user
 would watch their selection vanish for having changed its colour.
+
+## What Ik9 built
+
+> 2026-09-13. `StrokeTransform` in `:engine`, `StrokeMove` in `:app`. Twenty
+> tests.
+
+Pick some strokes and the transform box appears over them. Drag to move, a
+corner to scale, the knob to turn. The highlight follows the hand; the strokes
+move when the hand comes off the glass.
+
+### A moved stroke is the same hand movement, somewhere else
+
+Not pixels that slid across the page — the samples are mapped and the stroke is
+redrawn where they now are. So the grain regenerates in its new place, which is
+`docs/vector-plan.md` trap 2 satisfied **by construction**: `GrainTexture`'s
+shader is anchored to the page and nothing in this path touches a pixel.
+
+### What moves and what does not
+
+| Channel | Under a transform |
+|---|---|
+| x, y | Mapped. That is the operation. |
+| orientation | **Rotated with it.** It is the pen's azimuth *on the page*, so a stroke turned a quarter turn was drawn by a hand holding the pen a quarter turn round — and a chisel nib that did not turn would be a different mark in its new place. |
+| tilt | Unchanged. Turning the paper does not change how far the pen was leaning. |
+| pressure, time | Unchanged. Neither is geometry. |
+
+Orientation is stored in -PI..PI, so a turn that carries it past the end wraps
+rather than clamping; clamped, a chisel nib would stop turning half way through
+a rotation.
+
+### Scale is two things, and the second is Ik10's
+
+Mapping the samples moves the dabs further apart; it does not make them bigger,
+because a dab's size comes from the brush. A stroke scaled by two that stayed
+thin is a *stretched* stroke, not a bigger one. So the nib is scaled with the
+mark — a copy of the brush with its size range multiplied, interned in the
+sheet's table, which is exactly Ik10's re-brush reused. Strokes scaled together
+share one new entry, and a scale under half a percent adds none at all: that is
+below `MaskTolerance`'s own 3% size bucket, so a table entry per pixel of drag
+would be a table nobody could read for a difference nobody could see.
+
+A non-uniform scale becomes a uniform nib of the same area. The alternative is
+an elliptical nib that changes shape along the stroke, which is a feature nobody
+asked for and `MaskSpec` would have to grow a field for.
+
+### The drag previews and the drop edits
+
+`TransformBox` gained one optional callback: `onSettled`, the hand coming off
+the glass. `onMatrix` could not serve — it fires eight times a second, and a
+caller that turned each into an edit would make eight undo steps for one
+gesture. `FloatingPixels` does not need it, because pixels in the air are
+dropped by a button; strokes have no such moment, so the end of the drag is the
+moment.
+
+While the drag is happening the **highlight** moves and the strokes do not.
+Re-rendering fifty strokes eight times a second is not a drag anybody would want
+to be on the other end of, and a moving highlight is what a hand aims with.
+
+### Two tokens that stop a transform being applied twice
+
+The box's matrix is cumulative, so it is reset both when the selection changes —
+a transform held across a new pick would be applied to strokes it was never
+dragged over — and after each drop, because the strokes have absorbed it.
 
 ## Stop conditions
 

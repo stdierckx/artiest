@@ -555,6 +555,19 @@ private fun CanvasScreen(
     /** The highlight, republished by the render thread. See `StrokePickInfo`. */
     var pickInfo by remember { mutableStateOf(be.thalos.artiest.doc.StrokePickInfo.NONE) }
 
+    /** Ik9's live transform, or null when nothing is being dragged. */
+    var pickMatrix by remember { mutableStateOf<android.graphics.Matrix?>(null) }
+
+    /** Bumped so the overlay redraws the preview without recomposing. */
+    val pickTick = remember { mutableIntStateOf(0) }
+
+    /**
+     * Restarts the transform box's own matrix. Moved whenever the box has to
+     * forget what it was holding: a new selection, or a drag that has been
+     * absorbed into the strokes.
+     */
+    var pickToken by remember { mutableIntStateOf(0) }
+
     /**
      * Whether the sheet the pen is on keeps its strokes.
      *
@@ -1296,6 +1309,11 @@ private fun CanvasScreen(
                     // because the panel's stroke count is a recomposition.
                     it.onPickChanged = {
                         pickInfo = document.picked.snapshot
+                        // The box forgets its matrix whenever the selection
+                        // changes: a transform held across a new pick would be
+                        // applied to strokes it was never dragged over.
+                        pickToken++
+                        pickMatrix = null
                         outlineTick.intValue++
                     }
                     it.onTransformChanged = { outlineTick.intValue++ }
@@ -1325,6 +1343,10 @@ private fun CanvasScreen(
                 // are: the transform box is the outline then.
                 if (floatingBox != null) null else pickInfo.outline
             },
+            pickedTransform = {
+                pickTick.intValue
+                if (floatingBox != null) null else pickMatrix
+            },
             docToView = {
                 outlineTick.intValue
                 surface?.let { outlineMatrix.setDocToView(it.transform) }
@@ -1336,6 +1358,54 @@ private fun CanvasScreen(
             showing = selectionShape.active || selecting || pickInfo.active,
             modifier = Modifier.fillMaxSize(),
         )
+
+        // Ik9's box, over the picked strokes. Absent unless something is
+        // picked, so it consumes nothing on an ordinary canvas — the same rule
+        // the float's box follows, and for the same reason: a box that is
+        // always there is a box that eats the pen.
+        //
+        // Not shown while pixels are floating: two boxes on one canvas is two
+        // things to drag and no way to say which is which.
+        if (floatingBox == null && pickInfo.active) {
+            TransformBox(
+                sourceBounds = remember(pickInfo) {
+                    val b = pickInfo.bounds
+                    if (b.isEmpty) null else android.graphics.Rect(
+                        b.left.toInt(), b.top.toInt(),
+                        Math.ceil(b.right.toDouble()).toInt(),
+                        Math.ceil(b.bottom.toDouble()).toInt(),
+                    )
+                },
+                token = pickToken,
+                docToView = {
+                    outlineTick.intValue
+                    surface?.let { outlineMatrix.setDocToView(it.transform) }
+                    outlineMatrix
+                },
+                // The preview, eight times a second: the highlight moves and
+                // the strokes do not, because re-rendering fifty strokes at
+                // that rate is not a drag anybody would want to be on the other
+                // end of.
+                onMatrix = { m ->
+                    pickMatrix = m
+                    pickTick.intValue++
+                },
+                // And the edit, once, when the hand comes off the glass.
+                onSettled = { m ->
+                    val values = FloatArray(9)
+                    m.getValues(values)
+                    pickMatrix = null
+                    pickTick.intValue++
+                    // The token moves so the box starts from the identity
+                    // again: the strokes have absorbed the transform, and a box
+                    // that kept it would apply it twice on the next drag.
+                    pickToken++
+                    document.requestStrokeOp(be.thalos.artiest.doc.StrokeOp.Transform(values))
+                    surface?.redrawDry()
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         // Over the outline, because it is the thing being dragged, and it
         // takes the pen while it is there. Absent -- and consuming nothing --

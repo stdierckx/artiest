@@ -27,6 +27,7 @@ import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.doc.EraseMode
 import be.thalos.artiest.doc.SheetRebuilder
 import be.thalos.artiest.doc.StrokeEraser
+import be.thalos.artiest.doc.StrokeMove
 import be.thalos.artiest.doc.StrokeRestyle
 import be.thalos.artiest.doc.StrokeOp
 import be.thalos.artiest.doc.VectorSheet
@@ -1349,25 +1350,19 @@ class InkSurfaceView(
                 is StrokeOp.Erase -> edit(eraser.plan(op, sheet, entry.id), sheet, entry)
                 StrokeOp.DeletePicked ->
                     edit(eraser.planDelete(document.picked.toArray(), sheet, entry.id), sheet, entry)
+                is StrokeOp.Transform -> {
+                    val step = StrokeMove.plan(op, document.picked.toArray(), sheet, entry.id)
+                    if (step != null) {
+                        StrokeMove.apply(step, sheet)
+                        replaced(step, sheet, entry)
+                    }
+                }
                 is StrokeOp.Restyle -> {
                     val was = document.picked.toArray()
                     val step = StrokeRestyle.plan(op, was, sheet, entry.id)
                     if (step != null) {
                         StrokeRestyle.apply(step, sheet)
-                        document.recordVectorEdit(step)
-                        rebuild(entry, step.damage())
-                        document.layers.touchActive()
-                        redrawDry()
-                        // A restyled stroke is a *new* record with a new id, so
-                        // the picked set has to follow it: without this the
-                        // user would watch their selection vanish for having
-                        // changed its colour.
-                        document.picked.setTo(
-                            LongArray(step.added.size) { step.added[it].id },
-                            sheet,
-                            entry.id,
-                        )
-                        post { onPickChanged?.invoke() }
+                        replaced(step, sheet, entry)
                     }
                 }
                 else ->
@@ -1385,6 +1380,32 @@ class InkSurfaceView(
          * paints the list as it now is; and the pruning is last because it
          * reads the list.
          */
+        /**
+         * Record an edit that *replaced* records, repaint it, and move the
+         * picked set onto the replacements.
+         *
+         * The last part is what makes a restyle or a drag feel like one action
+         * rather than two: the replacements are new records with new ids — they
+         * have to be, because an undo step whose two halves name the same thing
+         * removes its own replacement — so without this the user would watch
+         * their selection vanish for having changed its colour or nudged it a
+         * pixel.
+         */
+        private fun replaced(
+            step: VectorStep,
+            sheet: be.thalos.artiest.doc.VectorSheet,
+            entry: LayerStack.Entry,
+        ) {
+            document.recordVectorEdit(step)
+            rebuild(entry, step.damage())
+            document.layers.touchActive()
+            redrawDry()
+            document.picked.setTo(
+                LongArray(step.added.size) { step.added[it].id }, sheet, entry.id,
+            )
+            post { onPickChanged?.invoke() }
+        }
+
         private fun edit(
             step: VectorStep?,
             sheet: be.thalos.artiest.doc.VectorSheet,

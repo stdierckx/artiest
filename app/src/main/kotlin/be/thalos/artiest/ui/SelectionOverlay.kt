@@ -65,6 +65,16 @@ fun SelectionOverlay(
      * very thin regions.
      */
     picked: () -> Path? = { null },
+    /**
+     * The transform being dragged over the picked strokes, or null.
+     *
+     * A preview and not the edit: the strokes themselves do not move until the
+     * hand comes off the glass, because moving them means re-rendering them and
+     * re-rendering fifty strokes eight times a second is not a drag anybody
+     * would want to be on the other end of. The highlight moves, which is what
+     * a hand needs to aim with.
+     */
+    pickedTransform: () -> Matrix? = { null },
     /** Document to view, rebuilt by the caller when the canvas moves. */
     docToView: () -> Matrix,
     /** Whether there is anything to draw. Gates the animation. */
@@ -135,7 +145,19 @@ fun SelectionOverlay(
             val native = canvas.nativeCanvas
             selection()?.let { ants(native, it, matrix, transformed, light, dark) }
             marquee()?.let { ants(native, it, matrix, transformed, light, dark) }
-            picked()?.let { spine(native, it, matrix, transformed, glow, core) }
+            picked()?.let { path ->
+                val moved = pickedTransform()
+                if (moved == null) {
+                    spine(native, path, matrix, transformed, glow, core)
+                } else {
+                    // The user's transform first, then the canvas's. One extra
+                    // matrix, built here rather than kept, because a drag is
+                    // the only time it exists.
+                    val both = Matrix(moved)
+                    both.postConcat(matrix)
+                    spine(native, path, both, transformed, glow, core)
+                }
+            }
         }
     }
 }

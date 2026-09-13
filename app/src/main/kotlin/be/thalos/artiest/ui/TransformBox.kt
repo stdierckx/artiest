@@ -62,6 +62,16 @@ fun TransformBox(
     docToView: () -> Matrix,
     /** The user's transform so far, in document space. Throttled. */
     onMatrix: (Matrix) -> Unit,
+    /**
+     * The hand came off the glass, with the transform it left behind.
+     *
+     * [onMatrix] cannot serve for this: it fires eight times a second while the
+     * drag is happening, and a caller that turned each one into an edit would
+     * make eight undo steps for one gesture. `FloatingPixels` does not need it
+     * — pixels in the air are dropped by a button — but Ik9's strokes have no
+     * such moment, so the end of the drag is the moment.
+     */
+    onSettled: ((Matrix) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (sourceBounds == null) return
@@ -88,8 +98,12 @@ fun TransformBox(
                 onDragEnd = {
                     // Unconditional. See the class header.
                     onMatrix(Matrix(user))
+                    onSettled?.invoke(Matrix(user))
                 },
-                onDragCancel = { onMatrix(Matrix(user)) },
+                onDragCancel = {
+                    onMatrix(Matrix(user))
+                    onSettled?.invoke(Matrix(user))
+                },
             )
         },
     ) {

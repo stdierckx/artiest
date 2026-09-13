@@ -89,6 +89,23 @@ sealed interface StrokeOp {
      * Null means "leave it alone", which is what makes "recolour without
      * changing the nib" expressible.
      */
+    /**
+     * Move, turn and resize the picked strokes.
+     *
+     * [matrix] is `android.graphics.Matrix.getValues` order, in **document**
+     * space, which is what `TransformBox` produces. Copied at construction for
+     * the reason [Lasso]'s path is: the box mutates one matrix in place at
+     * pointer rate.
+     *
+     * The nib is scaled with the mark — see `StrokeTransform.scaleOf` — because
+     * mapping the samples moves the dabs apart without making them bigger, and
+     * a stroke scaled by two that stayed thin is a stretched stroke rather than
+     * a bigger one.
+     */
+    class Transform(matrix: FloatArray) : StrokeOp {
+        val matrix: FloatArray = matrix.copyOf()
+    }
+
     class Restyle(
         val colorArgb: Int?,
         /** `BrushCodec.encode` of the brush to give them, or null. */
@@ -221,7 +238,8 @@ class StrokePick {
             // The two that edit the sheet rather than the set. They come here
             // only to be refused: `StrokeEraser` owns them, and the pruning
             // afterwards is what moves this object.
-            is StrokeOp.Erase, StrokeOp.DeletePicked, is StrokeOp.Restyle -> return false
+            is StrokeOp.Erase, StrokeOp.DeletePicked, is StrokeOp.Restyle,
+            is StrokeOp.Transform -> return false
         }
         if (ids.size == before && (was == null || was == ids)) return false
         publish(sheet)
