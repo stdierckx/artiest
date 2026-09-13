@@ -330,6 +330,17 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
 }
 
+/**
+ * The nibs Ik0 prices, in order, by id.
+ *
+ * The pen first as the cheap control, then the pencil, which is the one
+ * `docs/inker-plan.md`'s first stop condition is written about — and then an
+ * imported ink pen and a tipped brush, because both are things the app ships
+ * now and neither existed when the plan was written. An id that is not
+ * installed is skipped rather than failing the run.
+ */
+private val IK0_NIBS = listOf("pen", "pencil", "ink-2-fineliner", "chalk-details")
+
 /** The two stress shapes the readout is meant to be compared across. */
 private val STRESS_MODES = listOf(
     Triple("Sweep", null, StrokeStress.Path.SPIRAL),
@@ -369,6 +380,18 @@ private fun CanvasScreen(
     var stress by remember { mutableStateOf<StrokeStress?>(null) }
     var pinch by remember { mutableStateOf<GestureStress?>(null) }
     var reject by remember { mutableStateOf<RejectionStress?>(null) }
+
+    /**
+     * Ik0's readout, held until the next run replaces it.
+     *
+     * A `String` rather than a structure because nothing in the app reads it —
+     * a person does, once, and writes the number into
+     * `docs/inker-plan.md`. Parsing it into fields would be building a
+     * reporting layer for a measurement that happens four times in the life of
+     * the project.
+     */
+    var vectorReport by remember { mutableStateOf<String?>(null) }
+    var vectorRunning by remember { mutableStateOf(false) }
     var polling by remember { mutableStateOf(true) }
     var export by remember { mutableStateOf<ExportResult?>(null) }
     var exporting by remember { mutableStateOf(false) }
@@ -1325,27 +1348,29 @@ private fun CanvasScreen(
                 )
             }
             if (stats) {
-                Text(
-                    text = readout(
-                        surface, document, report, refreshHzNow(), policy,
-                        reject, export, exporting, generation,
-                        stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
-                        project, lastSave,
-                        eraserBrush?.label ?: "the brush in the hand",
-                    ),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    // A ground of its own, like the bars. Without it this is
-                    // grey monospace over a dark desk on one side and white
-                    // paper on the other, and the half over the desk is
-                    // unreadable — which is a readout that exists and cannot be
-                    // read, the worst of both.
-                    modifier = Modifier
-                        .padding(top = 6.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
+                // Ik0's table, kept on screen until the next run replaces it.
+                // Beside the readout rather than inside it because it is a
+                // measurement somebody asked for, not a live number: the
+                // readout is polled and this is not.
+                //
+                // **The buttons moved above the readout with it**, and that is
+                // a fix rather than a rearrangement: the readout is now
+                // forty-odd lines and runs off the bottom of a 1440-pixel
+                // screen, so every control under it had become unreachable on
+                // the one device this app is developed against.
+                vectorReport?.let { text ->
+                    Text(
+                        text = text,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
                 DebugRow(
                     surface = surface,
                     policy = policy,
@@ -1411,6 +1436,35 @@ private fun CanvasScreen(
                         grain = v.ink.grain.strength
                         generation++
                     },
+                    onVector = {
+                        val v = surface ?: return@DebugRow
+                        vectorRunning = true
+                        // Paused for the same reason a stress run pauses it:
+                        // the readout recomposes and allocates, and this is a
+                        // measurement of the render thread's time.
+                        polling = false
+                        // By name, not by what is in the hand. The plan's stop
+                        // condition is about the pencil and its fallback is
+                        // "opaque nibs only", so the pair that answers it is
+                        // the pencil and an ink pen — and a third with a
+                        // picture tip, because Wb5 made that a nib the app
+                        // ships and nobody has priced re-rendering one.
+                        val nibs = IK0_NIBS.mapNotNull { id ->
+                            library.find(id)?.let { it.label to it.create() }
+                        }
+                        // 100 and 300, not 1000. The stop condition is written about
+                        // 300, and the pen's own run showed the per-stroke cost
+                        // flat from 100 to 1000 — 3.80, 3.71, 3.65 ms — so the
+                        // third row costs ten minutes to confirm a straight
+                        // line.
+                        v.measureRerender(intArrayOf(100, 300), nibs) {
+                            vectorReport = it
+                            vectorRunning = false
+                            polling = true
+                            generation++
+                        }
+                    },
+                    vectorRunning = vectorRunning,
                     onStress = { pressure, path ->
                         val v = surface ?: return@DebugRow
                         val s = stress ?: StrokeStress(v).also { stress = it }
@@ -1423,6 +1477,27 @@ private fun CanvasScreen(
                             generation++
                         }
                     },
+                )
+                Text(
+                    text = readout(
+                        surface, document, report, refreshHzNow(), policy,
+                        reject, export, exporting, generation,
+                        stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
+                        project, lastSave,
+                        eraserBrush?.label ?: "the brush in the hand",
+                    ),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    // A ground of its own, like the bars. Without it this is
+                    // grey monospace over a dark desk on one side and white
+                    // paper on the other, and the half over the desk is
+                    // unreadable — which is a readout that exists and cannot be
+                    // read, the worst of both.
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
         }
@@ -2065,6 +2140,8 @@ private fun DebugRow(
     onF16: () -> Unit,
     onWet: () -> Unit,
     onStress: (Float?, StrokeStress.Path) -> Unit,
+    onVector: () -> Unit,
+    vectorRunning: Boolean,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -2142,6 +2219,14 @@ private fun DebugRow(
             TextButton(enabled = surface != null && !stressRunning, onClick = { onStress(p, path) }) {
                 Text(label)
             }
+        }
+        // Ik0. Measures with whatever brush is in the hand, which is the point
+        // of it being a button beside "Pencil ON" rather than a mode of its
+        // own: the plan's stop condition is about the *pencil*, and the
+        // fallback it names is "opaque nibs only", so the pair of runs is the
+        // measurement.
+        TextButton(enabled = surface != null && !vectorRunning, onClick = onVector) {
+            Text(if (vectorRunning) "Vector…" else "Vector")
         }
     }
 }

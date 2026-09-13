@@ -106,6 +106,11 @@ Three real options, and they diverge hard:
   full. The most self-contained, and it reuses everything P2 built.
 - **Inker** (150–200 days) — vector strokes, the eraser modes, the guide
   framework, perspective. The most *distinctive*, and the gateway to comics.
+  **It now has a plan of its own — `docs/inker-plan.md`**, written against the
+  code rather than against the menus, and it prices the Inker *without* the
+  sketcher at 77–115 days: 107–160 with P3, which is this row's band at its
+  lower end. The reason is that `Layer` turns out to be the render cache the
+  vector menu was budgeting days to build.
 - **Comic** — do not pick this second. It needs text, balloons, panels *and*
   pages, and pages need P0.5 finished and then some.
 
@@ -183,3 +188,5 @@ way this feature can make the app feel worse instead of better.
 | `text-plan.md` | 15–20 | transform handles |
 | `comics-plan.md` | 8–11 now / 250+ complete | text, groups, pages |
 | `animation-plan.md` | 23–36 (flipbook) / 60+ (with sound and camera) | the sequence subsystem |
+| `inker-plan.md` — the build for P4, over `vector-plan.md` and `guides-plan.md` | 77–115 | P3 |
+| `big-nib-plan.md` — a measured defect: a 600 px dab costs 24x what it should | 7–11.5 | none |

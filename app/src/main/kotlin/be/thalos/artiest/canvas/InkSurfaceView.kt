@@ -16,12 +16,14 @@ import androidx.graphics.surface.SurfaceControlCompat
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.FloatOp
+import be.thalos.artiest.doc.Layer
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
+import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.adoptBrush
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
@@ -391,78 +393,365 @@ class InkSurfaceView(
      * threading contract stated in one line. `Layer.write` refuses the main
      * thread, so the contract is checked rather than trusted.
      */
+    /**
+     * One block of work for the render thread, run before the next dry frame.
+     *
+     * **Instrumentation, and the only thing that may use it.** Everything the
+     * app does on the render thread goes through `CommitQueue`, whose ordering
+     * argument has been made four times; a measurement is not an edit and has
+     * no place in that queue. It is a field rather than a queue because there
+     * is at most one in flight and the next one cannot start until the readout
+     * of the last has been read by a person.
+     */
+    @Volatile
+    private var renderThreadTask: (() -> Unit)? = null
+
+    /**
+     * Ik0: what it costs to rebuild a sheet from the strokes that made it.
+     *
+     * `docs/inker-plan.md`'s whole premise is that a vector sheet is a raster
+     * sheet that kept its input, and its first stop condition is a number this
+     * produces: *"if re-rendering 300 pencil strokes costs more than a second
+     * on the tablet, then every edit is a visible hitch and the honest fallback
+     * is vector sheets for opaque nibs only."*
+     *
+     * Two things make the number trustworthy rather than merely encouraging.
+     * It goes through [stampStroke], which is the path a real commit takes, so
+     * a translucent nib pays for the scratch buffer and the composite exactly
+     * as it does when the pen is down. And it renders into a sheet of its own,
+     * so measuring the rebuild does not paint over the drawing — a stress that
+     * costs the user their page is a stress nobody runs twice.
+     *
+     * Two passes per count. The first pays for every dab mask the scene's sizes
+     * need and the second does not, and both are real: a cold sheet is what an
+     * app resume rebuilds, and a warm one is what an edit or an undo rebuilds.
+     */
+    fun measureRerender(
+        counts: IntArray,
+        nibs: List<Pair<String, Brush>>,
+        onDone: (String) -> Unit,
+    ) {
+        if (renderThreadTask != null || !surfaceAlive) return
+        renderThreadTask = {
+            val report = runCatching { rerenderReport(counts, nibs) }
+                .getOrElse { "re-render bench failed: $it" }
+            // Also to the log, because the number's destination is a table in
+            // `docs/inker-plan.md` and reading it off a tablet screen into a
+            // document is how a digit gets transposed.
+            android.util.Log.i("artiest.ik0", report)
+            post { onDone(report) }
+        }
+        redrawDry()
+    }
+
+    /**
+     * The report, one block per nib.
+     *
+     * **The bench chooses its own brushes and puts the old one back**, rather
+     * than measuring whatever is in the hand. The first run of this did the
+     * latter and produced a table that was quietly the wrong nib — the debug
+     * row's "Pencil ON" and "Stamp" toggles are two more things that have to be
+     * in the right state, and a measurement whose meaning depends on which
+     * buttons were pressed before it is a measurement nobody can repeat. The
+     * plan asks for the pencil and the ink pen by name; this asks for them by
+     * name.
+     *
+     * The pen is restored from its own encoded text, which is how `BrushStore`
+     * restores it across a restart — the same round trip, so the same fidelity.
+     */
+    private fun rerenderReport(counts: IntArray, nibs: List<Pair<String, Brush>>): String {
+        val w = document.widthPx
+        val h = document.heightPx
+        val sheet = Layer(w, h)
+        val held = BrushCodec.encode(pen)
+        val out = StringBuilder()
+        var blockStart = 0
+        try {
+            for ((label, brush) in nibs) {
+                adoptBrush(brush, pen)
+                armRasterizer()
+                out.append(label).append("  ")
+                    .append(if (indirectNeeded()) "indirect" else "direct")
+                    // The debug row can put the rasterizer in stamp mode, and
+                    // that is a 3x difference on an unshaped nib — so the table
+                    // says which it was rather than leaving the reader to
+                    // remember which buttons were pressed.
+                    .append(' ').append(rasterizer.mode.name.lowercase())
+                    .append(if (rasterizer.tip != null) " tip" else "")
+                    .append("  size ").append(pen.sizeMin.toInt()).append("..")
+                    .append(pen.sizeMax.toInt())
+                    .append("  op ").append(fmt2(pen.opacity))
+                    .append("  flow ").append(fmt2(pen.flow))
+                    .append("  hard ").append(fmt2(pen.hardness))
+                    .append(if (pen.grain.isActive) "  grain" else "")
+                    .append('\n')
+                out.append(
+                    "strokes samples    dabs  cold ms  warm ms ms/strk   KiB  " +
+                        "hit  patch ms\n",
+                )
+                val builder = StrokeBuilder(pen)
+                var drift = -1L
+                for (n in counts) {
+                    val scene = VectorStress.scene(n, w, h)
+                    val (raw, _) = VectorStress.bytesOf(scene)
+                    sheet.blank()
+                    val cold = renderScene(scene, builder, sheet)
+                    sheet.blank()
+                    val warm = renderScene(scene, builder, sheet)
+                    val patch = renderScene(touching(scene, builder, w, h), builder, sheet)
+                    if (drift < 0) drift = driftOf(scene, builder, sheet, w, h)
+                    out.append(
+                        "%7d %7d %7d %8.1f %8.1f %7.2f %5d %4d %9.1f\n".format(
+                            n, VectorStress.samplesOf(scene), cold.second,
+                            cold.first, warm.first, warm.first / n,
+                            raw / 1024, patchCount, patch.first,
+                        ),
+                    )
+                }
+                out.append("redraw drift ").append(drift).append(" px in a million\n\n")
+                // Logged per nib rather than only at the end. The first run of
+                // this took a quarter of an hour and printed nothing until it
+                // was done, so there was no way to tell a slow pencil from a
+                // wedged render thread — which is the one question you have
+                // while waiting.
+                android.util.Log.i("artiest.ik0", out.substring(blockStart))
+                blockStart = out.length
+            }
+        } finally {
+            sheet.close()
+            BrushCodec.decode(held)?.let { adoptBrush(it, pen) }
+            armRasterizer()
+        }
+        return out.toString()
+    }
+
+    /**
+     * The strokes of [scene] whose ink meets a [PATCH_DOC] by [PATCH_DOC] square at the
+     * middle of the page.
+     *
+     * **This is the number the plan's first stop condition should have asked
+     * for.** A full-sheet rebuild is what an app resume or a zoom settle costs,
+     * and it happens once; what happens two hundred times an hour is an *edit*
+     * — rub out one line, move three, recolour one — and an edit only has to
+     * redraw the strokes that overlap the rectangle it dirtied. Ik4 calls that
+     * a damage rectangle. If the full rebuild is unaffordable and the patch is
+     * not, then damage rectangles stop being an optimisation and become a
+     * requirement, which is a different conclusion from "vector sheets are for
+     * opaque nibs only".
+     *
+     * Half a page across is deliberately generous: a stroke's own bounds are
+     * usually far smaller, and being generous here fails towards the honest
+     * answer rather than the flattering one.
+     */
+    private fun touching(
+        scene: List<VectorStress.Record>,
+        builder: StrokeBuilder,
+        w: Int,
+        h: Int,
+    ): List<VectorStress.Record> {
+        val left = (w - PATCH_DOC) * 0.5f
+        val top = (h - PATCH_DOC) * 0.5f
+        val right = left + PATCH_DOC
+        val bottom = top + PATCH_DOC
+        val out = ArrayList<VectorStress.Record>()
+        for (record in scene) {
+            // Built rather than estimated, because the question is whether the
+            // stroke's *ink* meets the patch and only the dab loop knows how
+            // wide the ink is. The building is setup and is not timed.
+            val bounds = build(record, builder).bounds
+            if (bounds.right >= left && bounds.left <= right &&
+                bounds.bottom >= top && bounds.top <= bottom
+            ) {
+                out.add(record)
+            }
+        }
+        patchCount = out.size
+        return out
+    }
+
+    private var patchCount: Int = 0
+
+    /** Wall milliseconds, and the dabs laid, for one pass over [scene]. */
+    private fun renderScene(
+        scene: List<VectorStress.Record>,
+        builder: StrokeBuilder,
+        into: Layer,
+    ): Pair<Double, Int> {
+        var dabs = 0
+        val t0 = System.nanoTime()
+        for (record in scene) {
+            val stroke = build(record, builder)
+            dabs += stroke.dabCount
+            stampStroke(stroke, into)
+        }
+        return (System.nanoTime() - t0) / 1e6 to dabs
+    }
+
+    /**
+     * How many pixels in a million come out different when the same records are
+     * drawn twice.
+     *
+     * **Ik2's case, measured before Ik2 is written.** `docs/inker-plan.md` says
+     * determinism is the load-bearing property and that today's brush does not
+     * have it: `StrokeBuilder.begin` derives its random state from a counter,
+     * so a re-render gets a different roll. The plan asserts it; this counts it.
+     *
+     * Zero for a nib with no scatter and no size jitter — most of them — and a
+     * real number for the pencil, whose `scatter` is 1.5 document pixels driven
+     * by pressure. A drawing that changes every time it is rebuilt is the thing
+     * that makes undo, move and zoom all quietly untrustworthy, and a nib at
+     * zero here is one that would survive a vector sheet today.
+     */
+    private fun driftOf(
+        scene: List<VectorStress.Record>,
+        builder: StrokeBuilder,
+        sheet: Layer,
+        w: Int,
+        h: Int,
+    ): Long {
+        val mirror = Layer(w, h)
+        try {
+            sheet.blank()
+            renderScene(scene, builder, sheet)
+            renderScene(scene, builder, mirror)
+            val a = IntArray(w)
+            val b = IntArray(w)
+            var differ = 0L
+            var total = 0L
+            sheet.read { first ->
+                mirror.read { second ->
+                    // Row by row rather than the whole page at once: two
+                    // 7.1-megapixel int arrays is 57 MiB, and this runs on a
+                    // device whose memory budget is the subject of three other
+                    // notes in this file.
+                    for (y in 0 until h) {
+                        first.getPixels(a, 0, w, 0, y, w, 1)
+                        second.getPixels(b, 0, w, 0, y, w, 1)
+                        for (x in 0 until w) {
+                            total++
+                            if (a[x] != b[x]) differ++
+                        }
+                    }
+                }
+            }
+            return if (total == 0L) 0L else differ * 1_000_000L / total
+        } finally {
+            mirror.close()
+        }
+    }
+
+    /** One record through the real builder. The heart of what Ik0 prices. */
+    private fun build(record: VectorStress.Record, builder: StrokeBuilder): Stroke {
+        builder.begin(inkColorArgb)
+        for (i in 0 until record.count) {
+            val nanos = downNanos + (record.timeMillis(i) * 1_000_000f).toLong()
+            builder.addTilt(record.tilt(i), record.orientation(i), nanos)
+            builder.add(record.x(i), record.y(i), record.pressure(i), nanos)
+        }
+        return builder.end()
+    }
+
+    /** An arbitrary but fixed pen-down instant; only the deltas are read. */
+    private val downNanos: Long = 1_000_000_000L
+
+    private fun fmt2(v: Float): String = "%.2f".format(v)
+
+    /**
+     * Put [stroke] into [into], by whichever path the brush in the hand needs.
+     *
+     * **The one place a stroke becomes pixels**, and that is the point of it
+     * being a method rather than the body of [commitSink]'s `onStroke`.
+     * `docs/inker-plan.md`'s third stop condition is *"if re-rendering cannot
+     * go through `ScratchLayer` and `DabRasterizer` as the commit path does —
+     * if it needs its own loop — stop"*, because Phase 3 bought one compositor
+     * deliberately and two that drift is the defect a user finds months later
+     * in a file they have already sent somewhere. A re-render calls this.
+     *
+     * [into] is a parameter for the same reason: Ik0 measures the rebuild
+     * against an offscreen sheet of the same size, so that measuring it does
+     * not paint over the drawing. Every caller that is not a measurement passes
+     * `document.layer`.
+     *
+     * Does not snapshot for undo and does not touch thumbnails. Both belong to
+     * the *event* — a stroke was drawn, a sheet changed — and neither belongs
+     * to the act of rasterising, which is why they stayed with the caller.
+     */
+    private fun stampStroke(stroke: Stroke, into: Layer) {
+        if (!indirectNeeded()) {
+            armRasterizer()
+            into.write { rasterizer.drawDry(it, stroke) }
+            return
+        }
+        val stencil = document.selection.maskBitmap()
+        scratch.begin(stroke.bounds)
+        val sc = scratch.canvasInDocSpace()
+        if (sc == null) {
+            // The buffer could not be opened. Falling back to the direct
+            // path draws a beaded stroke, which is wrong but visible;
+            // dropping the stroke silently is wrong and invisible.
+            //
+            // The stencil still has to hold, and here a clip is the only
+            // tool left. `Layer`'s canvas is a software one, where Skia
+            // antialiases a path clip, so this costs nothing visible
+            // against the masked path -- which is exactly why it is safe
+            // here and wrong on the frame's `RenderNode` canvas.
+            armRasterizer()
+            into.write {
+                val save = it.save()
+                document.selection.clipInto(it)
+                rasterizer.drawDry(it, stroke)
+                it.restoreToCount(save)
+            }
+            return
+        }
+        armRasterizer()
+        // No `flowOverride`. Flow lives on the dab now -- `StrokeBuilder`
+        // writes `flowOption.valueFor(context)` into every one -- and
+        // passing the brush's flow here as well multiplied it in a second
+        // time. That was correct when a dab had no flow of its own and was
+        // never revisited when it got one, so the pencil painted at flow
+        // squared and the darkest press it could reach was 0.72 of what
+        // the preset asked for.
+        rasterizer.drawDry(sc, stroke)
+        if (stencil != null) scratch.maskBy(stencil)
+        into.write {
+            scratch.compositeInto(
+                it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
+            )
+        }
+    }
+
     private val commitSink = object : CommitQueue.Sink {
         override fun onStroke(stroke: Stroke) {
             // The snapshot first, and it is not merely ordering: this is the
             // last moment the region exists in its pre-stroke state. Taken
             // after the rasterise it would record the stroke as its own undo.
             document.snapshotBeforeStroke(stroke.bounds)
-            if (!indirectNeeded()) {
-                armRasterizer()
-                document.layer.write { rasterizer.drawDry(it, stroke) }
-                document.layers.touchActive()
-                return
-            }
-            val stencil = document.selection.maskBitmap()
-            // W6's indirect path. The dabs land on the scratch, which starts
-            // empty, so the stroke's own overlaps composite against nothing;
-            // the single composite at the end is what carries the opacity.
-            // The wet pass has usually already accumulated this stroke. Reuse
-            // it when it has: re-laying every dab would double the paint on a
-            // translucent brush, which is the very bug the buffer exists to
-            // prevent, wearing a different hat.
-            if (scratch.isOpen && scratchEpoch == strokeEpoch &&
+            // W6's indirect path. The wet pass has usually already accumulated
+            // this stroke onto the scratch. Reuse it when it has: re-laying
+            // every dab would double the paint on a translucent brush, which is
+            // the very bug the buffer exists to prevent, wearing a different
+            // hat.
+            //
+            // This is the one thing [stampStroke] cannot do, and the reason it
+            // stayed here rather than moving with the rest: it is about *this*
+            // stroke having just been drawn, and nothing that re-renders an
+            // old record is ever in that position.
+            if (indirectNeeded() && scratch.isOpen && scratchEpoch == strokeEpoch &&
                 scratch.ensureCovers(stroke.bounds)
             ) {
                 // Already masked by the wet pass, and `DST_IN` is idempotent,
                 // so this is belt to that braces -- and it is what covers the
                 // case where `ensureCovers` has just grown the buffer into
                 // ground the wet pass never masked.
-                if (stencil != null) scratch.maskBy(stencil)
+                document.selection.maskBitmap()?.let { scratch.maskBy(it) }
                 document.layer.write {
                     scratch.compositeInto(
                         it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
                     )
                 }
-                document.layers.touchActive()
-                return
-            }
-            scratch.begin(stroke.bounds)
-            val sc = scratch.canvasInDocSpace()
-            if (sc == null) {
-                // The buffer could not be opened. Falling back to the direct
-                // path draws a beaded stroke, which is wrong but visible;
-                // dropping the stroke silently is wrong and invisible.
-                //
-                // The stencil still has to hold, and here a clip is the only
-                // tool left. `Layer`'s canvas is a software one, where Skia
-                // antialiases a path clip, so this costs nothing visible
-                // against the masked path -- which is exactly why it is safe
-                // here and wrong on the frame's `RenderNode` canvas.
-                armRasterizer()
-                document.layer.write {
-                    val save = it.save()
-                    document.selection.clipInto(it)
-                    rasterizer.drawDry(it, stroke)
-                    it.restoreToCount(save)
-                }
-                document.layers.touchActive()
-                return
-            }
-            armRasterizer()
-            // No `flowOverride`. Flow lives on the dab now -- `StrokeBuilder`
-            // writes `flowOption.valueFor(context)` into every one -- and
-            // passing the brush's flow here as well multiplied it in a second
-            // time. That was correct when a dab had no flow of its own and was
-            // never revisited when it got one, so the pencil painted at flow
-            // squared and the darkest press it could reach was 0.72 of what
-            // the preset asked for.
-            rasterizer.drawDry(sc, stroke)
-            if (stencil != null) scratch.maskBy(stencil)
-            document.layer.write {
-                scratch.compositeInto(
-                    it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
-                )
+            } else {
+                stampStroke(stroke, document.layer)
             }
             document.layers.touchActive()
         }
@@ -1250,6 +1539,13 @@ class InkSurfaceView(
             bufferHeight: Int,
             params: Collection<DabBatch>,
         ) {
+            // Before the clock starts, on purpose: a measurement that ran
+            // inside the timed body would show up as one two-second dry frame
+            // in the very percentiles it exists to protect.
+            renderThreadTask?.let {
+                renderThreadTask = null
+                it()
+            }
             val dryStart = System.nanoTime()
             try {
                 drawDryFrame(canvas)
@@ -2555,6 +2851,17 @@ class InkSurfaceView(
         Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() ?: 0L
 
     companion object {
+
+        /**
+         * The damage square Ik0 prices an edit against, in document pixels.
+         *
+         * A thousand is about half the page's short side and is deliberately
+         * generous: a stroke's own bounds are usually far smaller, so erring
+         * this way fails towards the honest answer rather than the flattering
+         * one.
+         */
+        private const val PATCH_DOC: Float = 1000f
+
 
         /**
          * The stylus barrel buttons, as `MotionEvent` reports them:
