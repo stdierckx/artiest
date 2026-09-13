@@ -1,0 +1,27 @@
+artiest-brush 2
+id airbrush-soft
+label Airbrush Soft
+origin IMPORTED
+tags krita
+size 600 600
+sizeCurve pow 1.0
+spacing 0.1
+isotropic 0
+hardness 0.4
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 1.0 0.0 0.0 1.0 0
+sizeOpt.combine MULTIPLY
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0 0.675298 0.578529 0.859438 1
+aspect 1 1 MULTIPLY
+rotation 0 0 MULTIPLY
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

@@ -1,0 +1,30 @@
+artiest-brush 2
+id pencil-4-soft
+label Pencil-4 Soft
+origin IMPORTED
+tags krita tip
+size 0 16
+sizeCurve pow 1.0
+spacing 0.2
+isotropic 0
+hardness 1
+tip graphite-grain
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 1.0 0.0 0.0 1.0 0
+sizeOpt.combine MULTIPLY
+sizeOpt.drive PRESSURE points 0 0 0.145729 0.0351759 0.683417 0.859296 1 1
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0 0.0817124 0.159411 0.567839 0.763819 1 1
+aspect 1 1 MULTIPLY
+rotation 0.0 6.2831855 MULTIPLY
+rotation.drive DIRECTION pow 1.0
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

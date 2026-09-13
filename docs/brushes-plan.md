@@ -230,7 +230,7 @@ Each item is separately useful, and the order puts the cheap refutations first.
 | **Wb5** | **DONE.** Bitmap tips in the engine: mask source, cache key, tip budget. Falloff shapes did not turn out to be part of it — see below. | **Cleared.** 1.10 ms for the largest mask a tip can produce, against a 16.6 ms frame. |
 | **Wb6** | **DONE.** Second judgement pass, over predefined-tip brushes. | **Cleared.** 40 of 46 read as themselves; the six that do not share one cause. |
 | **Wb7** | In-app import from `.bundle`/`.kpp`, with the swatch grid picker. | — |
-| **Wb8** | Ship a curated CC0 starter set (~10–20), `LICENSES`, `NOTICE` amendment. | Any brush whose licence cannot be traced to a sentence in a `meta.xml` or an author's own page is dropped. |
+| **Wb8** | **DONE.** Ship a curated CC0 starter set (~10–20), `NOTICE` amendment. | **Cleared.** Sixteen presets and six tips, every one traced to the `CC-0` line in the bundle's own `meta.xml`. |
 
 ## Risks
 
@@ -491,6 +491,70 @@ and the picture of it is too small.
   `erase 1`, and the swatch renderer draws erasers as ink, so the row is a black
   slab."* `BrushSwatch.rubbedOut` punches the stroke through a wash now, so an
   eraser's row shows the hole it makes.
+
+## Wb8 — the sixteen a fresh install has
+
+> 2026-09-13. `app/src/main/assets/brushes`, `app/src/main/assets/tips`,
+> `ui/StarterBrushes.kt`, `tools/brush-picks.txt`.
+
+### The picking, as the plan described it
+
+`tools/brush-picks.txt` is the file this plan asked for under *"the machine
+proposes, you dispose, and the disposal is a file in git."* The converter's
+`--write-picks` proposes every preset it can convert, **all commented out**;
+uncommenting a line is the decision; `--picks` converts only what is
+uncommented. Re-running the proposal keeps the file line for line and appends
+only ids it has never mentioned, so regenerating after a bundle changes cannot
+silently undo a choice.
+
+Sixteen are uncommented, chosen to fill the gaps around the five the app
+authors itself rather than to be a tour of the bundle:
+
+| | |
+|---|---|
+| Pencils | Pencil-1 Hard, Pencil-3 Large 4B, Pencil-4 Soft, Pencil-5 Tilted |
+| Charcoal | Charcoal Pencil Large, Charcoal Pencil Thin |
+| Ink | Ink-1 Precision, Ink-2 Fineliner, Ink-3 Gpen, Ink-7 Brush Rough |
+| Marker | Marker Chisel Smooth |
+| Paint | Bristles-1 Details, Bristles-3 Large Smooth |
+| Other | Chalk Details, Airbrush Soft, Stamp Grass |
+
+Four of them stamp a picture. 160 KiB of APK all told, which is the whole cost.
+
+None of the bundle's three erasers is among them. The app has two of its own
+now and they are brushes rather than a mode, so a third and fourth called
+*Eraser Circle* and *Eraser Small* would be four rows doing one job.
+
+### Copied out, not read in place
+
+`StarterBrushes` copies the assets into `files/brushes` and `files/tips` the
+first time a version of the set runs. **Copied, so they are ordinary brushes**:
+a starter set that lived in the assets would need a third origin beside built-in
+and saved, and every question the shelf asks — can I tune it, save over it,
+delete it, does a tuning bump move it — would need a third answer. Copied out, a
+charcoal pencil from the bundle is exactly as much yours as one you made this
+morning.
+
+The cost is that deleting one is permanent, and that is the right cost. A
+starter set that grew back would be a shelf that will not let you tidy it —
+which is why the seed is keyed on a **version number** and not on "is the
+directory empty". An empty directory is what you have after deleting all
+sixteen.
+
+### What the tablet showed
+
+Twenty-seven rows in the shelf, all of them rendering their own mark, the
+imported ones among them. *Chalk Details* — a tipped brush — draws a grainy
+chalk line on the glass, which is the first time a picture-nibbed brush has been
+used to draw anything outside a test.
+
+### One thing this found in the build, not in the brushes
+
+`testOptions.unitTests.isIncludeAndroidResources` was off, so Robolectric could
+not see `assets/` at all. The first version of `StarterBrushesTest` passed while
+reading nothing: an asset listing came back empty, the loop ran zero times, and
+every assertion about the shipped set was true of the empty set. Worth writing
+down because the failure mode is a green test rather than a red one.
 
 ## Sources
 

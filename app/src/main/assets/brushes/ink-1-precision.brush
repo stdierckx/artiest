@@ -1,0 +1,28 @@
+artiest-brush 2
+id ink-1-precision
+label Ink-1 Precision
+origin IMPORTED
+tags krita
+size 0 3
+sizeCurve pow 1.0
+spacing 0.15
+isotropic 0
+hardness 0.85
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 1.0 0.0 0.0 1.0 0
+sizeOpt.combine MULTIPLY
+sizeOpt.drive SPEED points 0 1 1 0.526104
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0.163266 0 0.914286 1
+aspect 1 1 MULTIPLY
+rotation 0 0 MULTIPLY
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

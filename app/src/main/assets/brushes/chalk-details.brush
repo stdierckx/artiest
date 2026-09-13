@@ -1,0 +1,29 @@
+artiest-brush 2
+id chalk-details
+label Chalk Details
+origin IMPORTED
+tags krita tip textured
+size 0 60
+sizeCurve pow 1.0
+spacing 0.04
+isotropic 0
+hardness 1
+tip square-eroded
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 160.0 0.35 0.22 0.86 11
+sizeOpt.combine MULTIPLY
+sizeOpt.drive PRESSURE points 0 0.240175 1 1
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0.698795 0.396396 0.871486 1 1
+aspect 1 1 MULTIPLY
+rotation 0 0 MULTIPLY
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

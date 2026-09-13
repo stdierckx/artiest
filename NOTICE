@@ -14,13 +14,32 @@ repository that also contains a drawing is worth being explicit about.
    author's consent under the same Apache-2.0 terms as the code. It is
    reference material, not a logo or a trade mark.
 
-2. No third-party source, assets or brush data have been copied into this
-   repository. Where the design was informed by other drawing programs --
-   Krita and GIMP (GPL-3.0), MyPaint (GPL-2.0), and the Android graphics
-   stack -- the technique was learned from documentation and published
-   architecture descriptions and reimplemented here. docs/phase2-plan.md
-   records which idea came from where, and why each was taken, adapted or
-   skipped. See "Prior art, and the rule that governs it".
+2. No third-party source has been copied into this repository. Where the
+   design was informed by other drawing programs -- Krita and GIMP
+   (GPL-3.0), MyPaint (GPL-2.0), and the Android graphics stack -- the
+   technique was learned from documentation and published architecture
+   descriptions and reimplemented here. docs/phase2-plan.md records which
+   idea came from where, and why each was taken, adapted or skipped. See
+   "Prior art, and the rule that governs it".
+
+3. app/src/main/assets/brushes and app/src/main/assets/tips hold sixteen
+   brush presets and six brush tips converted from the default resource
+   bundle that ships with Krita. That bundle's own meta.xml declares
+
+       <meta:meta-userdefined meta:name="license" meta:value="CC-0"/>
+
+   alongside its author line, "Deevad with derivations of the brushes of
+   Ramon Miranda, Razvanc, Radian, Wolthera, Storm, Scottyp and other."
+   CC-0 is a public domain dedication and places no condition on reuse;
+   the attribution above is given because it is deserved, not because it
+   is required.
+
+   A preset and the program that reads it are two objects with two
+   licences, and conflating them is the mistake this note exists to avoid:
+   the data is CC-0, Krita's source is GPL-3.0, and no line of the latter
+   is here. tools/brush-picks.txt records exactly which presets were taken
+   and tools/krita-brushes.py is the converter, written from the file
+   formats rather than from Krita's code. See docs/brushes-plan.md.
 
 Third-party dependencies are declared in gradle/libs.versions.toml and are
 retrieved at build time; none is vendored here. The AndroidX libraries this

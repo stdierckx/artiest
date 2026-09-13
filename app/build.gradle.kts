@@ -51,6 +51,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        // The starter brushes ride in `assets/`, and `StarterBrushesTest` is
+        // the only thing that checks the shipped files parse. Without this,
+        // Robolectric sees no assets at all — an asset listing comes back empty
+        // and every assertion about the set passes by describing nothing, which
+        // is how the test first went green with sixteen files it never opened.
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {

@@ -1,0 +1,30 @@
+artiest-brush 2
+id pencil-5-tilted
+label Pencil-5 Tilted
+origin IMPORTED
+tags krita tip textured
+size 0 40
+sizeCurve pow 1.0
+spacing 0.03
+isotropic 0
+hardness 1
+tip gradient
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 160.0 0.35 0.22 0.86 11
+sizeOpt.combine MULTIPLY
+sizeOpt.drive TILT points 0 0.246231 1 1
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0 0.144578 0.0481932 1 1
+aspect 1 1 MULTIPLY
+rotation 0.0 6.2831855 MULTIPLY
+rotation.drive ORIENTATION points 0 0 1 1
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

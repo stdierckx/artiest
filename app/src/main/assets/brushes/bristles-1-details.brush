@@ -1,0 +1,29 @@
+artiest-brush 2
+id bristles-1-details
+label Bristles-1 Details
+origin IMPORTED
+tags krita tip
+size 0 16
+sizeCurve pow 1.0
+spacing 0.04
+isotropic 0
+hardness 1
+tip bristle
+opacity 1
+flowMin 0.0
+flow 0.999997
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 1.0 0.0 0.0 1.0 0
+sizeOpt.combine MULTIPLY
+sizeOpt.drive PRESSURE points 0 0.122271 0.414508 0.318777 0.746114 0.864629 1 1
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0 0.0673575 0.0393013 0.754237 1
+aspect 1 1 MULTIPLY
+rotation 0 0 MULTIPLY
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

@@ -1,0 +1,83 @@
+# Which imported brushes ship with artiest.
+#
+# Uncomment a line to ship it. Everything here is CC-0 and traceable
+# to a sentence in the bundle's own meta.xml; anything that is not
+# does not reach this file. See docs/brushes-plan.md, Wb8.
+#
+# id                              label                    tip
+# eraser-circle                   Eraser Circle            -
+# eraser-small                    Eraser Small             -
+# eraser-soft                     Eraser Soft              -
+airbrush-soft                   Airbrush Soft            -
+# basic-2-opacity                 Basic-2 Opacity          -
+# basic-3-flow                    Basic-3 Flow             -
+# basic-4-flow-opacity            Basic-4 Flow Opacity     -
+# basic-5-size-opacity            Basic-5 Size Opacity     -
+# basic-5-size                    Basic-5 Size             -
+# basic-6-details                 Basic-6 Details          plain-rake
+pencil-1-hard                   Pencil-1 Hard            -
+# pencil-2                        Pencil-2                 -
+pencil-3-large-4b               Pencil-3 Large 4B        -
+pencil-4-soft                   Pencil-4 Soft            graphite-grain
+pencil-5-tilted                 Pencil-5 Tilted          gradient
+# pencil-6-quick-shade            Pencil-6 Quick Shade     graphite-grain
+ink-1-precision                 Ink-1 Precision          -
+ink-2-fineliner                 Ink-2 Fineliner          -
+ink-3-gpen                      Ink-3 Gpen               -
+# ink-4-pen-rough                 Ink-4 Pen Rough          -
+ink-7-brush-rough               Ink-7 Brush Rough        -
+marker-chisel-smooth            Marker Chisel Smooth     -
+# marker-details                  Marker Details           -
+# marker-dry                      Marker Dry               -
+bristles-1-details              Bristles-1 Details       bristle
+# bristles-2-flat-rough           Bristles-2 Flat Rough    chisel-streaks
+bristles-3-large-smooth         Bristles-3 Large Smooth  bristles-circle-dense
+# bristles-4-glaze                Bristles-4 Glaze         random-particles
+# bristles-5-flat                 Bristles-5 Flat          rake-flat
+# charcoal-rock-soft              Charcoal Rock Soft       chalk-chisel-random-small
+# dry-roller                      Dry Roller               square-eroded
+# dry-bristles                    Dry Bristles             scratches-rough
+# dry-bristles-eroded             Dry Bristles Eroded      chalk-chisel-random
+# dry-brushing                    Dry Brushing             random-particles
+# dry-textured-creases            Dry Textured Creases     abominable-snowman
+chalk-details                   Chalk Details            square-eroded
+# chalk-grainy                    Chalk Grainy             rock-pitted-mask
+# chalk-soft                      Chalk Soft               oil-bristle
+# charcoal-pencil-medium          Charcoal Pencil Medium   -
+charcoal-pencil-thin            Charcoal Pencil Thin     -
+charcoal-pencil-large           Charcoal pencil large    -
+# watercolor-texture              Watercolor Texture       watercolor-mask
+# waterpaint-hard-edges           Waterpaint Hard Edges    circle-hard-eroded
+# waterpaint-soft-edges           Waterpaint Soft Edges    oil-knife
+# shapes-mecha                    Shapes Mecha             shapes-mech-random
+# shapes-rounded                  Shapes Rounded           shapes-round-random
+# shapes-spikes                   Shapes Spikes            shapes-spiked-random
+# shapes-square                   Shapes Square            -
+# pixel-art                       Pixel Art                -
+# pixel-art-dithering             Pixel Art Dithering      -
+# pixel-art-fill                  Pixel Art Fill           -
+# texture-impressionism           Texture Impressionism    impressionism-brush
+# screentone-pressure             Screentone Pressure      -
+# screentones-regular             Screentones Regular      -
+# texture-big                     Texture Big              square-rough-lightgrey
+# texture-crackles                Texture Crackles         crackles
+# texture-hair                    Texture Hair             hair
+# texture-large-splat             Texture Large Splat      splats-large
+# texture-noise                   Texture Noise            noise
+# texture-random-particles        Texture Random Particles random-debris
+# texture-reptile                 Texture Reptile          -
+# texture-snow-pile               Texture Snow Pile        snow
+# texture-spines                  Texture Spines           spines
+# texture-splat                   Texture Splat            splat-dots
+# texture-spray                   Texture Spray            freckles
+# texture-wood-fiber              Texture Wood Fiber       rake-dotted
+# stamp-bokeh                     Stamp Bokeh              bokey-circle
+# stamp-floor                     Stamp Floor              floor
+stamp-grass                     Stamp Grass              grass-mask
+# stamp-grass-patch               Stamp Grass Patch        grass-patch-mask
+# stamp-herbals                   Stamp Herbals            random-vegetal
+# stamp-mountains-distant         Stamp Mountains Distant  mountains-distant-mask
+# stamp-sparkles                  Stamp Sparkles           fairy-dust
+# stamp-stylised-tree             Stamp Stylised Tree      vegetal-stylised
+# stamp-vegetal                   Stamp Vegetal            vegetal
+# stamp-water                     Stamp Water              water-still

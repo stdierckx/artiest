@@ -1,0 +1,29 @@
+artiest-brush 2
+id stamp-grass
+label Stamp Grass
+origin IMPORTED
+tags krita tip
+size 0 125
+sizeCurve pow 1.0
+spacing 0.64
+isotropic 0
+hardness 1
+tip grass-mask
+opacity 1
+flowMin 0.0
+flow 1
+stabilization 0.1
+antialias 1
+erase 0
+eraseSize 96.0
+onset 0.0 0.0
+burnish 0.0
+grain 1.0 0.0 0.0 1.0 0
+sizeOpt.combine MULTIPLY
+sizeOpt.drive PRESSURE points 0 0.492462 1 1
+flowOpt.combine MULTIPLY
+flowOpt.drive PRESSURE points 0 0 1 1
+aspect 1 1 MULTIPLY
+rotation 0 0 MULTIPLY
+scatter 0.0 0.0 MULTIPLY
+sizeJitter 0.0 0.0 MULTIPLY

@@ -267,6 +267,8 @@ class Tips:
         self.sources = sources
         self.out_dir = out_dir
         self.done = {}
+        #: written-out name -> bytes, until `flush` says which are wanted
+        self.pending = {}
 
     def take(self, filename, as_mask=False):
         """`(tip id, longest side)` for a tip file, or None if it cannot be read."""
@@ -306,11 +308,25 @@ class Tips:
         return ident, max(width, height)
 
     def _write(self, name, data):
+        # Held rather than written. A preset that is converted and then not
+        # picked must not leave its tip behind, and whether it is picked is not
+        # known until after it converts.
+        self.pending[name] = data
+
+    def flush(self, used):
+        """Write the tips the picked brushes actually name. Returns how many."""
         if not self.out_dir:
-            return
-        os.makedirs(self.out_dir, exist_ok=True)
-        with open(os.path.join(self.out_dir, name), 'wb') as f:
-            f.write(data)
+            return 0
+        written = 0
+        for ident in sorted(used):
+            data = self.pending.get(ident + '.png')
+            if data is None:
+                continue
+            os.makedirs(self.out_dir, exist_ok=True)
+            with open(os.path.join(self.out_dir, ident + '.png'), 'wb') as f:
+                f.write(data)
+            written += 1
+        return written
 
 
 # ---------------------------------------------------------------- mapping
@@ -569,6 +585,63 @@ def tidy(name):
     return name.replace('_', ' ').strip()[:48]
 
 
+def read_picks(path):
+    """The ids that are uncommented in a picks file, or None if there is none.
+
+    The selection principle `docs/brushes-plan.md` describes: *the machine
+    proposes, you dispose, and the disposal is a file in git.* A line that
+    starts with `#` is a proposal; a line that does not is a decision.
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    picked = set()
+    for line in open(path):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        picked.add(line.split()[0])
+    return picked
+
+
+def write_picks(path, rows):
+    """Propose every convertible preset, commented out, without ever undoing a
+    decision already recorded in the file.
+
+    Re-running the tool must not uncomment anything or reorder what somebody
+    has edited, so an existing file is kept line for line and only ids it has
+    never mentioned are appended. That is what makes the file safe to
+    regenerate after a bundle changes.
+    """
+    existing = []
+    known = set()
+    if os.path.isfile(path):
+        existing = open(path).read().splitlines()
+        for line in existing:
+            stripped = line.strip().lstrip('#').strip()
+            if stripped:
+                known.add(stripped.split()[0])
+    out = list(existing)
+    if not out:
+        out = [
+            '# Which imported brushes ship with artiest.',
+            '#',
+            '# Uncomment a line to ship it. Everything here is CC-0 and traceable',
+            '# to a sentence in the bundle\'s own meta.xml; anything that is not',
+            '# does not reach this file. See docs/brushes-plan.md, Wb8.',
+            '#',
+            '# id                              label                    tip',
+        ]
+    added = 0
+    for ident, label, tip in rows:
+        if ident in known:
+            continue
+        out.append(f'# {ident:32s}{label:25s}{tip or "-"}')
+        added += 1
+    with open(path, 'w') as f:
+        f.write('\n'.join(out) + '\n')
+    return added
+
+
 def load_bundle(path):
     """`([(name, kpp bytes)], {tip filename: bytes})` out of a `.bundle` zip.
 
@@ -595,6 +668,9 @@ def main():
     ap.add_argument('--tips', help='where to write the tip pictures. Without it, '
                                    'only the procedural brushes convert')
     ap.add_argument('--preview', help='also write each preset\'s own Krita preview here')
+    ap.add_argument('--picks', help='a picks file: convert only the ids uncommented in it')
+    ap.add_argument('--write-picks', help='propose every convertible preset into this '
+                                          'file, commented out, and change nothing else')
     args = ap.parse_args()
 
     presets = []
@@ -615,7 +691,9 @@ def main():
         os.makedirs(args.preview, exist_ok=True)
     tips = Tips(tip_sources, args.tips) if args.tips else None
 
-    done = skipped = tipped = 0
+    picked = read_picks(args.picks)
+    done = skipped = tipped = passed = 0
+    proposals = []
     for name, data in presets:
         preset = read_preset_bytes(data, name)
         label = tidy(preset['_name'])
@@ -627,15 +705,33 @@ def main():
             print(f'  skip {label}: {preset.get("paintop", "?")}/{attrs.get("type", "-")}',
                   file=sys.stderr)
             continue
+        tip_line = next((l.split(' ', 1)[1] for l in text.split('\n')
+                         if l.startswith('tip ')), None)
+        proposals.append((ident, label, tip_line))
+        if picked is not None and ident not in picked:
+            passed += 1
+            continue
         open(os.path.join(args.out, ident + '.brush'), 'w').write(text)
-        if 'tip ' in text:
+        if tip_line:
             tipped += 1
         if args.preview:
             # The `.kpp` is a PNG, and the picture in it is Krita's own preview
             # of that brush. It is the control the swatch is judged against.
             open(os.path.join(args.preview, ident + '.png'), 'wb').write(data)
         done += 1
-    print(f'{done} converted ({tipped} with a tip), {skipped} skipped')
+    if tips:
+        used = set()
+        for f in os.listdir(args.out):
+            if not f.endswith('.brush'):
+                continue
+            for line in open(os.path.join(args.out, f)):
+                if line.startswith('tip '):
+                    used.add(line.split(' ', 1)[1].strip())
+        print(f'{tips.flush(used)} tips written')
+    if args.write_picks:
+        added = write_picks(args.write_picks, proposals)
+        print(f'{added} new proposals in {args.write_picks}')
+    print(f'{done} converted ({tipped} with a tip), {passed} not picked, {skipped} skipped')
 
 
 if __name__ == '__main__':
