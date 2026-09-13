@@ -1795,3 +1795,42 @@ The order within the phase is the table order, and the two halves are
 independent after Ik0: **the guide half can run first, last, or by somebody
 else.** Nothing in Ik12–Ik16 depends on a stroke record, and nothing in
 Ik1–Ik11 depends on a guide.
+
+### "If I pinch zoom, the perspective grid stays the same, the page zooms"
+
+The same report, a second time, from the tablet — and the fix above was only
+half of it. The geometry was right after it: the outline is placed on the page
+and the overlay maps it through the live canvas matrix, so at any zoom the
+lines are where they should be. What was missing is that **nothing ever asked
+for the overlay again.**
+
+`InkSurfaceView.onTransformChanged` existed, the guides and the marching ants
+were both wired to it, and `grep` over the whole tree found no call site. The
+field had never been fired. A pan or a zoom writes `transform` and the canvas
+redraws itself on the render thread; Compose is not part of that and hears
+nothing, so the overlay kept the last frame it had drawn — nailed to the glass
+while the drawing moved underneath it.
+
+`setTransform` is now the only writer of that field and it is where the
+callback goes, guarded on inequality because the gesture path calls it once per
+frame for the whole of a pinch.
+
+**Why it looked fixed.** Every check of the first fix was made with the zoom
+*buttons*, and a button press recomposes on its way through Compose, which
+redraws the overlay for reasons that have nothing to do with the canvas. A
+pinch touches no Compose state at all. Two ways of zooming, one of which
+repainted the chrome by accident.
+
+**And why no test could have caught it.** `adb shell input` injects one
+pointer. Every canvas gesture this app has takes two — `StrokeExclusivity` says
+so on purpose, so that a resting hand is never a gesture — so there was no way,
+from a test or a script, to perform a pinch at all. `tools/pinch.sh` is that
+way now: a `MotionEvent` with two pointers handed to the platform's own
+injector, the way `/system/bin/input` does it, because writing to
+`/dev/input/event3` is refused by SELinux even though the shell is in the
+`input` group.
+
+Run against the build before the fix it reproduces the report exactly — the ink
+scales, the guides do not. Run against the build after it, the rays, the arcs
+and the drawing move together, through a spread, a squeeze and a 35-degree
+twist.

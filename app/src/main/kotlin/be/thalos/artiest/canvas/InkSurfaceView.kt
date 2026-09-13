@@ -249,8 +249,34 @@ class InkSurfaceView(
             transformDeferrals++
             return false
         }
-        transform = t
+        setTransform(t)
         return true
+    }
+
+    /**
+     * The one place [transform] is written, and therefore the one place the
+     * chrome drawn over the canvas can be told that it moved.
+     *
+     * **This was missing and it shipped.** [onTransformChanged] existed, the
+     * overlays were wired to it, and nothing ever called it: the guides and the
+     * marching ants followed a *button* zoom, because pressing a button
+     * recomposes anyway, and stayed nailed to the glass through a pinch, which
+     * touches no Compose state at all. The page moved under them. That is the
+     * whole of the "the perspective grid stays the same, the page zooms"
+     * report, and no amount of correct geometry in `Guideline.outline` could
+     * have fixed it — the outline was right and nobody was asking for it again.
+     *
+     * Guarded on inequality because the gesture path calls this once per frame
+     * for the whole of a pinch and a solver that answers with the same
+     * transform twice should not cost a redraw of the overlay.
+     */
+    private fun setTransform(t: CanvasTransform) {
+        if (transform == t) return
+        transform = t
+        // UI thread, every caller: the gesture path, the toolbar buttons and
+        // pen-up are all on it. That matters because this ends in a Compose
+        // state write.
+        onTransformChanged?.invoke()
     }
 
     /**
@@ -1979,7 +2005,12 @@ class InkSurfaceView(
      * coordinates can follow it.
      *
      * The marching ants are stroked in view space from a document-space path,
-     * so a pan or a zoom moves them and nothing else tells Compose that.
+     * so a pan or a zoom moves them and nothing else tells Compose that. The
+     * guides are the same shape of thing and a louder one: a ruler that does
+     * not follow a pinch is a ruler the ink is no longer on.
+     *
+     * Fired from [setTransform], which is the only writer of [transform] —
+     * see there for what happened while nothing called this.
      */
     var onTransformChanged: (() -> Unit)? = null
 
@@ -3610,7 +3641,7 @@ class InkSurfaceView(
         strokeOpen = false
         val held = pendingTransform ?: return
         pendingTransform = null
-        transform = held
+        setTransform(held)
         redrawDry()
     }
 
