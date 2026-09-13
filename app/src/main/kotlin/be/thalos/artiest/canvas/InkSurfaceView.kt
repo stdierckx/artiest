@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.Shader
 import android.os.Debug
 import android.view.MotionEvent
@@ -17,19 +19,23 @@ import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.Layer
+import be.thalos.artiest.doc.LayerStack
 import be.thalos.artiest.doc.PendingStroke
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
+import be.thalos.artiest.doc.VectorSheet
 import be.thalos.artiest.engine.ink.DabEmitter
 import be.thalos.artiest.engine.ink.PredictedTail
 import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.brush.BrushCodec
 import be.thalos.artiest.engine.brush.adoptBrush
 import be.thalos.artiest.engine.ink.Bounds
+import be.thalos.artiest.engine.ink.MutableBounds
 import be.thalos.artiest.engine.ink.Stroke
 import be.thalos.artiest.engine.ink.SampleLog
 import be.thalos.artiest.engine.ink.StrokeBuilder
+import be.thalos.artiest.engine.ink.StrokeRecord
 import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PredictionGate
 import be.thalos.artiest.engine.input.RejectionCounters
@@ -720,7 +726,11 @@ class InkSurfaceView(
      * the *event* — a stroke was drawn, a sheet changed — and neither belongs
      * to the act of rasterising, which is why they stayed with the caller.
      */
-    private fun stampStroke(stroke: Stroke, into: Layer) {
+    private fun stampStroke(stroke: Stroke, into: Layer, confine: Confinement? = null) {
+        if (confine != null) {
+            stampConfined(stroke, into, confine)
+            return
+        }
         if (!indirectNeeded()) {
             armRasterizer()
             into.write { rasterizer.drawDry(it, stroke) }
@@ -764,6 +774,301 @@ class InkSurfaceView(
             )
         }
     }
+
+    /**
+     * Where a re-rendered stroke is allowed to land.
+     *
+     * Two things at once, because a rebuild needs both and neither is the live
+     * selection. [damage] is the rectangle being repainted: a stroke that
+     * overlaps it usually pokes outside it too, and ink outside the rectangle
+     * would land on top of pixels nobody cleared — a second coat, which on a
+     * translucent nib is darker and on an opaque one is invisible until the
+     * edges disagree. [clip] is the selection that was live when the stroke was
+     * *drawn*, out of the sheet's clip table, which is the whole reason that
+     * table exists.
+     */
+    private class Confinement(val damage: Rect, val clip: Path?)
+
+    /**
+     * [stampStroke] for a rebuild: the same two paths, confined by a canvas
+     * clip instead of by the live selection.
+     *
+     * **A clip and not a mask bitmap**, unlike the commit path, and the
+     * existing code already says why it is safe: `Layer`'s canvas is a software
+     * one, where Skia antialiases a path clip, *"which is exactly why it is
+     * safe here and wrong on the frame's `RenderNode` canvas"*. The commit path
+     * masks instead because it also has to confine the **wet** pass, which
+     * draws on a hardware canvas; a rebuild has no wet pass.
+     *
+     * It is also what makes the damage rectangle affordable. Masking would mean
+     * an `ALPHA_8` page per clip-table entry; clipping a rectangle is free.
+     */
+    private fun stampConfined(stroke: Stroke, into: Layer, confine: Confinement) {
+        armRasterizer()
+        if (!indirectNeededFor(pen, clipped = false)) {
+            into.write {
+                val save = it.save()
+                it.clipRect(confine.damage)
+                confine.clip?.let { path -> it.clipPath(path) }
+                rasterizer.drawDry(it, stroke)
+                it.restoreToCount(save)
+            }
+            return
+        }
+        scratch.begin(stroke.bounds)
+        val sc = scratch.canvasInDocSpace()
+        if (sc == null) {
+            // Same fallback as the commit path, and the same reasoning: a
+            // beaded stroke is wrong and visible, a dropped one is wrong and
+            // invisible.
+            into.write {
+                val save = it.save()
+                it.clipRect(confine.damage)
+                confine.clip?.let { path -> it.clipPath(path) }
+                rasterizer.drawDry(it, stroke)
+                it.restoreToCount(save)
+            }
+            return
+        }
+        rasterizer.drawDry(sc, stroke)
+        into.write {
+            val save = it.save()
+            it.clipRect(confine.damage)
+            confine.clip?.let { path -> it.clipPath(path) }
+            scratch.compositeInto(
+                it, compositeAlpha(), compositeGrain(), pen.erase, pen.burnish,
+            )
+            it.restoreToCount(save)
+        }
+    }
+
+    /**
+     * What a rebuild did, or why it did nothing.
+     *
+     * An enum and not a boolean, because "nothing happened" has four causes
+     * here and three of them are ordinary. A caller that cannot tell
+     * `NOT_VECTOR` from `SPOILED` cannot tell a raster sheet from a drawing
+     * whose records no longer describe it.
+     */
+    enum class Rebuild { DONE, NOTHING_THERE, NOT_VECTOR, SPOILED }
+
+    /** The last rebuild's cost and reach, for the readout. Render thread. */
+    var lastRebuildMs: Double = 0.0
+        private set
+
+    /** Strokes redrawn by the last rebuild. See [lastRebuildMs]. */
+    var lastRebuildStrokes: Int = 0
+        private set
+
+    /** Why the last rebuild stopped, if it did. See [lastRebuildMs]. */
+    var lastRebuild: Rebuild = Rebuild.NOTHING_THERE
+        private set
+
+    /**
+     * Repaint [damage] of [entry] from the strokes that made it. **Render
+     * thread**, and never while a stroke is open.
+     *
+     * ## The damage rectangle is the design, not an optimisation
+     *
+     * Ik0 measured a full-sheet rebuild at 1.09 s for the pen and 7.82 s for
+     * the tipped chalk, against a stop condition written at one second. The
+     * fallback that condition named — vector sheets for opaque nibs only —
+     * failed its own test, because the *pen* is over the bar too. So what makes
+     * the feature affordable is that an edit only repaints what it dirtied, and
+     * the rectangle has to be **tight**: half a page of pencil is still 1.7 s.
+     *
+     * ## One compositor, which is a stop condition
+     *
+     * Every stroke goes through [stampStroke], the same method the commit path
+     * uses, with the same `ScratchLayer` and the same `DabRasterizer`. That is
+     * `docs/inker-plan.md`'s third stop condition and it is why the brush is
+     * *adopted into the pen* for the duration rather than handed to a second
+     * code path: two compositors that drift is the defect a user finds months
+     * later in a file they have already sent somewhere.
+     *
+     * Swapping the pen on the render thread is the trick `rerenderReport`
+     * already uses, and it is safe for the same reason: a rebuild is one render
+     * thread task, no commit is drained during it, and the pen is restored from
+     * its own encoded text before the method returns.
+     *
+     * ## Clearing first
+     *
+     * The rectangle is blanked before anything is redrawn, because a rebuild
+     * *replaces* what is there. Painting over without clearing is a second coat
+     * — invisible on an opaque nib until the antialiased edges disagree, and
+     * plainly darker on a translucent one.
+     */
+    fun rebuild(entry: LayerStack.Entry, damage: Bounds): Rebuild {
+        val sheet = entry.vector ?: return finishRebuild(Rebuild.NOT_VECTOR, 0, 0.0)
+        return rebuild(sheet, entry.layer, damage)
+    }
+
+    /**
+     * [rebuild] against a sheet and pixels that need not be a stack entry.
+     *
+     * The bench measures against an offscreen `Layer` of its own so that
+     * measuring does not paint over the drawing — the same reason
+     * [stampStroke] takes its destination as a parameter.
+     */
+    fun rebuild(sheet: VectorSheet, into: Layer, damage: Bounds): Rebuild {
+        if (!sheet.intact) return finishRebuild(Rebuild.SPOILED, 0, 0.0)
+        if (damage.isEmpty) return finishRebuild(Rebuild.NOTHING_THERE, 0, 0.0)
+        if (!damage.toPixelRect(rebuildRect, document.widthPx, document.heightPx)) {
+            return finishRebuild(Rebuild.NOTHING_THERE, 0, 0.0)
+        }
+        val rect = Rect(rebuildRect[0], rebuildRect[1], rebuildRect[2], rebuildRect[3])
+        val records = sheet.overlapping(damage)
+        val started = System.nanoTime()
+        into.blank(rect.left, rect.top, rect.right, rect.bottom)
+        val held = BrushCodec.encode(pen)
+        val heldRubber = borrowedRubber
+        try {
+            for (record in records) {
+                adoptBrush(sheet.brushAt(record.brush), pen)
+                // A drawing brush used with the barrel button erases without
+                // being an eraser, and the record is the only thing that
+                // remembers it did. See `compositeAlpha`.
+                borrowedRubber = record.erase && !pen.erase
+                val stroke = replay(record) ?: continue
+                stampStroke(stroke, into, Confinement(rect, sheet.clipAt(record.clip)))
+            }
+        } finally {
+            BrushCodec.decode(held)?.let { adoptBrush(it, pen) }
+            borrowedRubber = heldRubber
+            armRasterizer()
+        }
+        return finishRebuild(
+            Rebuild.DONE, records.size, (System.nanoTime() - started) / 1e6,
+        )
+    }
+
+    private fun finishRebuild(what: Rebuild, strokes: Int, ms: Double): Rebuild {
+        lastRebuild = what
+        lastRebuildStrokes = strokes
+        lastRebuildMs = ms
+        return what
+    }
+
+    /** Reused by [rebuild]; render thread only. */
+    private val rebuildRect = IntArray(4)
+
+    /**
+     * The rectangle waiting to be repainted, and the sheet it belongs to.
+     *
+     * **The throttle, and it is a coalescer rather than a timer.** A rate limit
+     * would be the wrong shape: a rebuild that is *skipped* leaves the sheet
+     * showing something the records do not say, which is the one state this
+     * whole design exists to prevent. So nothing is ever skipped — repeated
+     * requests are unioned into one rectangle and paid for once, at the top of
+     * the next dry frame.
+     *
+     * That is also the shape the callers above Ik4 need. Ik9 drags a stroke and
+     * dirties a rectangle eight times a second; Ik10 recolours and dirties one
+     * per keystroke of a slider. Both want the last word rather than every
+     * word, and both want it before the next frame is drawn rather than a fixed
+     * number of milliseconds later.
+     *
+     * Before the dry clock starts, for the reason the measurement task above it
+     * is: a rebuild inside the timed body would show up as one long dry frame
+     * in the percentiles it exists to protect.
+     */
+    private val rebuildDamage = MutableBounds()
+
+    private var rebuildTarget: LayerStack.Entry? = null
+
+    /**
+     * Ask for [damage] of [entry] to be repainted from its records, at the top
+     * of the next dry frame. **Render thread.**
+     *
+     * A request for a second sheet before the first has been served repaints
+     * the first immediately rather than mixing two rectangles into one — two
+     * sheets' damage is two rebuilds, and unioning them would repaint each
+     * sheet over the other's rectangle.
+     */
+    fun requestRebuild(entry: LayerStack.Entry, damage: Bounds) {
+        if (damage.isEmpty) return
+        val held = rebuildTarget
+        if (held != null && held !== entry) drainRebuild()
+        rebuildTarget = entry
+        rebuildDamage.addBounds(damage)
+        redrawDry()
+    }
+
+    /**
+     * Repaint the whole active sheet from its records. **UI thread**, from the
+     * debug row.
+     *
+     * The only way to *see* Ik4, because a rebuild that works is a rebuild that
+     * changes nothing: what it is checked against is the drawing already on the
+     * glass. A small rectangle would prove it for a corner; the whole page
+     * proves it for the page, and Ik0 has already priced that at 1 to 8 seconds
+     * depending on the nib, which is a price a debug button may pay.
+     */
+    fun rebuildWholeActiveSheet() {
+        val r = renderer ?: return
+        if (!surfaceAlive || renderThreadTask != null) return
+        renderThreadTask = {
+            val entry = document.layers.active
+            rebuild(
+                entry,
+                Bounds.of(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat()),
+            )
+            document.layers.touchActive()
+        }
+        r.commit()
+        redrawDry()
+    }
+
+    /** Serve the coalesced request, if there is one. **Render thread.** */
+    private fun drainRebuild() {
+        val entry = rebuildTarget ?: return
+        val damage = rebuildDamage.snapshot()
+        rebuildTarget = null
+        rebuildDamage.reset()
+        if (rebuild(entry, damage) == Rebuild.DONE) document.layers.touchActive()
+    }
+
+    /**
+     * Decoded samples, grown as needed and never shrunk — the same discipline
+     * `StrokeBuilder`'s dab buffer keeps, for the same reason: a rebuild walks
+     * fifty records and a fresh array per record is fifty allocations inside
+     * one render callback.
+     */
+    private var replayFloats = FloatArray(0)
+
+    /**
+     * One record back through the builder that drew it.
+     *
+     * The seed and the `dabBase` come off the record, which is the whole of
+     * Ik2: without them this would draw a *similar* stroke, and the pencil's
+     * scatter would land somewhere else every time anything was touched.
+     *
+     * Null for a record with no samples, which a cancelled gesture can leave.
+     */
+    private fun replay(record: StrokeRecord): Stroke? {
+        if (record.sampleCount == 0) return null
+        if (replayFloats.size < record.floatCount) replayFloats = FloatArray(record.floatCount)
+        val n = record.decodeInto(replayFloats)
+        val b = rebuildBuilder
+        b.begin(record.colorArgb, record.seed, record.dabBase)
+        for (i in 0 until n) {
+            val o = i * StrokeRecord.STRIDE
+            val nanos = REPLAY_EPOCH_NANOS + (replayFloats[o + 5] * 1_000_000f).toLong()
+            b.addTilt(replayFloats[o + 3], replayFloats[o + 4], nanos)
+            b.add(replayFloats[o], replayFloats[o + 1], replayFloats[o + 2], nanos)
+        }
+        return b.end()
+    }
+
+    /**
+     * A second builder over the *same* `pen` object, so that adopting a
+     * record's brush into the pen changes what this one draws with.
+     *
+     * Separate from the live [commitSink]'s builder because that one can be
+     * open — a stroke in flight — and a rebuild must not reset it. Lazily
+     * built, because a session that never makes an ink layer never pays for it.
+     */
+    private val rebuildBuilder: StrokeBuilder by lazy { StrokeBuilder(pen) }
 
     private val commitSink = object : CommitQueue.Sink {
         override fun onStroke(stroke: Stroke, record: PendingStroke?) {
@@ -1007,8 +1312,21 @@ class InkSurfaceView(
      * confining ink, which is a second way of getting it wrong.
      */
     private fun indirectNeeded(): Boolean =
-        pen.opacity < 1f || pen.flow < 1f || pen.hardness < 1f ||
-            pen.tip != null || pen.grain.isActive || pen.erase || document.selection.active
+        indirectNeededFor(pen, document.selection.active)
+
+    /**
+     * The same question for a brush that is not necessarily the one in the
+     * hand, which is what a rebuild asks: every stroke it redraws names its own
+     * nib out of the sheet's table.
+     *
+     * [clipped] is separate from the brush because on the commit path a
+     * selection forces the indirect route whatever the nib is — there is
+     * exactly one way ink is confined — while a rebuild confines with a canvas
+     * clip and does not need the buffer for it.
+     */
+    private fun indirectNeededFor(brush: Brush, clipped: Boolean): Boolean =
+        brush.opacity < 1f || brush.flow < 1f || brush.hardness < 1f ||
+            brush.tip != null || brush.grain.isActive || brush.erase || clipped
 
     /**
      * Bumped on the UI thread whenever a stroke starts or is abandoned, and
@@ -1617,6 +1935,7 @@ class InkSurfaceView(
                 renderThreadTask = null
                 it()
             }
+            drainRebuild()
             val dryStart = System.nanoTime()
             try {
                 drawDryFrame(canvas)
@@ -3011,6 +3330,13 @@ class InkSurfaceView(
          * `driftOf` a measurement of the engine rather than of a counter.
          */
         private const val IK0_SEED_BASE: Int = 700_000
+
+        /**
+         * The pen-down instant a replay pretends to. Arbitrary and fixed: only
+         * the deltas from it are read, by `Brush.onsetMillis` and by the speed
+         * sensor, and both want the time *within* the stroke.
+         */
+        private const val REPLAY_EPOCH_NANOS: Long = 1_000_000_000L
 
 
         /**

@@ -151,6 +151,135 @@ class StrokeRedrawGoldenTest {
         assertTrue(differingPixels(renderAll(base, pen), renderAll(shifted, pen)) > 1000)
     }
 
+    /**
+     * **Ik4's open number, measured.**
+     *
+     * Ik1 packs positions to 1/16 of a document pixel, so a replayed dab can
+     * sit 1/32 px from where the live one sat, and `StrokeRecord`'s own KDoc
+     * says plainly that *"whether that is visible in a re-render is Ik4's
+     * measurement, not this type's claim"*. This is that measurement: the same
+     * scene drawn **live** from its raw floats, and drawn again from the
+     * **packed records**, counted pixel for pixel.
+     *
+     * It does not assert zero and it must not. Zero is what Ik2's golden
+     * claims, and that is a different claim — record against record. Here the
+     * two sides went through different arithmetic on purpose, and the useful
+     * question is *how much* rather than *whether*.
+     *
+     * ## What was measured, and why the bars are where they are
+     *
+     * Counting *how many* pixels differ turned out to be the wrong question: at
+     * 1/16 px it is 6% of the pen's ink, 46% of the pencil's and 55% of the
+     * fineliner's, and all three are **rim dithering** — the worst single
+     * channel anywhere is 41 of 255 and the total ink on the page is within
+     * 0.4%. The ink is the same amount in the same place; its antialiased edges
+     * land a fraction differently.
+     *
+     * So the bars are on the two numbers that separate that from a real defect:
+     * **total coverage**, which a dropped dab or a moved stroke would blow
+     * open, and the **worst single channel**, which a whole dab in the wrong
+     * place would take past 64 immediately.
+     *
+     * ## The sweep, so the next person does not have to run it
+     *
+     * Packing positions finer was tried at 1/16, 1/64 and 1/256 px, with
+     * pressure at 8 and at 16 bits, on all three nibs:
+     *
+     * - The **pen** — no dynamics, so nothing but position, pressure and time
+     *   reaches it — improves steadily: 6.4%, 2.5%, 1.1% of its ink. Position
+     *   precision is the lever for an opaque nib.
+     * - The **pencil** plateaus around 41-46% at every setting. Something other
+     *   than the packing dominates it.
+     * - Sixteen bits of pressure instead of eight moved the pen from 9.6% to
+     *   6.4% and bought a tenth of a byte-per-sample's worth of nothing
+     *   visible.
+     *
+     * 1/16 px stayed, for the reason `StrokeCodec.QUANTUM_DOC` gives: it is
+     * what keeps a sixteen-fold margin under the int16 step limit, and a step
+     * that does not fit is a refusal rather than a clamp. Buying an invisible
+     * improvement with that margin is the wrong trade.
+     */
+    @Test
+    fun `a packed record redraws what the live stroke drew`() {
+        for ((name, pen) in nibs()) {
+            val live = renderLive(pen, seedBase = 61_000)
+            val replayed = renderAll(sceneRecords(pen, seedBase = 61_000), pen)
+            val differing = differingPixels(live, replayed)
+            val inked = inkedPixels(live)
+            assertTrue(inked > 20_000, "$name inked only $inked pixels; nothing was tested")
+            val share = differing.toDouble() / inked
+            val a = coverage(live)
+            val b = coverage(replayed)
+            val drift = Math.abs(a - b).toDouble() / a
+            println(
+                "$name: $differing of $inked inked pixels differ " +
+                    "(${"%.1f".format(share * 100)}%), worst channel " +
+                    "${worstChannel(live, replayed)}, total ink ${"%.4f".format(drift * 100)}% off",
+            )
+            assertTrue(
+                drift < 0.01,
+                "$name: the replay laid ${"%.3f".format(drift * 100)}% more or less ink",
+            )
+            assertTrue(
+                worstChannel(live, replayed) <= 64,
+                "$name: a channel moved by ${worstChannel(live, replayed)} of 255",
+            )
+        }
+    }
+
+    /**
+     * The same scene, drawn the way the commit path draws it: from the floats,
+     * with no packing anywhere in the loop.
+     */
+    private fun renderLive(pen: Brush, seedBase: Int): IntArray {
+        val builder = StrokeBuilder(pen)
+        val rast = DabRasterizer(w, h, StampCache()).also { it.hardness = pen.hardness }
+        val scratch = ScratchLayer(maxWidth = w, maxHeight = h)
+        val sheet = Layer(w, h, enforceOffMainThread = false)
+        VectorStress.scene(12, w, h, seed = 3).forEachIndexed { i, s ->
+            builder.begin(Color.BLACK, seedBase + i)
+            for (j in 0 until s.count) {
+                val nanos = 1_000_000_000L + (s.timeMillis(j) * 1_000_000f).toLong()
+                builder.addTilt(s.tilt(j), s.orientation(j), nanos)
+                builder.add(s.x(j), s.y(j), s.pressure(j), nanos)
+            }
+            val stroke = builder.end()
+            scratch.begin(stroke.bounds)
+            rast.drawDry(scratch.canvasInDocSpace()!!, stroke)
+            sheet.write { scratch.compositeInto(it, pen.opacity) }
+        }
+        val pixels = IntArray(w * h)
+        sheet.read { it.getPixels(pixels, 0, w, 0, 0, w, h) }
+        scratch.release()
+        return pixels
+    }
+
+    /** Total alpha on the page: how much ink there is, regardless of where. */
+    private fun coverage(a: IntArray): Long {
+        var n = 0L
+        for (p in a) n += (p ushr 24).toLong()
+        return n
+    }
+
+    private fun inkedPixels(a: IntArray): Int {
+        var n = 0
+        for (p in a) if (p ushr 24 != 0) n++
+        return n
+    }
+
+    /** The largest single-channel difference anywhere, 0..255. */
+    private fun worstChannel(a: IntArray, b: IntArray): Int {
+        var worst = 0
+        for (i in a.indices) {
+            if (a[i] == b[i]) continue
+            for (shift in intArrayOf(24, 16, 8, 0)) {
+                val d = Math.abs(((a[i] ushr shift) and 0xFF) - ((b[i] ushr shift) and 0xFF))
+                if (d > worst) worst = d
+            }
+        }
+        return worst
+    }
+
     // -------------------------------------------------------------- the rig
 
     /**

@@ -313,6 +313,35 @@ class Layer(
     fun blank(mask: Bitmap): Boolean =
         write { it.drawBitmap(mask, 0f, 0f, subtractPaint) }
 
+    /**
+     * Back to transparent inside one integer rectangle.
+     *
+     * Ik4's, and it is a third [blank] rather than a parameter on the first
+     * because the three mean different things to a reader: empty the sheet,
+     * empty the stencil, empty this rectangle. `clipRect` and then
+     * `drawColor(CLEAR)` would do the same and would also leave a clip on a
+     * canvas the next caller shares.
+     *
+     * Half-open, the convention `Bounds.toPixelRect` writes and `Rect` keeps.
+     * A rectangle that is empty or off the sheet does nothing and answers true,
+     * because "there was nothing there to clear" is not a failure.
+     */
+    fun blank(left: Int, top: Int, right: Int, bottom: Int): Boolean {
+        if (right <= left || bottom <= top) return true
+        return write {
+            it.drawRect(
+                left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), clearPaint,
+            )
+        }
+    }
+
+    /** See [blank]. `CLEAR` writes transparent rather than blending toward it. */
+    private val clearPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        isAntiAlias = false
+        isFilterBitmap = false
+    }
+
     /** Shared, for the reason [replacePaint] is. Never mutated after construction. */
     private val subtractPaint = Paint().apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)

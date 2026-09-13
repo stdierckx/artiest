@@ -1464,6 +1464,14 @@ private fun CanvasScreen(
                             generation++
                         }
                     },
+                    onRebuild = {
+                        val v = surface ?: return@DebugRow
+                        // The whole page, because the point of the button is to
+                        // show that a rebuild puts back what was there: a small
+                        // rectangle would prove it for a corner.
+                        v.rebuildWholeActiveSheet()
+                        generation++
+                    },
                     vectorRunning = vectorRunning,
                     onStress = { pressure, path ->
                         val v = surface ?: return@DebugRow
@@ -2153,6 +2161,7 @@ private fun DebugRow(
     onWet: () -> Unit,
     onStress: (Float?, StrokeStress.Path) -> Unit,
     onVector: () -> Unit,
+    onRebuild: () -> Unit,
     vectorRunning: Boolean,
 ) {
     Row(
@@ -2240,6 +2249,11 @@ private fun DebugRow(
         TextButton(enabled = surface != null && !vectorRunning, onClick = onVector) {
             Text(if (vectorRunning) "Vector…" else "Vector")
         }
+        // Ik4, and the only way to see it: a rebuild is supposed to be
+        // invisible, so what it is checked against is the drawing that is
+        // already on the glass. Press it on an ink layer and nothing should
+        // move.
+        TextButton(enabled = surface != null, onClick = onRebuild) { Text("Rebuild") }
     }
 }
 
@@ -2311,6 +2325,8 @@ private fun readout(
         // sheet keeps strokes and not how many it has, and how many is the
         // number that says whether the commit path is actually appending.
         "ink      ${document.vectorNote()}\n" +
+        "rebuild  ${surface.lastRebuild.name.lowercase()}   " +
+        "${surface.lastRebuildStrokes} strokes   ${r(surface.lastRebuildMs.toFloat(), 1)} ms\n" +
         // The undo budget, which is the number that decides whether a long
         // session quietly stops being undoable. Both caps are visible so it is
         // obvious which one bit.

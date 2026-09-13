@@ -259,7 +259,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik1** | **DONE.** `StrokeRecord`, `SampleLog`, `StrokeCodec`, `StrokePolyline`, `StrokeGrid`, `IdList`, and `Bounds.intersects`. Pure, JVM, no pixels. See **What Ik1 built**. | `:engine` | Low | — | 4–6 |
 | **Ik2** | **DONE, and the pencil is at zero.** Seed as an input, per-dab random as a hash of (seed, dab index, channel), `dabBase`. See **What Ik2 changed**. | `:engine`, `:app` | Med | Ik1 | 2–3 |
 | **Ik3** | **DONE.** `VectorSheet`, `PendingStroke`, `LayerStack.Entry.vector`, `LayerOp.AddVector`, the commit path appending a record beside the pixels, and **`VectorSheet.intact`** — which is the part the plan did not foresee. See **What Ik3 built**. | `:app` | Med | Ik1 | 5–7 |
-| **Ik4** | Re-render: damage rectangles, the redraw loop, the throttle, and the clip table. Nothing visible yet — the sheet can be rebuilt and is proved identical to what drawing it produced. **Ik0 moved this item's centre of gravity**: the rectangle is the design, it has to be tight, and the rebuild opens *one* scratch buffer for the whole patch rather than one per stroke. | `:app` | **High** | Ik3, Ik2 | 5–8 |
+| **Ik4** | **DONE, and "identical" turned out to be the wrong word.** `InkSurfaceView.rebuild`, `Confinement`, `Layer.blank(rect)`, a coalescing throttle, and the clip table in use. See **What Ik4 built**. | `:app` | **High** | Ik3, Ik2 | 5–8 |
 | **Ik5** | `DocStep`, the exchange moved onto the step, `VectorStep`, and undo/redo of a vector edit. | `:app` | Med | Ik4 | 4–6 |
 | **Ik6** | Persistence: `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2 with a `kind` per sheet, save on the same debounce, load into `LayerOp.Open`. **The PNG stays** and is still written — see below. | `:app` | Med | Ik1, Ik3 | 4–6 |
 | **Ik7** | Picking strokes: tap, lasso (the marquee gesture, a different hit test), the selected set, and the highlight in the overlay. | `:app` | Med | Ik3 | 4–6 |
@@ -662,6 +662,103 @@ The record is appended **after** the pixels land, not before. If stamping throws
 not be left describing ink that is not on the page. The same invariant
 `Document.clearHistory` already keeps for the stroke bounds.
 
+## What Ik4 built
+
+> 2026-09-13. `:app`. Measured on the host with `StrokeRedrawGoldenTest` and on
+> the DTH-A116 with the debug row's **Rebuild** button.
+
+`rebuild(sheet, into, damage)` blanks a rectangle and repaints it from the
+strokes that overlap it. On the tablet: five pencil strokes on an ink layer,
+**261.3 ms**, and the drawing does not move.
+
+### One compositor, which was a stop condition
+
+Every stroke goes through `stampStroke` — the same method the commit path uses,
+the same `ScratchLayer`, the same `DabRasterizer`. The record's brush is
+**adopted into the pen** for the duration and the pen is restored from its own
+encoded text afterwards, which is the trick `rerenderReport` already used and is
+safe for the same reason: a rebuild is one render-thread task, no commit is
+drained during it. Stop condition 3 is cleared without a second loop.
+
+### The confinement, which is two things and one clip
+
+A stroke that overlaps the damage rectangle usually pokes outside it, and ink
+outside it would land on pixels nobody cleared — a second coat. So a rebuild
+clips to the rectangle. It also clips to the record's own entry in the **clip
+table**, which is the whole reason that table exists: a stroke drawn into a
+selection is clipped pixels, and re-rendering it unclipped would put ink outside
+the stencil, silently, long after the fact.
+
+Both are `Canvas` clips rather than the mask bitmap the commit path uses, and
+the existing code already said why that is safe: *"`Layer`'s canvas is a
+software one, where Skia antialiases a path clip, which is exactly why it is
+safe here and wrong on the frame's `RenderNode` canvas."* The commit path masks
+because it must also confine the **wet** pass, which draws on a hardware canvas.
+A rebuild has no wet pass. It is also what makes the damage rectangle
+affordable: masking would mean an `ALPHA_8` page per clip-table entry.
+
+### The throttle is a coalescer, not a rate limit
+
+A rebuild that is *skipped* leaves the sheet showing something its records do
+not say, which is the one state this design exists to prevent. So nothing is
+ever skipped: repeated requests union into one rectangle and are paid for once,
+at the top of the next dry frame — before the dry clock starts, so a rebuild
+does not appear as one long frame in the percentiles it exists to protect. That
+is also the shape Ik9's drag (a rectangle eight times a second) and Ik10's
+sliders want.
+
+### "Identical to what drawing it produced" is not quite true, and here is how much
+
+The plan's row asked for a rebuild *proved identical* to the drawing. It is not,
+and the difference was worth measuring rather than asserting away. The same
+scene drawn live from its floats, and drawn again from its packed records:
+
+| Nib | Inked pixels that differ | Worst single channel | Total ink |
+|---|---|---|---|
+| Pen | 9.6% | 39 of 255 | 0.013% off |
+| Pencil | 46.9% | 14 of 255 | 0.029% off |
+| Ink-2 Fineliner | 54.9% | 16 of 255 | 0.400% off |
+
+**Counting how many pixels differ is the wrong question.** The ink is the same
+amount in the same place — total coverage is within 0.4% — and its antialiased
+edges land a fraction differently. On the tablet, over the whole drawing at
+0.667 zoom, 70% of the differing pixels are 2 of 255 or less and 30 pixels out
+of 162 549 exceed 8.
+
+So the test's bars are on the two numbers that separate that from a defect:
+**total coverage within 1%**, which a dropped dab or a moved stroke would blow
+open, and **no single channel past 64**, which one dab in the wrong place would
+pass immediately.
+
+### The sweep, so nobody has to run it again
+
+Finer packing was tried at 1/16, 1/64 and 1/256 document pixels, with pressure
+at 8 and at 16 bits:
+
+- The **pen** — no dynamics, so only position, pressure and time reach it —
+  improves steadily: 6.4%, 2.5%, 1.1% of its ink. Position precision is the
+  lever for an opaque nib.
+- The **pencil** plateaus at 41–46% at every setting. Something other than the
+  packing dominates it.
+- Sixteen bits of pressure took the pen from 9.6% to 6.4% and cost a byte a
+  sample, which is 11% of the record.
+
+**1/16 px stayed.** It is what keeps a sixteen-fold margin under the int16 step
+limit — a step that does not fit is a refusal, not a clamp — and spending that
+margin on an invisible improvement is the wrong trade. `StrokeCodec.VERSION` is
+still there if a later measurement disagrees.
+
+### What Ik0 asked for and did not get
+
+Ik0's note said a rebuild should open *"one scratch buffer sized to the damage
+rectangle and reuse it across every stroke it redraws, rather than opening one
+per stroke"*. Half of that is right and half of it is not. **Reuse** is right
+and is what happens — `ScratchLayer` keeps its buffer across `begin` calls and
+Bn3's 256 px overshoot means a rebuild rarely reallocates. **One buffer for the
+whole patch** is wrong: two overlapping translucent strokes accumulated into one
+buffer and composited once are a different drawing from two strokes composited
+one at a time, and not being that is the entire reason the buffer exists.
+
 ## Stop conditions
 
 The phase's, in the order they can fire.
@@ -680,11 +777,11 @@ The phase's, in the order they can fire.
    roughly six times the bytes and losing re-brushing and re-stabilisation, is
    not needed. Left in the list because a stop condition that was cleared on
    evidence is worth as much as one that fired.
-3. **Ik4 forces a second compositor.** If re-rendering cannot go through
-   `ScratchLayer` and `DabRasterizer` as the commit path does — if it needs its
-   own loop — stop. Phase 3 bought one compositor deliberately, and two that
-   drift is the defect a user finds months later in a file they have already
-   sent somewhere.
+3. ~~**Ik4 forces a second compositor.**~~ **Cleared.** `rebuild` calls
+   `stampStroke`, which is the commit path's own method, with the commit path's
+   `ScratchLayer` and `DabRasterizer`. What it needed instead was a way to
+   confine a stroke to a rectangle and to the record's own clip, which is a
+   canvas clip and eleven lines. See **What Ik4 built**.
 4. **Ik8's erase-to-intersection is not the feature people mean.** It is the
    single most-praised vector feature in CSP and the reason inkers use vector
    layers at all. If, on the tablet, the junction it picks is not the junction

@@ -474,4 +474,54 @@ class LayerTest {
         const val OPAQUE_BLACK = 0xFF000000.toInt()
         const val OPAQUE_WHITE = 0xFFFFFFFF.toInt()
     }
+    // ---- Ik4: clearing one rectangle ---------------------------------------
+
+    /**
+     * The rebuild's first step. It has to clear before it redraws, because a
+     * rebuild *replaces* what is there and painting over without clearing is a
+     * second coat — invisible on an opaque nib until the antialiased edges
+     * disagree, and plainly darker on a translucent one.
+     *
+     * Half-open, so the right and bottom rows are **not** cleared. That is
+     * `Bounds.toPixelRect`'s convention and `Rect`'s, and a rectangle that
+     * cleared one row too many would take a pixel of a neighbouring stroke with
+     * it on every edit.
+     */
+    @Test
+    fun `blanking a rectangle clears inside it and nothing outside`() {
+        val layer = Layer(64, 64, false)
+        val paint = Paint().apply { color = Color.BLACK; isAntiAlias = false }
+        layer.write { it.drawRect(0f, 0f, 64f, 64f, paint) }
+        assertTrue(layer.blank(16, 16, 32, 32))
+
+        var cleared = 0
+        var kept = 0
+        layer.read { bmp ->
+            for (y in 0 until 64) {
+                for (x in 0 until 64) {
+                    val inside = x in 16..31 && y in 16..31
+                    val a = bmp.getPixel(x, y) ushr 24
+                    if (inside) {
+                        assertEquals(0, a, "($x, $y) was inside and survived")
+                        cleared++
+                    } else {
+                        assertEquals(255, a, "($x, $y) was outside and was cleared")
+                        kept++
+                    }
+                }
+            }
+        }
+        assertEquals(256, cleared)
+        assertEquals(64 * 64 - 256, kept)
+    }
+
+    @Test
+    fun `an empty or inverted rectangle clears nothing and is not a failure`() {
+        val layer = Layer(16, 16, false)
+        val paint = Paint().apply { color = Color.BLACK; isAntiAlias = false }
+        layer.write { it.drawRect(0f, 0f, 16f, 16f, paint) }
+        assertTrue(layer.blank(8, 8, 8, 12))
+        assertTrue(layer.blank(12, 8, 4, 12))
+        layer.read { assertEquals(255, it.getPixel(8, 8) ushr 24) }
+    }
 }
