@@ -303,7 +303,7 @@ feature, it is a subsystem with a feature on top.** This plan takes that price.
 | **Ik12** | **DONE.** `Guide`, `Snap`, `LineGuide`, `StrokeBuilder.snap`, and the predicted tail through the same guide. See **What Ik12 built**. | `:engine` | Med | — | 3–4 |
 | **Ik13** | **DONE.** `GuideSet`, `Guideline`, `NearestGuide`, `GuideOverlay`, `GuideHandles`, the guides panel, `StrokeRecord.guide` and format 3 on both files. See **What Ik13 built**. | `:app` | **High** | Ik12 | 8–12 |
 | **Ik14** | **DONE.** `ParallelGuide`, `EllipseGuide`, `CurveGuide`, the `Guide.begin` the first needed, and *Trace that stroke*. The straight ruler and the falloff came with Ik13 and Ik12. See **What Ik14 built**. | `:engine`, `:app` | Med | Ik13 | 5–8 |
-| **Ik15** | **DONE, and two of its six parts needed no code.** `PerspectiveGuide`, `Guide.advance`, the ray-choice rule with its tie-break, the lock, the derived horizon. The isometric grid and infinitising a point are both the parallel ruler. See **What Ik15 built**. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
+| **Ik15** | **DONE, and larger than it was written.** `PerspectiveGuide`, `Guide.advance`, the ray-choice rule with its tie-break, the lock, the derived horizon, one to three points on a tap — and `FisheyeGuide`, which is `docs/guides-plan.md`'s Tier 2 item 21 brought in from the cold. See **What Ik15 built** and **What the tablet asked for next**. | `:engine`, `:app` | **High** | Ik13 | 10–14 |
 | **Ik16** | The feel pass on the tablet, by the person holding the pen, and the reconcile of this document against what was measured. | device, docs | Low | all | 1–2 |
 
 **Guide subtotal: 30–44 days.**
@@ -1511,11 +1511,81 @@ The **horizon is derived**: the line through the first two points, or a
 horizontal through the only one. It moves when a point is dragged, which is what
 a horizon does, and a stored one would be a second thing to keep in step.
 
-The **rays are aimed at the visible rectangle** rather than spread at even
-angles. A vanishing point is usually a long way off the page, so an even fan
+The **rays are aimed at the page**, at fixed points spaced along its own edge. A
+vanishing point is usually a long way off the paper, so a fan at even *angles*
 would put nearly all of it off screen and leave two lines that look like a
-mistake. Aiming each ray at a point spaced along the clip's own edge fills
-whatever is in front of you, at any zoom and wherever the point is.
+mistake; aiming at the page fans it across the drawing instead.
+
+> That sentence originally said *the visible rectangle* and it was wrong. See
+> **What the tablet asked for next**.
+
+## What the tablet asked for next
+
+> 2026-09-13, from the person holding the pen. Three requests, and the first
+> was a defect that three commits of careful work had walked straight past.
+
+### "The perspective guides should zoom with the page"
+
+`Guideline.outline` took one rectangle — the clip — and quietly used it for two
+different jobs: **cutting** the infinite lines down to something a `Path` can
+hold, and **placing** the families. The second was wrong, and it was wrong in
+the way that is hardest to see from the inside: it filled the screen beautifully
+at every zoom *because* it re-aimed itself at the screen. So the lines slid over
+the drawing as the canvas moved, and a ray you were inking along was gone the
+moment you zoomed in on it.
+
+A guide that re-aims itself at the glass is not a thing on the page, which is
+the one sentence this whole subsystem is built on. `outline` takes two
+rectangles now: the page is where the lines *are*, the clip is only what the
+infinite ones are cut to.
+
+**The lesson is about which measurement to take.** Every test of the overlay
+asked "does it fill the view at this zoom", and the answer was yes at every
+zoom. Nobody asked "is it in the same place on the *drawing* at two zooms", and
+that was the question.
+
+### "I would like to be able to move the vanishing points"
+
+They were draggable, and nobody could drag them. A two-point set puts both
+points off the page on purpose — that is what makes them vanishing points — and
+at a fit-to-screen zoom the page *is* the screen, so both handles were off the
+glass with no gesture able to reach either. Ik13 wrote the handle code and Ik15
+shipped the one guide it could not serve.
+
+A handle outside the view is now drawn at the edge of it, hollow, and dragging
+it moves the point **by** the distance the finger went rather than **to** where
+the finger is — dragging to the finger would teleport a vanishing point onto
+the page the moment you touched its marker. Handles are hit-tested in view
+space and bodies in document space, because where a handle is and where it is
+drawn are now two different places.
+
+### "3 point should be possible, as well as 5 point (fisheye)"
+
+Three always worked in the engine and the panel could not ask for it, which is
+its own small lesson about where a feature is finished. A perspective row now
+carries a second word you tap: 1 pt, 2 pt, 3 pt.
+
+**Five-point is a new guide**, and `docs/guides-plan.md` item 21 — the one
+scored **1 for use and 4 for difficulty**, with "few people use it" beside it.
+That score is about how many artists reach for it and not about whether this one
+does, and the difficulty turned out to be the most wrong number in the document:
+it is the *least* difficult of the three points that 4 was guarding, because the
+construction is exact.
+
+A fisheye is a circle with four vanishing points on it and a fifth at the
+centre. Everything belongs to one of three families — straight through the
+middle, an arc from the left point to the right, an arc from the top to the
+bottom — and **through any two fixed points and one more there is exactly one
+circle**, so the arc a stroke is on is not fitted or approximated. It is *the*
+circle through its family's two points and the place the pen landed, and
+projecting onto a circle is a normalise and a multiply.
+
+Three points on a line have no circle, and that is the honest case rather than a
+fallback: a stroke started on a diameter of a fisheye really is straight.
+
+The circumcircle is computed in **double**, for `EllipseGuide`'s reason one more
+time: a page coordinate is a few thousand, its square is a few million, and the
+determinant is a difference of those.
 
 ## The Inker workspace, which is what all of this was for
 
