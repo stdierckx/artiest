@@ -1478,11 +1478,26 @@ The phase's, in the order they can fire.
    crossing is. What a log cannot answer is whether it *feels* like the right
    junction when the lines are not two ruled strokes — that is Ik16's, with the
    pen in a hand. See **What Ik8 built**.
-5. **Ik13 needs a gesture that races the canvas.** See above; the answer is
-   arrange mode, and a second answer is a stop condition, not a design.
-6. **The chrome measurement regresses.** `U10`'s rule — `recompose N/s` reads 0
-   while a stroke is drawn — covers the guide overlay too. A guide overlay that
-   recomposes while the pen is down fails it.
+5. ~~**Ik13 needs a gesture that races the canvas.**~~ **Cleared, and the
+   answer is the one written above.** Handles are dragged in arrange mode and
+   nowhere else. What the section above did not foresee is that arrange mode is
+   *also* where toolbars are dragged and shapes are painted, so the answer is
+   not enough on its own: `GuideHandles` tests the **down** event against the
+   guides and consumes it only if it hit one, which is what lets a guide and a
+   toolbar share a mode. See **What Ik13 built**.
+6. ~~**The chrome measurement regresses.**~~ **Cleared, measured.** On the
+   DTH-A116, with a ruler, a parallel set and a traced curve on the page and a
+   stroke being drawn against them:
+
+   ```
+   chrome  5 surfaces  23 controls  recompose 0/s  35 total
+   ```
+
+   `U10`'s rule holds. It holds by construction rather than by luck: the
+   overlay reads its tick counters **inside the draw lambda**, which makes a
+   guide moving a draw-phase invalidation and not a recomposition — the same
+   arrangement `SelectionOverlay` uses for the marching ants, and the reason
+   `GuideSet` is a plain mutable object rather than Compose state.
 
 ## Cut order, decided now while it is cheap
 
