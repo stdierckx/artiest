@@ -223,15 +223,15 @@ class GuideSet {
      * [out] is reset first: the overlay owns one path for its life and this is
      * what refills it.
      */
-    fun outline(out: Path, clip: RectF) {
+    fun outline(out: Path, clip: RectF, page: RectF) {
         out.reset()
-        for (line in lines) line.outline(out, clip)
+        for (line in lines) line.outline(out, clip, page)
     }
 
     /** The same, for the guides that are switched off. See `GuideOverlay`. */
-    fun outline(out: Path, clip: RectF, on: Boolean) {
+    fun outline(out: Path, clip: RectF, page: RectF, on: Boolean) {
         out.reset()
-        for (line in lines) if (line.on == on) line.outline(out, clip)
+        for (line in lines) if (line.on == on) line.outline(out, clip, page)
     }
 
     // ---- the one thing that has to happen on every change ------------------

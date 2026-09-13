@@ -585,7 +585,9 @@ private fun CanvasScreen(
         val set = document.guides
         GuideInfo(
             rows = set.all().mapIndexed { at, line ->
-                GuideInfo.Row(line.id, labelFor(line, at), line.on, lockLabel(line))
+                GuideInfo.Row(
+                    line.id, labelFor(line, at), line.on, lockLabel(line), pointsLabel(line),
+                )
             },
             strength = set.strength,
             reachDoc = set.reachDoc,
@@ -780,6 +782,17 @@ private fun CanvasScreen(
             }
 
             is GuideAct.Lock -> set.byId(act.id)?.let { set.put(it.nextLock()) }
+
+            is GuideAct.Points -> set.byId(act.id)?.let {
+                set.put(
+                    it.nextPointCount(document.widthPx.toFloat(), document.heightPx.toFloat()),
+                )
+                // A point that has just appeared is off the page, so the marker
+                // for it is at the edge of the glass and the next thing a hand
+                // wants is to drag it. Same three lines every other way of
+                // making a guide ends with.
+                arranging = true
+            }
 
             is GuideAct.SetOn -> set.setOn(act.id, act.on)
             is GuideAct.Remove -> set.remove(act.id)
@@ -1502,7 +1515,9 @@ private fun CanvasScreen(
                 guideTick
                 outlineTick.intValue
                 if (document.guides.isEmpty) null else {
-                    document.guides.outline(guidePath, visibleDoc(surface, document), on = true)
+                    document.guides.outline(
+                        guidePath, visibleDoc(surface, document), pageOf(document), on = true,
+                    )
                     guidePath
                 }
             },
@@ -1510,7 +1525,9 @@ private fun CanvasScreen(
                 guideTick
                 outlineTick.intValue
                 if (document.guides.isEmpty) null else {
-                    document.guides.outline(guideDim, visibleDoc(surface, document), on = false)
+                    document.guides.outline(
+                        guideDim, visibleDoc(surface, document), pageOf(document), on = false,
+                    )
                     guideDim
                 }
             },
@@ -3024,6 +3041,18 @@ private fun lockLabel(line: be.thalos.artiest.doc.Guideline): String? {
 }
 
 /**
+ * How many vanishing points a set has, for its row, or null for a kind with
+ * none.
+ *
+ * "1 pt" and not "1 point", because it sits beside three other controls on a
+ * 268dp row and the number is the part being read.
+ */
+private fun pointsLabel(line: be.thalos.artiest.doc.Guideline): String? {
+    if (line.kind != be.thalos.artiest.doc.GuideKind.PERSPECTIVE) return null
+    return "${line.pointCount} pt"
+}
+
+/**
  * Where a fresh guide is put.
  *
  * **In the middle of the page**, and not where the last one was or where the
@@ -3074,6 +3103,12 @@ private fun madeAt(
         // wants, and moving it is a drag rather than a setting.
         be.thalos.artiest.doc.GuideKind.PERSPECTIVE ->
             floatArrayOf(-w * 0.35f, h * 0.45f, w * 1.35f, h * 0.45f)
+
+        // Centred on the page, with the field of view filling most of it. A
+        // fisheye is a statement about the whole picture rather than a ruler
+        // laid on part of it, so it arrives the size of the picture.
+        be.thalos.artiest.doc.GuideKind.FISHEYE ->
+            floatArrayOf(w * 0.5f, h * 0.5f, w * 0.5f + minOf(w, h) * 0.46f, h * 0.5f)
 
         // Nothing. A curve is not placed, it is *traced*: it comes from a
         // stroke you have already drawn and picked, which is the only honest
@@ -3172,6 +3207,22 @@ private fun visibleDoc(
     out.set(left - margin, top - margin, right + margin, bottom + margin)
     return out
 }
+
+/**
+ * The page, as a rectangle.
+ *
+ * The *other* rectangle a guide is drawn against, and the one that matters —
+ * see `Guideline.outline`. A guide is placed against this and cut to what is on
+ * screen, which is why it pans and zooms with the drawing instead of sliding
+ * over it.
+ */
+private fun pageOf(document: be.thalos.artiest.doc.Document): android.graphics.RectF {
+    pageScratch.set(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
+    return pageScratch
+}
+
+/** [pageOf]'s own rectangle. UI thread only, and it never escapes a draw. */
+private val pageScratch = android.graphics.RectF()
 
 /** [visibleDoc]'s own rectangle. UI thread only, and it never escapes a draw. */
 private val visibleScratch = android.graphics.RectF()

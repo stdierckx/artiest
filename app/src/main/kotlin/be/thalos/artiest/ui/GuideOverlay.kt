@@ -41,6 +41,11 @@ import androidx.compose.ui.graphics.nativeCanvas
  * dashed and dimmer — visible, because it is still a thing on the page you can
  * pick up, and quiet, because it is not doing anything.
  *
+ * A handle whose point is off the glass is drawn at the edge of it, hollow —
+ * see [handleViewPosition]. That is not a nicety: a vanishing point belongs off
+ * the page, and at a fit-to-screen zoom the page *is* the screen, so without it
+ * a two-point set has two handles and no way to reach either.
+ *
  * The handles are drawn **only while arranging**. That is Ik13's one interface
  * decision and `docs/guides-plan.md` trap 4 is why: dragging a guide competes
  * with panning, and `docs/panels-plan.md` has already settled that class of
@@ -109,6 +114,15 @@ fun GuideOverlay(
             color = HALO
         }
     }
+    /** A ring for a handle whose point is off the glass. See the draw below. */
+    val hollow = remember {
+        Paint().asFrameworkPaint().apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = HAIR * 1.6f
+            isAntiAlias = true
+            color = LIVE
+        }
+    }
     val point = remember { FloatArray(2) }
 
     Canvas(modifier) {
@@ -118,13 +132,23 @@ fun GuideOverlay(
             dim()?.let { line(native, it, matrix, transformed, halo, off) }
             live()?.let { line(native, it, matrix, transformed, halo, core) }
             val grabs = handles() ?: return@drawIntoCanvas
+            val w = size.width
+            val h = size.height
             var i = 0
             while (i + 1 < grabs.size) {
-                point[0] = grabs[i]
-                point[1] = grabs[i + 1]
-                matrix.mapPoints(point)
-                native.drawCircle(point[0], point[1], HANDLE, knob)
-                native.drawCircle(point[0], point[1], HANDLE, knobEdge)
+                // A handle whose point is off the glass is drawn at the edge,
+                // and drawn **hollow** so it reads as a marker for something
+                // out there rather than as the thing itself. A vanishing point
+                // belongs off the page, so this is the normal case for the one
+                // guide that most needs dragging. See `handleViewPosition`.
+                val far = handleViewPosition(grabs[i], grabs[i + 1], matrix, w, h, point)
+                if (far) {
+                    native.drawCircle(point[0], point[1], HANDLE + 2f, knobEdge)
+                    native.drawCircle(point[0], point[1], HANDLE - 1f, hollow)
+                } else {
+                    native.drawCircle(point[0], point[1], HANDLE, knob)
+                    native.drawCircle(point[0], point[1], HANDLE, knobEdge)
+                }
                 i += 2
             }
         }

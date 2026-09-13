@@ -33,6 +33,9 @@ class GuideSetTest {
 
     private fun set(vararg lines: Guideline) = GuideSet().also { it.load(lines.toList()) }
 
+    /** The page every outline test draws against, so "on the page" is one rect. */
+    private val page = RectF(0f, 0f, 1000f, 800f)
+
     // ---- one guide, one question -------------------------------------------
 
     @Test
@@ -240,7 +243,7 @@ class GuideSetTest {
         // disappearing when you zoom in on it.
         val path = Path()
         val clip = RectF(0f, 0f, 1000f, 800f)
-        set(ruler(1, 0f, 0f, 1000f, 800f)).outline(path, clip)
+        set(ruler(1, 0f, 0f, 1000f, 800f)).outline(path, clip, clip)
         assertFalse(path.isEmpty)
         val bounds = RectF()
         path.computeBounds(bounds, true)
@@ -251,14 +254,14 @@ class GuideSetTest {
     @Test
     fun `a ruler that misses the page draws nothing`() {
         val path = Path()
-        set(ruler(1, -500f, -500f, 500f, -500f)).outline(path, RectF(0f, 0f, 1000f, 800f))
+        set(ruler(1, -500f, -500f, 500f, -500f)).outline(path, page, page)
         assertTrue(path.isEmpty, "a horizontal line 500 above the page")
     }
 
     @Test
     fun `a ruler along an edge is still drawn`() {
         val path = Path()
-        set(ruler(1, 0f, 0f, 1000f, 0f)).outline(path, RectF(0f, 0f, 1000f, 800f))
+        set(ruler(1, 0f, 0f, 1000f, 0f)).outline(path, page, page)
         assertFalse(path.isEmpty, "the top edge is on the page, not off it")
     }
 
@@ -288,8 +291,8 @@ class GuideSetTest {
         // The whole of telling it apart from a ruler on the page: a ruler says
         // "draw here" and a parallel set says "anywhere, at this angle".
         val clip = RectF(0f, 0f, 1000f, 800f)
-        val one = Path().also { set(ruler(1, 0f, 400f, 100f, 400f)).outline(it, clip) }
-        val many = Path().also { set(parallel(1, 0f, 400f, 100f, 400f)).outline(it, clip) }
+        val one = Path().also { set(ruler(1, 0f, 400f, 100f, 400f)).outline(it, clip, page) }
+        val many = Path().also { set(parallel(1, 0f, 400f, 100f, 400f)).outline(it, clip, page) }
         val a = RectF().also { one.computeBounds(it, true) }
         val b = RectF().also { many.computeBounds(it, true) }
         assertEquals(0f, a.height(), 1e-3f, "a ruler is one line")
@@ -317,7 +320,7 @@ class GuideSetTest {
         assertEquals(700f, scratch[0], 1e-1f)
         assertEquals(400f, scratch[1], 1e-1f)
 
-        val path = Path().also { set(e).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        val path = Path().also { set(e).outline(it, RectF(0f, 0f, 1000f, 800f), RectF(0f, 0f, 1000f, 800f)) }
         val bounds = RectF().also { path.computeBounds(it, true) }
         assertEquals(300f, bounds.left, 1f)
         assertEquals(700f, bounds.right, 1f)
@@ -334,8 +337,8 @@ class GuideSetTest {
             1, GuideKind.ELLIPSE, floatArrayOf(0f, 0f, 0f, 200f, 0f, 50f),
         )
         val clip = RectF(-400f, -400f, 400f, 400f)
-        val a = RectF().also { Path().also { p -> upright.outline(p, clip); p.computeBounds(it, true) } }
-        val b = RectF().also { Path().also { p -> turned.outline(p, clip); p.computeBounds(it, true) } }
+        val a = RectF().also { Path().also { p -> upright.outline(p, clip, clip); p.computeBounds(it, true) } }
+        val b = RectF().also { Path().also { p -> turned.outline(p, clip, clip); p.computeBounds(it, true) } }
         assertEquals(a.width(), b.height(), 1f)
         assertEquals(a.height(), b.width(), 1f)
     }
@@ -419,7 +422,7 @@ class GuideSetTest {
     @Test
     fun `a curve draws as the polyline it is`() {
         val line = Guideline(1, GuideKind.CURVE, floatArrayOf(10f, 20f, 300f, 20f, 300f, 400f))
-        val path = Path().also { set(line).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        val path = Path().also { set(line).outline(it, RectF(0f, 0f, 1000f, 800f), RectF(0f, 0f, 1000f, 800f)) }
         val bounds = RectF().also { path.computeBounds(it, true) }
         assertEquals(10f, bounds.left, 1e-3f)
         assertEquals(300f, bounds.right, 1e-3f)
@@ -450,7 +453,7 @@ class GuideSetTest {
     fun `a perspective set draws a horizon through its points`() {
         // Derived and not stored, so it moves when a point is dragged.
         val clip = RectF(0f, 0f, 1000f, 800f)
-        val path = Path().also { set(twoPoint(1)).outline(it, clip) }
+        val path = Path().also { set(twoPoint(1)).outline(it, clip, page) }
         assertFalse(path.isEmpty)
         // Every ray and the horizon are cut to the page.
         val bounds = RectF().also { path.computeBounds(it, true) }
@@ -461,7 +464,7 @@ class GuideSetTest {
     @Test
     fun `one vanishing point still gets a horizon`() {
         val one = Guideline(1, GuideKind.PERSPECTIVE, floatArrayOf(500f, 300f))
-        val path = Path().also { set(one).outline(it, RectF(0f, 0f, 1000f, 800f)) }
+        val path = Path().also { set(one).outline(it, RectF(0f, 0f, 1000f, 800f), RectF(0f, 0f, 1000f, 800f)) }
         assertFalse(path.isEmpty, "a horizontal through the only point")
     }
 
@@ -545,6 +548,87 @@ class GuideSetTest {
         assertNotNull(set.snap)
         set.setOn(set[2].id, false)
         assertEquals(2, set.all().count { it.on }, "and one can be put away")
+    }
+
+    @Test
+    fun `a perspective set cycles between one, two and three points`() {
+        var line = twoPoint(1)
+        assertEquals(2, line.pointCount)
+        line = line.nextPointCount(1000f, 800f)
+        assertEquals(3, line.pointCount)
+        // The third is above the page, centred between the other two, which is
+        // where a hand would have put it for a building seen from the street.
+        assertTrue(line.yAt(2) < 0f, "the third point is above the page: ${line.yAt(2)}")
+        assertEquals(500f, line.xAt(2), 1f)
+        // And the first two did not move.
+        assertEquals(-1000f, line.xAt(0), 1e-3f)
+        assertEquals(2000f, line.xAt(1), 1e-3f)
+
+        line = line.nextPointCount(1000f, 800f)
+        assertEquals(1, line.pointCount, "and round again")
+    }
+
+    @Test
+    fun `shrinking a set drops a lock that named a point which has gone`() {
+        // Otherwise every stroke would be locked to a ray that is not there,
+        // which `PerspectiveGuide` treats as no lock at all -- but the row
+        // would still say "to 3".
+        var line = twoPoint(1, lock = 1)
+        line = line.nextPointCount(1000f, 800f)
+        assertEquals(1, line.lockedRay, "three points, so ray 1 is still there")
+        line = line.nextPointCount(1000f, 800f)
+        assertEquals(1, line.pointCount)
+        assertEquals(-1, line.lockedRay, "one point, so it is gone")
+    }
+
+    @Test
+    fun `only a perspective set has a point count to cycle`() {
+        val r = ruler(1, 0f, 0f, 100f, 0f)
+        assertSame(r, r.nextPointCount(1000f, 800f))
+    }
+
+    // ---- the fisheye -------------------------------------------------------
+
+    private fun fisheye(id: Long, cx: Float, cy: Float, r: Float) =
+        Guideline(id, GuideKind.FISHEYE, floatArrayOf(cx, cy, cx + r, cy))
+
+    @Test
+    fun `a fisheye is a centre and a radius, and it snaps`() {
+        val line = fisheye(1, 500f, 400f, 300f)
+        val g = assertNotNull(line.guide)
+        // Start above the middle, move sideways: the across family, an arc from
+        // the left point to the right one.
+        g.begin(500f, 550f)
+        for (i in 1..20) g.advance(500f + i * 3f, 550f)
+        assertTrue(g.project(700f, 550f, scratch))
+        // It has bowed back toward the two side points, which are at y = 400.
+        assertTrue(scratch[1] < 550f, "no bow: ${scratch[1]}")
+    }
+
+    @Test
+    fun `a fisheye with no radius is not a guide`() {
+        assertNull(Guideline(1, GuideKind.FISHEYE, floatArrayOf(500f, 400f, 500f, 400f)).guide)
+    }
+
+    @Test
+    fun `a fisheye draws its field of view and the families in it`() {
+        val line = fisheye(1, 500f, 400f, 300f)
+        val path = Path().also { set(line).outline(it, page, page) }
+        assertFalse(path.isEmpty)
+        val bounds = RectF().also { path.computeBounds(it, true) }
+        // The circle is 200..800 across; the spokes are infinite and cut to the
+        // page, so the whole thing reaches the page's edges.
+        assertTrue(bounds.left <= 1f, "$bounds")
+        assertTrue(bounds.right >= 999f, "$bounds")
+    }
+
+    @Test
+    fun `a fisheye goes out and comes back`() {
+        val line = fisheye(4, 500f, 400f, 300f)
+        val back = assertNotNull(GuideText.decode(GuideText.encode(line)))
+        assertEquals(GuideKind.FISHEYE, back.kind)
+        assertEquals(2, back.pointCount)
+        assertEquals(800f, back.xAt(1), 0.1f)
     }
 
     // ---- what a stroke keeps -----------------------------------------------
@@ -635,8 +719,8 @@ class GuideSetTest {
     fun `the on and off guides are drawn apart`() {
         val set = set(ruler(1, 0f, 0f, 1000f, 0f), ruler(2, 0f, 400f, 1000f, 400f, on = false))
         val clip = RectF(0f, 0f, 1000f, 800f)
-        val live = Path().also { set.outline(it, clip, on = true) }
-        val dim = Path().also { set.outline(it, clip, on = false) }
+        val live = Path().also { set.outline(it, clip, page, on = true) }
+        val dim = Path().also { set.outline(it, clip, page, on = false) }
         val liveBounds = RectF().also { live.computeBounds(it, true) }
         val dimBounds = RectF().also { dim.computeBounds(it, true) }
         assertEquals(0f, liveBounds.top, 1e-3f)

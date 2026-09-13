@@ -73,6 +73,11 @@ data class GuideInfo(
          * rays. See `Guideline.lockedRay`.
          */
         val lock: String? = null,
+        /**
+         * How many vanishing points a perspective set has, or null for a kind
+         * that has none. Tapping it cycles one, two, three.
+         */
+        val points: String? = null,
     )
 
     val isEmpty: Boolean get() = rows.isEmpty()
@@ -105,6 +110,9 @@ sealed interface GuideAct {
 
     /** Cycle a perspective set's ray: choosing, then each point, then choosing. */
     class Lock(val id: Long) : GuideAct
+
+    /** Cycle a perspective set between one, two and three vanishing points. */
+    class Points(val id: Long) : GuideAct
 
     class SetOn(val id: Long, val on: Boolean) : GuideAct
 
@@ -252,6 +260,7 @@ private fun GuidesBody(
             // own -- which is why it sits beside Perspective as an equal and
             // not inside it as an option.
             Make(ToolIcons.isometric, "Isometric") { onAct(GuideAct.Isometric) }
+            Make(ToolIcons.fisheye, "Fisheye") { onAct(GuideAct.Add(GuideKind.FISHEYE)) }
         }
 
         // Only when there is a stroke to trace. See GuideInfo.picked.
@@ -339,21 +348,16 @@ private fun GuideRow(row: GuideInfo.Row, onAct: (GuideAct) -> Unit) {
             color = if (row.on) colors.onPrimaryContainer else colors.onSurfaceVariant,
         )
         Spacer(Modifier.weight(1f))
+        // How many vanishing points, as a word you tap. One, two, three.
+        if (row.points != null) {
+            Pill(row.points) { onAct(GuideAct.Points(row.id)) }
+            Spacer(Modifier.width(6.dp))
+        }
         // `docs/guides-plan.md` item 18's manual override, as a word you tap.
         // A cycle rather than a menu: there are at most four states, and a menu
         // for four states is a menu nobody opens.
         if (row.lock != null) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surfaceContainerHigh)
-                    .clickable { onAct(GuideAct.Lock(row.id)) }
-                    .padding(horizontal = 9.dp),
-            ) {
-                Text(row.lock, fontSize = 11.sp, color = colors.onSurfaceVariant)
-            }
+            Pill(row.lock) { onAct(GuideAct.Lock(row.id)) }
             Spacer(Modifier.width(6.dp))
         }
         Box(
@@ -384,6 +388,29 @@ private fun GuideRow(row: GuideInfo.Row, onAct: (GuideAct) -> Unit) {
                 modifier = Modifier.size(17.dp),
             )
         }
+    }
+}
+
+/**
+ * A word you tap to get the next one.
+ *
+ * Two of these sit on a perspective set's row — how many points, and which ray
+ * — and they are words rather than icons because both are *states in a cycle*
+ * and a picture of a state you have to learn is worse than the word for it.
+ */
+@Composable
+private fun Pill(text: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(colors.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+    ) {
+        Text(text, fontSize = 11.sp, color = colors.onSurfaceVariant)
     }
 }
 

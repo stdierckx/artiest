@@ -5,6 +5,7 @@ import android.graphics.RectF
 import be.thalos.artiest.engine.guide.Guide
 import be.thalos.artiest.engine.guide.CurveGuide
 import be.thalos.artiest.engine.guide.EllipseGuide
+import be.thalos.artiest.engine.guide.FisheyeGuide
 import be.thalos.artiest.engine.guide.LineGuide
 import be.thalos.artiest.engine.guide.ParallelGuide
 import be.thalos.artiest.engine.guide.PerspectiveGuide
@@ -139,6 +140,17 @@ enum class GuideKind(
      * `PerspectiveGuide`.
      */
     PERSPECTIVE("perspective", ANY_POINTS, "Perspective", leastAny = 1),
+
+    /**
+     * Five-point curvilinear perspective: a fisheye.
+     *
+     * `docs/guides-plan.md` item 21. Two points and not five: the centre and
+     * one of the four on the circle, which between them give the radius and the
+     * turn — and the other three follow, because a fisheye's four are at the
+     * compass positions of one circle by definition. Storing five would be
+     * storing three numbers that can disagree with the other two.
+     */
+    FISHEYE("fisheye", 2, "Fisheye"),
     ;
 
     /**
@@ -288,6 +300,15 @@ class Guideline(
             if (n < 1) null else PerspectiveGuide(points, n, lockedRay)
         }
 
+        GuideKind.FISHEYE -> {
+            val cx = points[0]
+            val cy = points[1]
+            val rx = points[2] - cx
+            val ry = points[3] - cy
+            val r = hypot(rx, ry)
+            if (r < MIN_SPAN_DOC) null else FisheyeGuide(cx, cy, r, atan2(ry, rx))
+        }
+
         GuideKind.ELLIPSE -> {
             val cx = points[0]
             val cy = points[1]
@@ -313,6 +334,44 @@ class Guideline(
     ): Guideline =
         if (on == this.on && lockedRay == this.lockedRay) this
         else Guideline(id, kind, points, on, lockedRay)
+
+    /**
+     * The same perspective set with one more vanishing point, or back to one.
+     *
+     * A cycle — one, two, three, one — for [nextLock]'s reason: there are three
+     * states and a menu for three states is a menu nobody opens. Answers itself
+     * unchanged for every other kind.
+     *
+     * **Growing places the new point and shrinking forgets the old ones**, and
+     * that is the trade a cycle makes. It is the right way round here: a
+     * vanishing point takes one drag to place and the set takes one tap to get
+     * back to, while the alternative — a plus and a minus — is two more
+     * controls on a row that already carries four.
+     *
+     * The new point goes **above** the page, which is where the third one of a
+     * three-point set belongs for the drawing everybody makes with it: a
+     * building seen from the street, with its verticals converging upward.
+     */
+    fun nextPointCount(pageW: Float, pageH: Float): Guideline {
+        if (kind != GuideKind.PERSPECTIVE) return this
+        val now = pointCount
+        val next = if (now >= PerspectiveGuide.MAX_POINTS) 1 else now + 1
+        val out = FloatArray(next * 2)
+        for (i in 0 until minOf(now, next)) {
+            out[i * 2] = xAt(i)
+            out[i * 2 + 1] = yAt(i)
+        }
+        if (next > now) {
+            // Above the page and centred between the two that are already
+            // there, so a fresh third point is where a hand would have put it.
+            val cx = if (now >= 2) (xAt(0) + xAt(1)) * 0.5f else pageW * 0.5f
+            out[(next - 1) * 2] = cx
+            out[(next - 1) * 2 + 1] = -pageH * 1.2f
+        }
+        // A lock that named a point which has just gone has to go with it.
+        val lock = if (lockedRay < next) lockedRay else PerspectiveGuide.NO_LOCK
+        return Guideline(id, kind, out, on, lock)
+    }
 
     /**
      * The next lock in the cycle: choosing, then each point in turn, then
@@ -400,13 +459,14 @@ class Guideline(
      * the coordinates stop being representable and the line vanishes at high
      * zoom.
      */
-    fun outline(out: Path, clip: RectF) {
+    fun outline(out: Path, clip: RectF, page: RectF) {
         when (kind) {
             GuideKind.RULER -> rulerOutline(out, clip)
-            GuideKind.PARALLEL -> parallelOutline(out, clip)
+            GuideKind.PARALLEL -> parallelOutline(out, clip, page)
             GuideKind.ELLIPSE -> ellipseOutline(out)
             GuideKind.CURVE -> curveOutline(out)
-            GuideKind.PERSPECTIVE -> perspectiveOutline(out, clip)
+            GuideKind.PERSPECTIVE -> perspectiveOutline(out, clip, page)
+            GuideKind.FISHEYE -> fisheyeOutline(out, clip)
         }
     }
 
@@ -423,37 +483,44 @@ class Guideline(
      * at whatever zoom, and the lines are never anything a stroke snaps to —
      * they are a picture of an angle.
      */
-    private fun parallelOutline(out: Path, clip: RectF) {
+    private fun parallelOutline(out: Path, clip: RectF, page: RectF) {
         val dx = points[2] - points[0]
         val dy = points[3] - points[1]
         val len = hypot(dx, dy)
         if (len < MIN_SPAN_DOC) return
-        // Perpendicular, normalised: the direction the family is spaced along.
+        // Perpendicular, normalised: the axis the family is spaced along.
         val nx = -dy / len
         val ny = dx / len
-        val cx = (clip.left + clip.right) * 0.5f
-        val cy = (clip.top + clip.bottom) * 0.5f
-        // Far enough either way to cross the clip whatever the angle. The
-        // diagonal is the worst case and half of it reaches every corner.
-        val reach = hypot(clip.width(), clip.height()) * 0.5f
-        val gap = reach * 2f / (PARALLEL_LINES + 1)
+        // **Spaced on the page and not on the screen.** The gap is a fraction
+        // of the page's diagonal, so it is the same distance on the paper at
+        // every zoom, and the phase is measured from the page's centre, so a
+        // given line of the family is always in the same place on the drawing.
+        val cx = page.centerX()
+        val cy = page.centerY()
+        val gap = hypot(page.width(), page.height()) / PARALLEL_LINES
         if (gap < MIN_SPAN_DOC) return
-        for (i in 1..PARALLEL_LINES) {
-            val at = -reach + gap * i
-            val px = cx + nx * at
-            val py = cy + ny * at
-            lineThrough(out, clip, px, py, dx, dy)
+        // Which of them cross what is on screen: project the clip's four
+        // corners onto the spacing axis and walk the range between.
+        var lo = Float.MAX_VALUE
+        var hi = -Float.MAX_VALUE
+        for (i in 0..3) {
+            val px = (if (i == 1 || i == 2) clip.right else clip.left) - cx
+            val py = (if (i >= 2) clip.bottom else clip.top) - cy
+            val at = px * nx + py * ny
+            lo = minOf(lo, at)
+            hi = maxOf(hi, at)
+        }
+        var k = kotlin.math.floor(lo / gap).toInt()
+        val last = kotlin.math.ceil(hi / gap).toInt()
+        var drawn = 0
+        while (k <= last && drawn < MAX_FAMILY) {
+            val at = k * gap
+            lineThrough(out, clip, cx + nx * at, cy + ny * at, dx, dy)
+            k++
+            drawn++
         }
     }
 
-    /**
-     * The ellipse, as a `Path`, in document space.
-     *
-     * `addOval` on a rotated rectangle is not a thing `Path` offers, so the
-     * oval is added upright and the whole path is turned. No clip: an ellipse
-     * is bounded, so there is nothing to cut, and the one on screen is the one
-     * the hand placed.
-     */
     /**
      * The horizon, and a fan of rays from each vanishing point.
      *
@@ -468,15 +535,18 @@ class Guideline(
      * points, or a horizontal through the only one. It moves when a point is
      * dragged, which is what a horizon does.
      */
-    private fun perspectiveOutline(out: Path, clip: RectF) {
+    private fun perspectiveOutline(out: Path, clip: RectF, page: RectF) {
         val n = minOf(pointCount, PerspectiveGuide.MAX_POINTS)
         if (n < 1) return
         for (i in 0 until n) {
             val vx = points[i * 2]
             val vy = points[i * 2 + 1]
             for (k in 0 until RAYS) {
-                val at = (k + 0.5f) / RAYS
-                val edge = onPerimeter(clip, at)
+                // **Aimed at the page and not at the glass.** Each ray goes
+                // through a fixed point on the paper's own edge, so the fan is
+                // nailed to the drawing: zoom in and you see the ones that
+                // cross the view, in the places they have always been.
+                val edge = onPerimeter(page, (k + 0.5f) / RAYS)
                 val dx = edge[0] - vx
                 val dy = edge[1] - vy
                 if (hypot(dx, dy) < MIN_SPAN_DOC) continue
@@ -496,11 +566,112 @@ class Guideline(
     }
 
     /**
-     * A point [t] of the way round [clip]'s edge, clockwise from its top-left.
+     * The fisheye: its circle, the spokes through the middle, and the two
+     * families of arcs.
+     *
+     * Cut to [clip] only where something is infinite, which is the spokes. The
+     * circle and the arcs are bounded by the field of view itself and are the
+     * same shape on the page at every zoom — a fisheye is the one guide whose
+     * furniture *is* its geometry.
+     */
+    private fun fisheyeOutline(out: Path, clip: RectF) {
+        val cx = points[0]
+        val cy = points[1]
+        val ax = points[2] - cx
+        val ay = points[3] - cy
+        val r = hypot(ax, ay)
+        if (r < MIN_SPAN_DOC) return
+        val a = atan2(ay, ax)
+        val ca = kotlin.math.cos(a)
+        val sa = kotlin.math.sin(a)
+
+        // The field of view.
+        oval.set(cx - r, cy - r, cx + r, cy + r)
+        out.addOval(oval, Path.Direction.CW)
+
+        // The spokes: straight lines through the middle, which is the family a
+        // line going away from the viewer belongs to. Infinite, so they are cut
+        // to what is on screen.
+        for (k in 0 until FISHEYE_SPOKES) {
+            val t = Math.PI * k / FISHEYE_SPOKES + a
+            lineThrough(out, clip, cx, cy, kotlin.math.cos(t).toFloat(), kotlin.math.sin(t).toFloat())
+        }
+
+        // The two families of arcs. Each is the circle through a pair of
+        // opposite points on the field of view and a third point taken along
+        // the diameter between the other pair — which is exactly the family a
+        // stroke started at that third point would be snapped to.
+        for (family in 0 until 2) {
+            val pax = if (family == 0) cx - ca * r else cx + sa * r
+            val pay = if (family == 0) cy - sa * r else cy - ca * r
+            val pbx = if (family == 0) cx + ca * r else cx - sa * r
+            val pby = if (family == 0) cy + sa * r else cy + ca * r
+            for (k in 1..FISHEYE_ARCS) {
+                val at = (k.toFloat() / (FISHEYE_ARCS + 1) * 2f - 1f) * r * FISHEYE_SPREAD
+                val tx = if (family == 0) cx - sa * at else cx + ca * at
+                val ty = if (family == 0) cy + ca * at else cy + sa * at
+                arcThrough(out, pax, pay, pbx, pby, tx, ty)
+            }
+        }
+    }
+
+    /**
+     * The arc from ([ax], [ay]) to ([bx], [by]) that passes through
+     * ([tx], [ty]), appended to [out].
+     *
+     * Three points on a line have no arc and get the chord, which is what they
+     * are asking for — see `FisheyeGuide.circleThrough`.
+     */
+    private fun arcThrough(
+        out: Path,
+        ax: Float,
+        ay: Float,
+        bx: Float,
+        by: Float,
+        tx: Float,
+        ty: Float,
+    ) {
+        if (!FisheyeGuide.circleThrough(ax, ay, bx, by, tx, ty, circle)) {
+            out.moveTo(ax, ay)
+            out.lineTo(bx, by)
+            return
+        }
+        val ox = circle[0]
+        val oy = circle[1]
+        val r = circle[2]
+        oval.set(ox - r, oy - r, ox + r, oy + r)
+        val from = degrees(ax - ox, ay - oy)
+        val to = degrees(bx - ox, by - oy)
+        val through = degrees(tx - ox, ty - oy)
+        // Two ways round; take the one the third point is on. `arcTo` sweeps
+        // anticlockwise for a negative sweep, which is how the other half is
+        // asked for.
+        val ccw = wrap(to - from)
+        val sweep = if (wrap(through - from) < ccw) ccw else ccw - 360f
+        out.arcTo(oval, from, sweep, true)
+    }
+
+    private fun degrees(x: Float, y: Float): Float =
+        Math.toDegrees(atan2(y, x).toDouble()).toFloat()
+
+    /** An angle difference as 0 up to 360. */
+    private fun wrap(d: Float): Float {
+        var v = d % 360f
+        if (v < 0f) v += 360f
+        return v
+    }
+
+    /** [fisheyeOutline]'s rectangle and circle. UI thread; never escape a draw. */
+    private val oval = RectF()
+    private val circle = FloatArray(3)
+
+    /**
+     * A point [t] of the way round [rect]'s edge, clockwise from its top-left.
      *
      * Reused scratch, because this is called once per ray per frame of a pan.
      */
-    private fun onPerimeter(clip: RectF, t: Float): FloatArray {
+    private fun onPerimeter(rect: RectF, t: Float): FloatArray {
+        val clip = rect
         val w = clip.width()
         val h = clip.height()
         val half = w + h
@@ -643,21 +814,59 @@ class Guideline(
         /**
          * How many lines a parallel set draws across whatever is on screen.
          *
-         * Nine. Enough that the angle reads at a glance from anywhere on the
-         * page, and few enough that the drawing underneath is still the thing
-         * you are looking at — a set dense enough to be a hatching pattern in
-         * its own right would be furniture competing with the ink.
+         * Fourteen across the page's diagonal, which is a gap of about 280
+         * document pixels on the tablet's 3300 by 2160 page.
+         *
+         * A *spacing* rather than a count, because the family is fixed to the
+         * paper: at a fit-to-screen zoom you see about fourteen of them, and
+         * zoomed in you see the two or three that cross the view — in the same
+         * places on the drawing they were before you zoomed.
          */
-        private const val PARALLEL_LINES = 9
+        private const val PARALLEL_LINES = 14
+
+        /**
+         * Past this many lines of one family the loop has gone wrong.
+         *
+         * Reachable only by a page whose diagonal is a rounding error or a clip
+         * the size of a country, neither of which the app can make — so it is a
+         * guard against arithmetic rather than against a user.
+         */
+        private const val MAX_FAMILY = 256
 
         /**
          * How many rays a vanishing point draws across whatever is on screen.
          *
-         * Seven, against the parallel set's nine, because a two-point grid
-         * draws two of these fans and a three-point grid draws three: fourteen
-         * or twenty-one lines is already the most furniture the app puts on a
-         * page, and more would be a hatching pattern competing with the ink.
+         * Twelve per point, aimed at twelve fixed places on the paper's edge.
+         *
+         * More than the seven this started with, and the reason is that the fan
+         * is now nailed to the page: seven rays spread over a whole page is two
+         * or three in view once you zoom in to ink one of them, and a grid you
+         * cannot see is a grid you are not drawing against. Twelve is a
+         * two-point grid of twenty-four lines and a horizon, which is about as
+         * much furniture as a page will take.
          */
-        private const val RAYS = 7
+        private const val RAYS = 12
+
+        /**
+         * How many straight spokes a fisheye draws through its middle.
+         *
+         * Eight, which is one every 22.5 degrees — dense enough to read as
+         * "everything radiates from here" and sparse enough that the two
+         * families of arcs over them are still separate lines.
+         */
+        private const val FISHEYE_SPOKES = 8
+
+        /** How many arcs each of a fisheye's two families draws. */
+        private const val FISHEYE_ARCS = 5
+
+        /**
+         * How far out along the diameter the outermost arc of a family is
+         * taken, as a fraction of the radius.
+         *
+         * Not all the way to 1: an arc through a point *on* the field of view
+         * is the field of view, drawn a second time. Nine tenths keeps the
+         * outermost one visibly inside it.
+         */
+        private const val FISHEYE_SPREAD = 0.9f
     }
 }

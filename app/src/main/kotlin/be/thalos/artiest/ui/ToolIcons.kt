@@ -1027,6 +1027,25 @@ object ToolIcons {
         }
     }
 
+    /**
+     * A circle with a bowed cross in it. Five-point curvilinear perspective.
+     *
+     * The field of view and one arc of each family, which is the smallest
+     * picture that says "the straight lines bend" — and bending is the whole of
+     * what tells a fisheye apart from the other perspective.
+     */
+    val fisheye: ImageVector by lazy {
+        icon("fisheye") {
+            stroke {
+                circle(12f, 12f, 9.6f)
+                moveTo(2.4f, 12f)
+                curveTo(8f, 7.2f, 16f, 7.2f, 21.6f, 12f)
+                moveTo(12f, 2.4f)
+                curveTo(7.2f, 8f, 7.2f, 16f, 12f, 21.6f)
+            }
+        }
+    }
+
     /** Two sheets, one behind the other. Duplicate. */
     val duplicate: ImageVector by lazy {
         icon("duplicate") {
