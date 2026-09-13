@@ -41,14 +41,14 @@ class RegionLayoutTest {
     fun `a strip packs exactly what the old one-dimensional engine did`() {
         val items = listOf(
             ToolItem.PEN, ToolItem.SIZE, ToolItem.PENCIL,
-            ToolItem.SMOOTHING, ToolItem.ERASER, ToolItem.GRAIN,
+            ToolItem.SMOOTHING, ToolItem.HARD_ERASER, ToolItem.GRAIN,
         )
         val expected = listOf(
             ToolItem.PEN to 0,
             ToolItem.SIZE to 1,
             ToolItem.PENCIL to 5,
             ToolItem.SMOOTHING to 6,
-            ToolItem.ERASER to 10,
+            ToolItem.HARD_ERASER to 10,
         )
 
         for (axis in Axis.entries) {
@@ -85,7 +85,7 @@ class RegionLayoutTest {
             region = l,
             flow = FlowOrder.DOWN_THEN_RIGHT,
             flowing = flow(
-                ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.ERASER,
+                ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.HARD_ERASER,
                 ToolItem.COLOUR, ToolItem.UNDO, ToolItem.REDO, ToolItem.LAYERS,
                 ToolItem.ZOOM_IN, ToolItem.ZOOM_OUT,
             ),
@@ -121,7 +121,7 @@ class RegionLayoutTest {
             region = l,
             flow = FlowOrder.DOWN_THEN_RIGHT,
             flowing = flow(
-                ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.ERASER, ToolItem.SIZE,
+                ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.HARD_ERASER, ToolItem.SIZE,
             ),
         )
         val slider = fill.placements.single { it.item == ToolItem.SIZE }
@@ -137,11 +137,11 @@ class RegionLayoutTest {
         val fill = RegionLayout.pack(
             region = CellRegion.strip(3, Axis.HORIZONTAL),
             flow = FlowOrder.RIGHT_THEN_DOWN,
-            flowing = flow(ToolItem.PEN, ToolItem.SIZE, ToolItem.PENCIL, ToolItem.ERASER),
+            flowing = flow(ToolItem.PEN, ToolItem.SIZE, ToolItem.PENCIL, ToolItem.HARD_ERASER),
         )
         assertEquals(listOf(ToolItem.SIZE), fill.overflow)
         assertEquals(
-            listOf(ToolItem.PEN, ToolItem.PENCIL, ToolItem.ERASER),
+            listOf(ToolItem.PEN, ToolItem.PENCIL, ToolItem.HARD_ERASER),
             fill.placements.sortedBy { it.x }.map { it.item },
         )
     }
@@ -190,11 +190,11 @@ class RegionLayoutTest {
             fixed = listOf(
                 CellPlacement(ToolItem.PEN, 0, 0, 1, 1),
                 CellPlacement(ToolItem.PENCIL, 9, 0, 1, 1),  // off the end
-                CellPlacement(ToolItem.ERASER, 0, 0, 1, 1),  // on top of the pen
+                CellPlacement(ToolItem.HARD_ERASER, 0, 0, 1, 1),  // on top of the pen
             ),
         )
         assertEquals(listOf(ToolItem.PEN), fill.placements.map { it.item })
-        assertEquals(listOf(ToolItem.PENCIL, ToolItem.ERASER), fill.overflow)
+        assertEquals(listOf(ToolItem.PENCIL, ToolItem.HARD_ERASER), fill.overflow)
     }
 
     @Test
@@ -281,7 +281,7 @@ class RegionLayoutTest {
         val region = CellRegion.u(width = 6, height = 5)
         val items = flow(
             ToolItem.PEN, ToolItem.SIZE, ToolItem.PENCIL, ToolItem.SMOOTHING,
-            ToolItem.ERASER, ToolItem.COLOUR, ToolItem.LAYERS, ToolItem.GRAIN,
+            ToolItem.HARD_ERASER, ToolItem.COLOUR, ToolItem.LAYERS, ToolItem.GRAIN,
         )
         val once = RegionLayout.pack(region, FlowOrder.DOWN_THEN_RIGHT, flowing = items)
         val twice = RegionLayout.pack(region, FlowOrder.DOWN_THEN_RIGHT, flowing = items)

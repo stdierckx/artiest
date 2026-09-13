@@ -104,6 +104,33 @@ rather than cutting it out — which is what a soft eraser is *for*, and which t
 translucent-erase path already supports because `Brush.erase`'s own KDoc says an
 eraser beads exactly as a translucent brush does.
 
+### Us2 — what was actually built
+
+Shipped as described, with three things the plan did not foresee.
+
+**The soft eraser needed the engine to stop overriding it.**
+`InkSurfaceView.compositeAlpha` forced *every* erasing stroke to alpha 1 and
+`armRasterizer` set `solid` on every one, both for a good reason: a pencil
+pressed into service as a rubber inherits a 0.02 flow floor and a grain mask,
+and a full-pressure wipe was removing about a quarter of what was under it.
+That reason applies to a *borrowed* rubber and not to a real one — so the
+override is now conditional on `PenChoice.borrowed`, and the soft eraser keeps
+its own 0.45 flow under its own 0.85 ceiling. Without this the two erasers
+would have differed only at the rim.
+
+**The eraser's swatch was a fat black band.** Every other row is honest because
+it is the mark, drawn by drawing it; an eraser's mark is a hole, and a hole on
+an empty page is nothing. `BrushSwatch.rubbedOut` washes the page and punches
+the stroke through it with `DST_OUT`, so the row shows a stroke-shaped gap in a
+tone. The width, the rim and how much comes out at a light press are all still
+the engine's answer — only the wash is scenery.
+
+**The swatch page had to grow**, 480×160 → 696×232. A 128-pixel eraser with a
+34-pixel swing covers a 160-tall page entirely, so there was no ground left for
+the hole to be in and the row came back blank — seen on the tablet before it was
+seen anywhere else. The cost is that the pen is a tenth of its row's height
+where it was a seventh.
+
 ### Us3 — blend modes in a dropdown
 
 `LayersPanel` spends 106 dp on a heading and seven chips. Krita spends 26 on a

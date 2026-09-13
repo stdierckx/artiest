@@ -99,7 +99,7 @@ class WorkspaceJsonTest {
         // pen said where it was; pencil and eraser did not and flowed after it.
         assertEquals(Cell(0, 0), once.layout.locate(ToolItem.PEN)?.cell)
         assertEquals(Cell(0, 1), once.layout.locate(ToolItem.PENCIL)?.cell)
-        assertEquals(Cell(0, 2), once.layout.locate(ToolItem.ERASER)?.cell)
+        assertEquals(Cell(0, 2), once.layout.locate(ToolItem.HARD_ERASER)?.cell)
     }
 
     @Test
@@ -249,7 +249,6 @@ class WorkspaceJsonTest {
         // Sliders are four cells long, so they land four apart along the bottom.
         assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.SIZE)?.cell)
         assertEquals(Cell(4, 0), ws.layout.locate(ToolItem.SMOOTHING)?.cell)
-        assertEquals(Cell(8, 0), ws.layout.locate(ToolItem.ERASER_SIZE)?.cell)
     }
 
     @Test
@@ -355,7 +354,7 @@ class WorkspaceJsonTest {
         assertEquals(0.8f, ws.defaults.stabilisation)
         assertEquals("nib-fine", ws.defaults.brush)
         assertEquals(Cell(0, 0), ws.layout.locate(ToolItem.PEN)?.cell)
-        assertEquals(Cell(0, 2), ws.layout.locate(ToolItem.ERASER)?.cell)
+        assertEquals(Cell(0, 2), ws.layout.locate(ToolItem.HARD_ERASER)?.cell)
 
         // And every single thing it could not do is named.
         val said = decoded.dropped.joinToString("\n")

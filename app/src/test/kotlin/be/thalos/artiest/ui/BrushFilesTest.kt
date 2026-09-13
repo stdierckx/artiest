@@ -47,10 +47,13 @@ class BrushFilesTest {
     }
 
     @Test
-    fun `the shelf is the shipped three plus what is on disk`() {
+    fun `the shelf is what is shipped plus what is on disk`() {
         files.save(entry("mine", "Mine"))
         val library = files.library()
-        assertEquals(listOf("pen", "pencil", "marker", "mine"), library.entries.map { it.id })
+        assertEquals(
+            listOf("pen", "pencil", "marker", "hard_eraser", "soft_eraser", "mine"),
+            library.entries.map { it.id },
+        )
         assertTrue(library.hasSaved)
     }
 
@@ -107,7 +110,11 @@ class BrushFilesTest {
     fun `a directory that is not there yet is not an error`() {
         val missing = BrushFiles(File(dir, "never-made"))
         assertEquals(emptyList(), missing.list())
-        assertEquals(3, missing.library().entries.size, "the shipped three, and no crash")
+        assertEquals(
+            BrushPreset.entries.size,
+            missing.library().entries.size,
+            "the shipped ones, and no crash",
+        )
         assertTrue(missing.save(entry("first", "First")), "and saving makes it")
         assertEquals(1, missing.list().size)
     }

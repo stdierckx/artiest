@@ -1,6 +1,6 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 5,
+  "catalogue": 6,
   "id": "example",
   "name": "Example",
   "description": "Every field in the reference, in one file.",
@@ -17,7 +17,7 @@
       "tools": [
         {"id": "pen", "at": [0, 0]},
         {"id": "pencil", "at": [0, 1]},
-        {"id": "eraser", "at": [0, 2]},
+        {"id": "hard_eraser", "at": [0, 2]},
         {"id": "size", "at": [0, 4]},
         {"id": "colour", "at": [0, 9]}
       ]

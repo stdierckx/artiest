@@ -83,7 +83,7 @@ class FittedLayoutTest {
                     ToolItem.SIZE to Cell(0, 0),
                     ToolItem.SMOOTHING to Cell(4, 0),
                     ToolItem.GRAIN to Cell(8, 0),
-                    ToolItem.ERASER_SIZE to Cell(12, 0),
+                    ToolItem.FLOW to Cell(12, 0),
                     ToolItem.OPACITY to Cell(16, 0),
                 ),
             ),
@@ -97,7 +97,7 @@ class FittedLayoutTest {
             kept.slots.placements.map { it.item },
         )
         assertEquals(
-            listOf(ToolItem.ERASER_SIZE, ToolItem.OPACITY),
+            listOf(ToolItem.FLOW, ToolItem.OPACITY),
             fitted.overflow["a"]?.map { it.item },
             "in flow order, so the chevron lists the same things every time",
         )

@@ -1,6 +1,6 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 5,
+  "catalogue": 6,
   "id": "everything",
   "name": "Everything",
   "description": "Every control there is, arranged the way it starts.",
@@ -19,7 +19,8 @@
         {"id": "pencil", "at": [0, 1]},
         {"id": "marker", "at": [0, 2]},
         {"id": "brushes", "at": [0, 3]},
-        {"id": "eraser", "at": [0, 4]},
+        {"id": "hard_eraser", "at": [0, 4]},
+        {"id": "soft_eraser", "at": [0, 5]},
         {"id": "colour", "at": [0, 6]}
       ]
     },
@@ -54,13 +55,12 @@
     {
       "id": "s4",
       "anchor": "bottom",
-      "rects": [[0, 0, 16, 1]],
+      "rects": [[0, 0, 12, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "size", "at": [0, 0]},
         {"id": "smoothing", "at": [4, 0]},
-        {"id": "grain", "at": [8, 0]},
-        {"id": "eraser_size", "at": [12, 0]}
+        {"id": "grain", "at": [8, 0]}
       ]
     }
   ]

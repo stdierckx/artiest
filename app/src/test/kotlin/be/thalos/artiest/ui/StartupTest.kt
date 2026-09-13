@@ -67,7 +67,7 @@ class StartupTest {
 
         assertEquals("everything", workspace.id, "nobody has chosen a workspace yet")
         assertEquals(
-            listOf("pen", "pencil", "eraser", "marker", "colour", "marquee"),
+            listOf("pen", "pencil", "hard_eraser", "marker", "colour", "marquee"),
             docks.surface("left")!!.slots.placements.map { it.item.id },
             "the left edge is the one the user built, not the one that ships",
         )
@@ -85,7 +85,18 @@ class StartupTest {
             docks.surface("right")!!.slots.placements.map { it.item.id },
             "and it lands in the gap that was there, moving nothing",
         )
-        assertEquals(6, docks.surface("bottom")!!.slots.placements.size)
+        // The bottom bar is where Us2 shows up on an install that already
+        // existed. `eraser_size` left the catalogue, so its four cells are
+        // free; `introduce` finds them and puts the two controls this install
+        // has never been offered — the brush shelf and the soft eraser — in
+        // them. The eraser itself is not introduced, because the toggle the
+        // user already had *is* it: `ToolItem.WAS` turned `eraser` into
+        // `hard_eraser` in the cell it was standing in, which is the left bar
+        // above, unmoved.
+        assertEquals(
+            listOf("size", "smoothing", "grain", "brushes", "soft_eraser", "opacity", "flow"),
+            docks.surface("bottom")!!.slots.placements.map { it.item.id },
+        )
         assertNotNull(docks.surface("f4"), "and the panel they fixated")
     }
 
@@ -132,7 +143,7 @@ class StartupTest {
         seedPrefs()
         val (workspace, docks) = startUp()
 
-        val mine = listOf("pen", "pencil", "eraser", "marker", "colour", "marquee")
+        val mine = listOf("pen", "pencil", "hard_eraser", "marker", "colour", "marquee")
         assertEquals(mine, docks.surface("left")!!.slots.placements.map { it.item.id })
         assertEquals(
             mine,
@@ -145,7 +156,7 @@ class StartupTest {
         val workspaces = WorkspaceStore(context)
         workspaces.switchTo(ShippedWorkspaces.SKETCHER)
         assertEquals(
-            listOf("pen", "pencil", "marker", "brushes", "eraser", "colour"),
+            listOf("pen", "pencil", "marker", "brushes", "hard_eraser", "soft_eraser", "colour"),
             workspaces.current().layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
 
@@ -200,7 +211,7 @@ class StartupTest {
         val sketcher = assertNotNull(workspaces.current())
         assertEquals("sketcher", sketcher.id)
         assertEquals(
-            listOf("pen", "pencil", "marker", "brushes", "eraser", "colour"),
+            listOf("pen", "pencil", "marker", "brushes", "hard_eraser", "soft_eraser", "colour"),
             sketcher.layout.surface("s1")!!.slots.placements.map { it.item.id },
         )
     }

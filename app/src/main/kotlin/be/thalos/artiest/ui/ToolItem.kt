@@ -54,7 +54,7 @@ package be.thalos.artiest.ui
  * | Undo, redo | **shipped** — region snapshots, see `UndoHistory` |
  * | Zoom in, zoom out | **shipped** |
  * | Pen, pencil, marker | W10's presets. Marker is a real question — the graphite reference turned out to be one pencil at two tilts, and no marker was cut from the plan on that evidence. It comes back only if it is wanted for its own sake. |
- * | Eraser | W11 |
+ * | Eraser | **shipped**, then rebuilt — two brushes rather than a mode. See [HARD_ERASER]. |
  * | Tool settings, stabilisation settings | Partly shipped as the size and smoothing sliders; becomes a panel when W7 adds opacity and flow |
  * | Colour wheel | Phase 4. The five-swatch palette is the placeholder and says so. |
  * | Document history (a list you can jump around in) | Phase 3, with the tiled copy-on-write layer. Undo and redo did not need it; a visual history of every state does. |
@@ -175,6 +175,45 @@ enum class ToolItem(
     MARKER("marker", "Marker", "Marker", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
+     * The two erasers, which are the same kind of thing as the three above: a
+     * named favourite for a brush the app ships.
+     *
+     * ## What went, and why
+     *
+     * `ERASER`, a one-slot toggle that put whatever brush was in the hand into
+     * erase mode, and `ERASER_SIZE`, the second size slider that mode needed.
+     * Both are gone. The user's words:
+     *
+     * > *"The eraser: Now it is some sort of toggle button on a brush, that is
+     * > not how i like it. I want the eraser to be a separate tool. We should
+     * > have 2 erasers: a hard one, and a soft one. No toggles, just a separate
+     * > "brush" with the name: (Hard/Soft) eraser."*
+     *
+     * The size slider went with the toggle rather than as an extra: an eraser
+     * is a brush now, and a brush's width is [SIZE]. That is a slider's worth
+     * of bar handed back, which is `docs/ui-space-plan.md`'s Us5 paid early.
+     *
+     * ## What did not go
+     *
+     * The barrel button. Turning the pen over still rubs out momentarily with
+     * the drawing brush's own shape — a pencil rubs out with the pencil's tilt
+     * — and that is not a toggle, it is a thing the hardware does. See
+     * `InkSurfaceView.rubber`.
+     *
+     * ## Why these are entries and not just shelf rows
+     *
+     * They are both. `BrushPreset.HARD_ERASER` puts them on the shelf like any
+     * other brush and [BRUSH] can put either on a bar; these two exist for the
+     * reason [PEN], [PENCIL] and [MARKER] do, which is stated there — a tool
+     * you reach for fifty times an hour is one tap on the bar, not two taps
+     * through a panel.
+     */
+    HARD_ERASER("hard_eraser", "Hard eraser", "Hard", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+
+    /** See [HARD_ERASER]. Soft-edged, and it fades a passage rather than cutting it. */
+    SOFT_ERASER("soft_eraser", "Soft eraser", "Soft", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+
+    /**
      * One brush of your own, as a button.
      *
      * **The only entry in this catalogue that carries an argument**, and the
@@ -228,26 +267,6 @@ enum class ToolItem(
     ),
 
     /**
-     * W11. A toggle, not a third tool: it changes how the brush in the hand
-     * composites, so the pencil erases with the pencil's shape and the pen with
-     * the pen's. The barrel button does the same thing momentarily and does not
-     * move this toggle.
-     */
-    ERASER("eraser", "Eraser", "Erase", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
-
-    /**
-     * The eraser's own width, in document pixels, separate from [SIZE].
-     *
-     * A second size slider rather than a reuse of the first, for the reason
-     * `Brush.eraseSizeMax` gives: a pencil point and a rubber are different
-     * widths, and tying them together means the eraser resizes itself every
-     * time the pencil does. It sits next to [ERASER] rather than in a settings
-     * panel because "the eraser is too small for this" is a thought you have
-     * mid-rub, with the pen already on the glass.
-     */
-    ERASER_SIZE("eraser_size", "Eraser size", "Erase", 4, ToolGroup.DRAW, ToolKind.SLIDER, turns = true),
-
-    /**
      * The layers panel, as a button that opens it.
      *
      * One slot and a panel, for the reason [COLOUR] is one slot and a panel:
@@ -260,9 +279,9 @@ enum class ToolItem(
     /**
      * The marquee: the pen selects instead of drawing.
      *
-     * A toggle beside the brushes rather than a fourth brush, for the reason
-     * [ERASER] is a toggle: it does not change what the nib is, it changes what
-     * the pen is *for*. Everything about who may draw — palm rejection, the
+     * A toggle beside the brushes rather than another brush, and it is now the
+     * only real one in this group: it does not change what the nib is, it
+     * changes what the pen is *for*. Everything about who may draw — palm rejection, the
      * two-finger gesture, the cancel on focus loss — is about pointers and
      * applies to a marquee word for word, so the pen's own path is the one that
      * forks.
@@ -415,7 +434,25 @@ enum class ToolItem(
         /** The catalogue keyed by [id], for the codec. Unknown ids decode to null. */
         private val BY_ID: Map<String, ToolItem> = entries.associateBy { it.id }
 
-        fun byId(id: String): ToolItem? = BY_ID[id]
+        /**
+         * Ids that were real once, and what they mean now.
+         *
+         * **One entry, and it should stay short.** Rule 2 says a persisted id
+         * is never renamed, and this is not a rename — `eraser` named a toggle
+         * that no longer exists. Without this line, everyone who has arranged a
+         * toolbar since W11 opens the app to a hole where their eraser was,
+         * because a decoder that does not know an id drops it. The nearest
+         * thing to what they had is the hard eraser, so that is what they get.
+         *
+         * `eraser_size` is deliberately **not** here. Its nearest equivalent is
+         * the size slider, which is already on the bar in every arrangement
+         * this app has ever shipped, and mapping it there would put a second
+         * one beside the first. A four-cell hole is the honest outcome, and it
+         * is four cells the user can now put something else in.
+         */
+        private val WAS: Map<String, ToolItem> = mapOf("eraser" to HARD_ERASER)
+
+        fun byId(id: String): ToolItem? = BY_ID[id] ?: WAS[id]
     }
 }
 

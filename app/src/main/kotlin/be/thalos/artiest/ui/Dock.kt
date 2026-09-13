@@ -696,23 +696,24 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
             get() = of(
                 listOf(
                     anchored(
-                        // Still seven tall. The shelf joins the three
-                        // favourites it belongs with, the gap moves down one to
-                        // stay between the ink tools and the colour, and the
-                        // marquee moves to the right bar beside the selection
-                        // panel -- which is where it was always going to end
-                        // up, since the two are one idea.
+                        // Still seven tall, and **full** now: the gap that used
+                        // to sit between the ink tools and the colour is where
+                        // the second eraser went. Two erasers rather than one
+                        // toggle is Us2, and the column had exactly one cell
+                        // spare, which is the kind of luck worth spending
+                        // rather than growing the bar for.
                         //
-                        // Growing this column to eight instead was tried and
-                        // reverted: at 12x8 cells it reaches the bottom bar,
-                        // and `the starter layout does not overlap itself on
-                        // any screen worth having` caught it.
+                        // Growing this column to eight was tried and reverted:
+                        // at 12x8 cells it reaches the bottom bar, and `the
+                        // starter layout does not overlap itself on any screen
+                        // worth having` caught it.
                         "s1", Side.LEFT, 1, 7,
                         ToolItem.PEN to Cell(0, 0),
                         ToolItem.PENCIL to Cell(0, 1),
                         ToolItem.MARKER to Cell(0, 2),
                         ToolItem.BRUSHES to Cell(0, 3),
-                        ToolItem.ERASER to Cell(0, 4),
+                        ToolItem.HARD_ERASER to Cell(0, 4),
+                        ToolItem.SOFT_ERASER to Cell(0, 5),
                         ToolItem.COLOUR to Cell(0, 6),
                     ),
                     anchored(
@@ -736,11 +737,15 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
                         ToolItem.SELECTION to Cell(0, 5),
                     ),
                     anchored(
-                        "s4", Side.BOTTOM, 16, 1,
+                        // Twelve, not sixteen. The eraser's own size slider
+                        // went with the eraser's mode -- an eraser is a brush
+                        // now and its width is the size slider, like any
+                        // other's -- so the bottom bar gives back four cells of
+                        // paper rather than keeping an empty tail.
+                        "s4", Side.BOTTOM, 12, 1,
                         ToolItem.SIZE to Cell(0, 0),
                         ToolItem.SMOOTHING to Cell(4, 0),
                         ToolItem.GRAIN to Cell(8, 0),
-                        ToolItem.ERASER_SIZE to Cell(12, 0),
                     ),
                 ),
             )

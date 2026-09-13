@@ -135,16 +135,22 @@ class DockStore(context: Context) {
          * where each would like to go. Append to this list when a tool ships;
          * never remove from it, because an id that leaves the list is an id
          * that gets offered a second time.
+         *
+         * `eraser_size` left it anyway, and that is the one case the rule does
+         * not cover: it is not on the list any more because it is not in the
+         * catalogue any more. Its id cannot be offered a second time by a build
+         * that has no such tool. See `ToolItem.HARD_ERASER`.
          */
         private val NEW_ITEMS: List<ToolItem> = listOf(
             ToolItem.LAYERS,
             ToolItem.MARKER,
             ToolItem.IMPORT,
-            ToolItem.ERASER_SIZE,
             ToolItem.MARQUEE,
             ToolItem.SELECTION,
             ToolItem.PROJECTS,
             ToolItem.BRUSHES,
+            ToolItem.HARD_ERASER,
+            ToolItem.SOFT_ERASER,
         )
 
     }

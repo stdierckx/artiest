@@ -411,22 +411,29 @@ private fun BrushRow(
                     }
                     if (menu) {
                         DropdownMenu(expanded = true, onDismissRequest = { menu = false }) {
-                            // Offered on every row, built-ins included: the
-                            // eraser wants a *shape*, and the pen's hard edge
-                            // and the pencil's soft one are the two most
-                            // obvious rubbers this app ships.
                             // First, because it is the one an artist reaches
                             // for repeatedly: a shelf is a list you go to and a
-                            // favourite is a button you already have.
+                            // favourite is a button you already have. The other
+                            // way to the same place is the `+` in arrange
+                            // mode's Brushes tab, which is the one that lets
+                            // you say *where* — see `BrushChoiceList`.
                             DropdownMenuItem(
                                 text = { Text("Put on a toolbar", fontSize = 13.sp) },
                                 onClick = { menu = false; onPlaceOnBar() },
                             )
+                            // The **barrel button's** rubber, and nothing else.
+                            // It used to be "the eraser's brush" and it is not
+                            // any more: the eraser is two brushes on this very
+                            // shelf, picked like any other row. What is left is
+                            // the question the toolbar cannot answer — what the
+                            // pen does when it is turned over — and the default
+                            // answer, rubbing out with the brush in your hand,
+                            // is still the good one.
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        if (erasing) "Stop erasing with this"
-                                        else "Use as eraser",
+                                        if (erasing) "Stop using for the pen's back"
+                                        else "Use for the pen's back",
                                         fontSize = 13.sp,
                                     )
                                 },

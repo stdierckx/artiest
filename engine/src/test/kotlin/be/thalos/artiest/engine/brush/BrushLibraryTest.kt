@@ -23,9 +23,12 @@ class BrushLibraryTest {
         BrushEntry.fromText(id, label, BrushCodec.encode(brush))
 
     @Test
-    fun `the three shipped brushes are there and are built in`() {
+    fun `the five shipped brushes are there and are built in`() {
         val library = BrushLibrary.DEFAULT
-        assertEquals(listOf("pen", "pencil", "marker"), library.entries.map { it.id })
+        assertEquals(
+            listOf("pen", "pencil", "marker", "hard_eraser", "soft_eraser"),
+            library.entries.map { it.id },
+        )
         assertTrue(library.entries.all { it.origin == BrushOrigin.BUILT_IN })
         assertFalse(library.entries.any { it.removable }, "a shipped brush cannot be deleted")
         assertFalse(library.hasSaved)
@@ -54,7 +57,7 @@ class BrushLibraryTest {
     fun `a file cannot shadow a shipped brush`() {
         val fake = saved("pencil", "Not the pencil", Brush().also { it.sizeMax = 3f })
         val library = BrushLibrary(listOf(fake))
-        assertEquals(3, library.entries.size)
+        assertEquals(BrushPreset.entries.size, library.entries.size)
         assertEquals(
             BrushPreset.PENCIL.create().sizeMax,
             assertNotNull(library.find("pencil")).create().sizeMax,
@@ -90,30 +93,37 @@ class BrushLibraryTest {
     }
 
     @Test
-    fun `erasing is a mode and not a different brush`() {
+    fun `a pencil turned into an eraser is no longer the pencil`() {
+        // The reverse of what this test used to say, and the reversal is Us2.
+        // While the eraser was a *mode*, a pencil rubbing something out was
+        // still the pencil and `matches` had to ignore the erase lines. The
+        // eraser is two brushes now — `BrushPreset.HARD_ERASER` — so a brush
+        // that erases and one that does not are two different brushes, and the
+        // shelf's modified mark should say so.
         val entry = assertNotNull(BrushLibrary.DEFAULT.find("pencil"))
         val brush = entry.create()
+        assertTrue(entry.matches(brush), "untouched, it is itself")
         brush.erase = true
-        brush.eraseSizeMax = 200f
-        assertTrue(entry.matches(brush), "a pencil rubbing something out is still the pencil")
+        assertFalse(entry.matches(brush), "and now it is a rubber with a pencil's shape")
     }
 
     @Test
-    fun `picking a brush does not turn the eraser on or off`() {
-        // The report that found this: "nothing happens when the stylus touches
-        // the canvas" -- the eraser toggle was on, which is the documented
-        // behaviour of a modifier that survives a tool change. What was wrong
-        // was underneath: `applyTo` wrote `erase` from the file, so a brush
-        // could appear to change a mode that `InkSurfaceView.applyEraseFor`
-        // re-reads from the toolbar at every pen-down. A brush may not have an
-        // opinion about it.
-        val erasing = BrushPreset.PEN.create().also { it.erase = true }
-        BrushLibrary.DEFAULT.entryFor("pencil").applyTo(erasing)
-        assertTrue(erasing.erase, "still erasing, with the pencil's shape")
+    fun `picking a brush is what turns erasing on and off`() {
+        // Also the reverse of what it used to say. There was a toggle then, and
+        // a brush that carried `erase` would have been a brush that moved
+        // somebody else's switch — so `applyTo` refused to. There is no toggle
+        // now, and this line is the whole of how an artist reaches for a
+        // rubber.
+        val hand = BrushPreset.PENCIL.create()
+        BrushLibrary.DEFAULT.entryFor("hard_eraser").applyTo(hand)
+        assertTrue(hand.erase, "picking the eraser puts a rubber in the hand")
 
-        val inking = BrushPreset.PEN.create()
-        saved("rubber", brush = Brush().also { it.erase = true }).applyTo(inking)
-        assertFalse(inking.erase, "and a file cannot start the eraser either")
+        BrushLibrary.DEFAULT.entryFor("pencil").applyTo(hand)
+        assertFalse(hand.erase, "and picking the pencil takes it back out")
+
+        val fromFile = BrushPreset.PEN.create()
+        saved("rubber", brush = Brush().also { it.erase = true }).applyTo(fromFile)
+        assertTrue(fromFile.erase, "a saved eraser is an eraser too")
     }
 
     @Test

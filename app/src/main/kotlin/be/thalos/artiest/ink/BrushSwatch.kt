@@ -2,6 +2,9 @@ package be.thalos.artiest.ink
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import be.thalos.artiest.doc.Thumbnails
 import be.thalos.artiest.engine.brush.Brush
 import be.thalos.artiest.engine.ink.StrokeBuilder
@@ -59,10 +62,28 @@ import kotlin.math.sin
  */
 object BrushSwatch {
 
-    /** The page the sample stroke is drawn on, in document pixels. */
-    const val DOC_WIDTH = 480
+    /**
+     * The page the sample stroke is drawn on, in document pixels.
+     *
+     * **It grew when the erasers arrived**, from 480 by 160, and the reason is
+     * worth stating because it cost every other swatch a little: the soft
+     * eraser is 128 document pixels across, and on a 160-tall page a stroke
+     * that wide with a 34-pixel swing covers the entire sheet. That is fine for
+     * a brush — a swatch full of ink is still a swatch of ink — and fatal for
+     * an eraser, whose swatch is the *ground it takes away*: with no ground
+     * left anywhere, [rubbedOut] returned a blank row. Seen on the tablet, as a
+     * pale empty box where the hard eraser should have been.
+     *
+     * 232 is [AMPLITUDE] twice, plus the widest nib the app ships, plus a
+     * little ground at top and bottom. The width follows at three to one.
+     *
+     * What it costs: the pen is a tenth of the row's height where it was a
+     * seventh. What it buys is that the same page can hold every tool without
+     * either of the two answers being a special case.
+     */
+    const val DOC_WIDTH = 696
 
-    const val DOC_HEIGHT = 160
+    const val DOC_HEIGHT = 232
 
     /** Three to one, which is the shape of a row and of the stroke that fits it. */
     const val ASPECT = DOC_WIDTH.toFloat() / DOC_HEIGHT
@@ -90,7 +111,7 @@ object BrushSwatch {
 
         if (!indirectNeeded(brush)) {
             rasterizer.drawDry(canvas, stroke)
-            return Thumbnails.reduce(page, width, height)
+            return Thumbnails.reduce(rubbedOut(brush, page), width, height)
         }
 
         // `InkSurfaceView`'s indirect path, minus everything that is about
@@ -119,7 +140,61 @@ object BrushSwatch {
             scratch.release()
             grain.release()
         }
-        return Thumbnails.reduce(page, width, height)
+        return Thumbnails.reduce(rubbedOut(brush, page), width, height)
+    }
+
+    /**
+     * For an eraser, the mark it *takes away* rather than the one it makes.
+     *
+     * ## Why this exists
+     *
+     * Because the shelf showed the hard eraser as a fat black band, and a fat
+     * black band is a marker. Every other brush's swatch is honest by
+     * construction — it is the mark, drawn by drawing it — and an eraser's mark
+     * is a hole, which cannot be drawn on an empty page because an empty page
+     * is already a hole.
+     *
+     * So the page is given something to rub out: a flat wash of the ink, and
+     * the stroke that was just drawn is punched through it with `DST_OUT`. What
+     * comes back is a stroke-shaped gap in a tone, which is exactly what the
+     * tool does and is unmistakable at row size.
+     *
+     * The wash is the **only** thing here that is not what the engine does. It
+     * has to be, for the same reason the hole has to be: there is no drawing
+     * underneath a swatch. Everything about the hole — its width, its rim, how
+     * much it takes out at a light press — is the brush's own, because [page]
+     * was drawn by the real rasterizer through the real scratch buffer before
+     * it got here. The soft eraser's swatch is a soft-edged, partial gap and
+     * the hard one's is a clean one, and that difference is the engine's
+     * answer rather than a decoration.
+     *
+     * A no-op for every brush that is not an eraser, which is the common case
+     * and costs one boolean.
+     */
+    private fun rubbedOut(brush: Brush, page: Bitmap): Bitmap {
+        if (!brush.erase) return page
+        val shown = Bitmap.createBitmap(DOC_WIDTH, DOC_HEIGHT, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(shown)
+        canvas.drawColor(WASH)
+        canvas.drawBitmap(page, 0f, 0f, CUT)
+        page.recycle()
+        return shown
+    }
+
+    /**
+     * The tone an eraser's swatch rubs out of, as premultiplied-safe ARGB.
+     *
+     * Mid grey at 78% rather than the ink's own colour: the wash is scenery and
+     * must not be mistaken for the brush's colour, and a swatch drawn in the
+     * current ink would change its background every time the user picked a
+     * colour. Dark enough that the gap reads at 30 by 22 dp, pale enough that
+     * it is obviously not a mark.
+     */
+    private const val WASH = 0xC7595959.toInt()
+
+    /** `DST_OUT`: take the destination away wherever the source has ink. */
+    private val CUT = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
     }
 
     /**
@@ -184,10 +259,10 @@ object BrushSwatch {
     }
 
     /** Half the widest nib the app ships, so nothing is clipped by the page. */
-    private const val MARGIN = 46f
+    private const val MARGIN = 70f
 
     /** Enough of an S to turn the marker's wedge through its whole range. */
-    private const val AMPLITUDE = 34f
+    private const val AMPLITUDE = 30f
 
     /**
      * About a hundred samples, which is what the digitizer delivers over a

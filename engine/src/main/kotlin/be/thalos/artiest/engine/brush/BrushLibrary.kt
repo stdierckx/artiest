@@ -180,15 +180,14 @@ class BrushEntry(
     /**
      * Whether [brush] is still this entry, or has been moved since.
      *
-     * What the shelf's modified mark reads. The erase lines are excluded on
-     * purpose: the eraser is a *mode* the brush in the hand is in, not a
-     * property of the brush that was picked, so a pencil that is currently
-     * rubbing something out is still the pencil.
+     * What the shelf's modified mark reads. Every line counts, `erase`
+     * included — which is another small reversal from when the eraser was a
+     * mode: a brush that erases and one that does not are not the same brush
+     * any more, they are the eraser and the pencil.
      */
     fun matches(brush: Brush): Boolean = comparable(brush) == comparable(create())
 
-    private fun comparable(brush: Brush): List<String> =
-        BrushCodec.encode(brush).split('\n').filterNot { it.startsWith("erase") }
+    private fun comparable(brush: Brush): List<String> = BrushCodec.encode(brush).split('\n')
 
     companion object {
 
@@ -303,14 +302,17 @@ fun adoptBrush(from: Brush, to: Brush) {
     to.onsetPressure = from.onsetPressure
     to.grain = from.grain
     to.burnish = from.burnish
-    // **`erase` is not copied, and that is deliberate.** It is a *mode the pen
-    // is in*, owned by the toolbar's toggle and re-read from it at the start of
-    // every stroke by `InkSurfaceView.applyEraseFor` — so carrying it here
-    // changed a field that the next pen-down overwrote anyway, while making
-    // `applyTo` look as though picking a brush could turn the eraser on or off.
-    // `eraseSizeMax` *is* copied: the rubber's width is a number a brush may
-    // reasonably have an opinion about, and `Brush.eraseSizeMax` says why it is
-    // separate from the nib's.
+    // **`erase` is copied, and that is a reversal.** It was taken out of here
+    // on the argument that erase is a *mode the pen is in*, owned by a toolbar
+    // toggle and re-read from that toggle at the start of every stroke — so
+    // copying it wrote a field the next pen-down overwrote. That argument died
+    // with the toggle. There are two eraser presets now
+    // (`BrushPreset.HARD_ERASER`), erase is a property of the brush, and this
+    // line is what makes picking one of those rows put a rubber in the hand.
+    to.erase = from.erase
+    // `eraseSizeMax` is the *barrel button's* width, which is a different
+    // question and still a real one: a pencil held backwards rubs out with the
+    // pencil's shape at rubber width. See `Brush.eraseSizeMax`.
     to.eraseSizeMax = from.eraseSizeMax
     for ((src, dst) in listOf(
         from.size to to.size,

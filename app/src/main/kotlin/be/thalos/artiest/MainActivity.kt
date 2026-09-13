@@ -405,14 +405,6 @@ private fun CanvasScreen(
     var ink by remember { mutableIntStateOf(PALETTE.first()) }
     var sizeMax by remember { mutableFloatStateOf(DEFAULT_SIZE_MAX) }
 
-    /**
-     * The eraser's width, in document pixels, held apart from [sizeMax].
-     *
-     * See `Brush.eraseSizeMax`: the rubber is a different width from the point,
-     * and a user reaching for the eraser does not want the pencil resized on
-     * the way back.
-     */
-    var eraserSize by remember { mutableFloatStateOf(DEFAULT_ERASER_SIZE) }
     var smoothing by remember { mutableFloatStateOf(DEFAULT_SMOOTHING) }
 
     // W7. Both default to 1, which is Phase 1's opaque nib exactly, so nothing
@@ -455,6 +447,17 @@ private fun CanvasScreen(
     val brush = library.entryFor(brushId)
 
     /**
+     * Whether the brush in the hand takes ink out.
+     *
+     * Remembered, not recomputed: `create()` builds a whole `Brush` and this is
+     * read once per recomposition of the chrome. It is asked of the *entry*
+     * rather than of `surface.ink`, because a plain field on the render path is
+     * not Compose state and a slider that changed range would not know to
+     * redraw itself.
+     */
+    val erasing = remember(brush.stamp) { brush.create().erase }
+
+    /**
      * Whether the brush in the hand has been moved since it was picked.
      *
      * What the shelf's modified mark reads. Recomputed where the sliders are
@@ -463,21 +466,20 @@ private fun CanvasScreen(
     var brushModified by remember { mutableStateOf(false) }
 
     /**
-     * Which brush the eraser rubs out with, or **null for the one in the hand**.
+     * Which brush the **barrel button** rubs out with, or null for the one in
+     * the hand.
      *
-     * Null is the behaviour the app shipped with and is still the default: the
-     * eraser takes the shape of whatever you are drawing with, so the pencil
-     * rubs out with the pencil's tilt. What it could not do is keep a soft
-     * rubber and a hard one and switch between them without changing the brush
-     * you draw with. See `InkSurfaceView.rubber`.
+     * Narrower than it was: the eraser is two brushes now and they arrive
+     * through [brushId] like any other, so this is only the answer to "what
+     * happens when the pen is turned over". Null is the default and the good
+     * one — the pencil rubs out with the pencil's tilt. See
+     * `InkSurfaceView.rubber`.
      */
     var eraserBrushId by remember { mutableStateOf(brushStore.loadEraserId()) }
 
     /** That id's entry, or null. Derived, so deleting it falls back by itself. */
     val eraserBrush = eraserBrushId?.let { library.find(it) }
 
-    /** W11. Whether that tool is currently taking ink out instead of putting it in. */
-    var eraser by remember { mutableStateOf(false) }
 
     /**
      * Whether a barrel button is held down right now.
@@ -807,10 +809,8 @@ private fun CanvasScreen(
         // across would hand the user a pencil a quarter of the size they had.
         if (brushStore.storedTuning() != brush.tuning) {
             brush.applyTo(v.ink)
-            v.ink.erase = false
             brushStore.save(v.ink, brush)
             sizeMax = v.ink.sizeMax
-            eraserSize = v.ink.eraseSizeMax
             smoothing = v.ink.stabilization
             opacity = v.ink.opacity
             flow = v.ink.flow
@@ -849,26 +849,31 @@ private fun CanvasScreen(
             brush.applyShapeOnlyTo(v.ink)
         }
         sizeMax = v.ink.sizeMax
-        eraserSize = v.ink.eraseSizeMax
         smoothing = v.ink.stabilization
         opacity = v.ink.opacity
         flow = v.ink.flow
         grain = v.ink.grain.strength
     }
 
-    // The rubber, rebuilt whenever the brush behind it or its width changes.
-    // A fresh `Brush` rather than a reference into the library, because the
-    // view keeps it and the width is this app's number rather than the entry's.
-    LaunchedEffect(surface, eraserBrush, eraserSize) {
+    // The barrel button's rubber, rebuilt whenever the brush behind it
+    // changes. A fresh `Brush` rather than a reference into the library,
+    // because the view keeps it and may not hold something the shelf owns.
+    LaunchedEffect(surface, eraserBrush) {
         val v = surface ?: return@LaunchedEffect
-        v.rubber = eraserBrush?.create()?.also { it.eraseSizeMax = eraserSize }
+        v.rubber = eraserBrush?.create()
     }
 
-    LaunchedEffect(surface, ink, sizeMax, eraserSize, smoothing, opacity, flow, grain) {
+    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
         v.ink.sizeMax = sizeMax
-        v.ink.eraseSizeMax = eraserSize
+        // An eraser brush's rubber width *is* its size, so the one slider sets
+        // both. `Brush.modeScale` divides the two, and for a brush that erases
+        // natively that ratio has to stay 1 — otherwise dragging the size
+        // slider would scale the eraser by the wrong factor twice over. For a
+        // drawing brush `eraseSizeMax` is left where the preset put it, which
+        // is the barrel button's width and nobody else's.
+        if (v.ink.erase) v.ink.eraseSizeMax = sizeMax
         v.ink.stabilization = smoothing
         // These two are what turn the indirect path on. Both at 1 is Phase 1's
         // opaque nib and takes the direct path; anything less routes the stroke
@@ -1092,7 +1097,6 @@ private fun CanvasScreen(
             entry.applyTo(v.ink)
             brushId = entry.id
             sizeMax = v.ink.sizeMax
-            eraserSize = v.ink.eraseSizeMax
             smoothing = v.ink.stabilization
             opacity = v.ink.opacity
             flow = v.ink.flow
@@ -1105,9 +1109,12 @@ private fun CanvasScreen(
     /**
      * Write what is in the hand as a brush of its own.
      *
-     * `erase` is cleared on the way out. It is a *mode* the pen is in, not a
-     * property of the brush — saving while rubbing something out would make a
-     * brush that starts by erasing, which is a trap rather than a tool.
+     * `erase` is **kept** now, and that is the reversal Us2 makes everywhere:
+     * it used to be cleared here on the grounds that saving while rubbing
+     * something out would make a brush that starts by erasing, which was a trap
+     * while erasing was a mode you could be in by accident. It is a property of
+     * the brush now, so a tuned eraser saves as a tuned eraser — which is the
+     * whole point of being able to save one.
      */
     val saveBrushAs: (String) -> Unit = { typed ->
         val v = surface
@@ -1115,7 +1122,6 @@ private fun CanvasScreen(
         if (v != null && name.isNotEmpty()) {
             val copy = BrushCodec.decode(BrushCodec.encode(v.ink))
             if (copy != null) {
-                copy.erase = false
                 val id = brushFiles.freeId(name)
                 val entry = BrushEntry.fromText(id, name, BrushCodec.encode(copy))
                 if (brushFiles.save(entry)) {
@@ -1406,7 +1412,6 @@ private fun CanvasScreen(
                         p.applyTo(v.ink)
                         brushId = p.id
                         sizeMax = v.ink.sizeMax
-                        eraserSize = v.ink.eraseSizeMax
                         smoothing = v.ink.stabilization
                         opacity = v.ink.opacity
                         flow = v.ink.flow
@@ -1503,8 +1508,6 @@ private fun CanvasScreen(
                     onInk = { ink = it },
                     sizeMax = sizeMax,
                     onSizeMax = { sizeMax = it },
-                    eraserSize = eraserSize,
-                    onEraserSize = { eraserSize = it },
                     layerRows = layerRows,
                     activeLayer = activeLayer,
                     onLayerOp = onLayerOp,
@@ -1574,16 +1577,8 @@ private fun CanvasScreen(
                     onFlow = { flow = it },
                     grain = grain,
                     onGrain = { grain = it },
-                    eraser = eraser,
+                    erasing = erasing,
                     barrel = barrel,
-                    onEraser = {
-                        eraser = !eraser
-                        surface?.eraserTool = eraser
-                        // Reaching for the eraser is a statement that the pen
-                        // is drawing. See `onPreset`.
-                        setSelecting(false)
-                        generation++
-                    },
                     library = library,
                     brushId = brushId,
                     eraserBrushId = eraserBrushId,
@@ -1612,7 +1607,6 @@ private fun CanvasScreen(
                             // Found on the tablet, not in a test.
                             setSelecting(false)
                             sizeMax = v.ink.sizeMax
-                            eraserSize = v.ink.eraseSizeMax
                             smoothing = v.ink.stabilization
                             opacity = v.ink.opacity
                             flow = v.ink.flow
@@ -1727,8 +1721,6 @@ private fun ToolSlot(
     onFixate: (ToolItem, Cell) -> Unit,
     sizeMax: Float,
     onSizeMax: (Float) -> Unit,
-    eraserSize: Float,
-    onEraserSize: (Float) -> Unit,
     layerRows: List<LayerInfo>,
     activeLayer: Int,
     onLayerOp: (LayerOp) -> Unit,
@@ -1764,9 +1756,9 @@ private fun ToolSlot(
     onRenameBrush: (BrushEntry, String) -> Unit,
     onDeleteBrush: (BrushEntry) -> Unit,
     onBrush: (BrushEntry) -> Unit,
-    eraser: Boolean,
+    /** Whether the brush in the hand takes ink out. Only the size slider reads it. */
+    erasing: Boolean,
     barrel: Boolean,
-    onEraser: () -> Unit,
     exporting: Boolean,
     importing: Boolean,
     onImport: () -> Unit,
@@ -1821,8 +1813,20 @@ private fun ToolSlot(
             recent = recentInks,
         )
 
+        // Two ranges on one slider, chosen by what is in the hand. A rubber and
+        // a nib are not the same kind of width: 120 doc px is a fat carpenter's
+        // pencil and a useless eraser, and 300 is a block rubber and a brush
+        // nobody wants on a pencil's slider. This is the second size slider's
+        // whole job, done by the first one — see `ToolItem.HARD_ERASER`.
         ToolItem.SIZE -> ToolSlider(
-            ToolIcons.size, item.label, sizeMax, MIN_SIZE_MAX, MAX_SIZE_MAX, 0, axis, onSizeMax,
+            if (erasing) ToolIcons.eraser else ToolIcons.size,
+            item.label,
+            sizeMax,
+            if (erasing) MIN_ERASER_SIZE else MIN_SIZE_MAX,
+            if (erasing) MAX_ERASER_SIZE else MAX_SIZE_MAX,
+            0,
+            axis,
+            onSizeMax,
         )
 
         ToolItem.SMOOTHING -> ToolSlider(
@@ -1850,13 +1854,15 @@ private fun ToolSlot(
         // button says two things are current when only one is. Found on the
         // tablet, where the screenshot showed both lit at once.
         //
-        // `&& !barrel` on the three brushes, and `|| barrel` on the eraser, is
-        // the same rule applied to the other momentary override: holding the
-        // pen's side button erases, so while it is held the eraser is the tool
-        // in the hand and the bar should say so. The toggle underneath does not
-        // move — releasing the button gives the brush back, which is what a
-        // pencil with a rubber on the end does — so this is the bar reporting
-        // the pen rather than the bar changing state.
+        // `&& !barrel` on the drawing brushes, and `|| barrel` on the hard
+        // eraser, is the same rule applied to the other momentary override:
+        // holding the pen's side button rubs out, so while it is held the
+        // eraser is the tool in the hand and the bar should say so. Nothing
+        // underneath moves — releasing the button gives the brush back, which
+        // is what a pencil with a rubber on the end does — so this is the bar
+        // reporting the pen rather than the bar changing state. The *hard*
+        // eraser and not the soft one, because a barrel with no named rubber
+        // behind it takes a line out rather than fading one.
         ToolItem.PEN -> IconToolButton(
             icon = ToolIcons.pen,
             label = item.label,
@@ -1878,16 +1884,22 @@ private fun ToolSlot(
             selected = brushId == BrushPreset.MARKER.id && !selecting && !barrel,
         )
 
-        ToolItem.ERASER -> IconToolButton(
+        // The two erasers are picked exactly as the three brushes above are,
+        // because that is exactly what they are now. There is no `onEraser`
+        // and no mode: `BrushPreset.HARD_ERASER` carries `erase`, `adoptBrush`
+        // copies it, and the pen rubs out because the brush in it does.
+        ToolItem.HARD_ERASER -> IconToolButton(
             icon = ToolIcons.eraser,
             label = item.label,
-            onClick = onEraser,
-            selected = (eraser || barrel) && !selecting,
+            onClick = { onBrush(library.entryFor(BrushPreset.HARD_ERASER.id)) },
+            selected = (brushId == BrushPreset.HARD_ERASER.id || barrel) && !selecting,
         )
 
-        ToolItem.ERASER_SIZE -> ToolSlider(
-            ToolIcons.eraser, item.label, eraserSize,
-            MIN_ERASER_SIZE, MAX_ERASER_SIZE, 0, axis, onEraserSize,
+        ToolItem.SOFT_ERASER -> IconToolButton(
+            icon = ToolIcons.softEraser,
+            label = item.label,
+            onClick = { onBrush(library.entryFor(BrushPreset.SOFT_ERASER.id)) },
+            selected = brushId == BrushPreset.SOFT_ERASER.id && !selecting && !barrel,
         )
 
         ToolItem.UNDO ->
@@ -2174,6 +2186,7 @@ private fun readout(
     strokeTimes: String,
     project: Project,
     lastSave: SaveResult.Saved?,
+    /** What the pen's back rubs out with. See `InkSurfaceView.rubber`. */
     eraserLabel: String,
 ): String {
     if (surface == null) return "surface  -"
@@ -2247,7 +2260,7 @@ private fun readout(
         "last stroke\n" +
         "tilt     ${r(surface.lastStrokeTiltDeg, 1)} deg max last stroke   " +
         "dab ${r(surface.lastStrokeWidthMin, 1)}..${r(surface.lastStrokeWidthMax, 1)} doc px\n" +
-        "eraser   $eraserLabel   ${r(surface.cursorDiameterDocPx, 0)} doc px\n" +
+        "back     $eraserLabel   ${r(surface.cursorDiameterDocPx, 0)} doc px\n" +
         "brush    ${if (surface.pen.erase) "ERASING" else "painting"}   " +
         "${surface.pen.opacity.let { if (it < 1f) "translucent" else "opaque" }}   " +
         "flow ${r(surface.pen.flow, 2)}   hard ${r(surface.pen.hardness, 2)}   " +
@@ -2491,17 +2504,18 @@ private const val MIN_SIZE_MAX = 2f
  */
 private const val MAX_SIZE_MAX = 120f
 
-/** `Brush.eraseSizeMax`'s default, mirrored so the slider starts where the tool is. */
-private const val DEFAULT_ERASER_SIZE = 96f
-
 /**
- * The eraser slider's ends, in document pixels: about 1 mm to about 22 mm at a
- * fitted page.
+ * What the size slider's ends become while an eraser is in the hand: about
+ * 1 mm to about 22 mm at a fitted page.
  *
  * The floor is a nib-sized eraser for picking a stray line out of a hatch; the
  * ceiling is a block rubber for clearing a passage. Below the floor an eraser
  * is indistinguishable from a fingernail and above the ceiling the Clear button
  * is quicker.
+ *
+ * These were a second slider's ends until the eraser became a brush. The
+ * numbers survived the slider because they were never about the control, they
+ * were about the rubber.
  */
 private const val MIN_ERASER_SIZE = 14f
 private const val MAX_ERASER_SIZE = 300f

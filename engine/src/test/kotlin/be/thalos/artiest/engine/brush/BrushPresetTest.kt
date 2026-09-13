@@ -89,7 +89,70 @@ class BrushPresetTest {
      */
     @Test
     fun `the preset list is exactly the tools that were asked for`() {
-        assertEquals(listOf("Pen", "Pencil", "Marker"), BrushPreset.entries.map { it.label })
+        assertEquals(
+            listOf("Pen", "Pencil", "Marker", "Hard eraser", "Soft eraser"),
+            BrushPreset.entries.map { it.label },
+        )
+    }
+
+    /**
+     * The two erasers, in the three facts that make them two tools.
+     *
+     * `erase` on both, because that is the whole of what makes one an eraser
+     * now that there is no mode to be in. A hard rim and a full-strength pass
+     * on the first, so one stroke takes a line out; a soft rim and a flow
+     * ceiling under an opacity ceiling on the second, so one stroke fades a
+     * passage and two fade it further. If those converge, one of them is a
+     * duplicate of the other and the pair is not worth the two cells.
+     */
+    @Test
+    fun `the hard eraser cuts and the soft one fades`() {
+        val hard = BrushPreset.HARD_ERASER.create()
+        val soft = BrushPreset.SOFT_ERASER.create()
+        assertTrue(hard.erase && soft.erase, "an eraser erases because it is one")
+
+        assertEquals(1f, hard.hardness, "the hard one has a rim")
+        assertEquals(1f, hard.opacity)
+        assertEquals(1f, hard.flow, "and clears in one pass")
+
+        assertTrue(soft.hardness < 0.5f, "the soft one does not: ${soft.hardness}")
+        assertTrue(soft.opacity < 1f, "one sweep cannot clear: ${soft.opacity}")
+        assertTrue(soft.flow < 0.6f, "and it builds: ${soft.flow}")
+        assertTrue(soft.sizeMax > hard.sizeMax, "a soft rubber is swept, not aimed")
+    }
+
+    /**
+     * An eraser's rubber width is its own width.
+     *
+     * `Brush.modeScale` divides `eraseSizeMax` by `sizeMax` whenever a brush
+     * erases, which is right for the barrel button — a pencil rubbing out at
+     * rubber width — and must be exactly 1 for a brush that *is* a rubber, or
+     * the size slider would scale it twice.
+     */
+    @Test
+    fun `an eraser preset does not scale itself`() {
+        for (preset in listOf(BrushPreset.HARD_ERASER, BrushPreset.SOFT_ERASER)) {
+            val b = preset.create()
+            assertEquals(b.sizeMax, b.eraseSizeMax, "${preset.id} scales itself")
+        }
+    }
+
+    /**
+     * Switching away from an eraser stops the erasing.
+     *
+     * `reset` did not clear `erase` before, because nothing ever set it. Now
+     * two presets do, and a `reset` that left it behind would mean picking the
+     * pencil after the eraser hands you a pencil that rubs out — the single
+     * most confusing thing this change could have shipped.
+     */
+    @Test
+    fun `a drawing preset takes erasing back off`() {
+        val b = BrushPreset.HARD_ERASER.create()
+        assertTrue(b.erase)
+        for (preset in listOf(BrushPreset.PEN, BrushPreset.PENCIL, BrushPreset.MARKER)) {
+            preset.applyTo(b)
+            assertFalse(b.erase, "${preset.id} left the rubber on")
+        }
     }
 
     /**

@@ -32,7 +32,9 @@ class ToolIconsTest {
         setOf("colour", "colour_panel"),
         setOf("layers", "layers_panel"),
         setOf("selection", "selection_panel"),
-        setOf("eraser", "eraser_size"),
+        // The two erasers do **not** share one, and that is the point: they
+        // sit side by side on the starter bar, so a hand has to tell them apart
+        // at 21dp without reading. See `ToolIcons.softEraser`.
         // Three, pairwise: the button that opens the shelf, the shelf kept,
         // and one brush placed on a bar. All three are the same idea at
         // different sizes, and a brush button's real face is its own swatch --

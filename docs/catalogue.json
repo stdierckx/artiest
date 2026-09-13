@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 5,
+  "version": 6,
   "cell_dp": 44,
   "groups": [
     {
@@ -89,26 +89,6 @@
       "turns": false
     },
     {
-      "id": "eraser",
-      "label": "Eraser",
-      "short": "Erase",
-      "group": "draw",
-      "kind": "toggle",
-      "cells_wide": 1,
-      "cells_tall": 1,
-      "turns": false
-    },
-    {
-      "id": "eraser_size",
-      "label": "Eraser size",
-      "short": "Erase",
-      "group": "draw",
-      "kind": "slider",
-      "cells_wide": 4,
-      "cells_tall": 1,
-      "turns": true
-    },
-    {
       "id": "export",
       "label": "Export PNG",
       "short": "Export",
@@ -147,6 +127,16 @@
       "cells_wide": 4,
       "cells_tall": 1,
       "turns": true
+    },
+    {
+      "id": "hard_eraser",
+      "label": "Hard eraser",
+      "short": "Hard",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
     },
     {
       "id": "import",
@@ -287,6 +277,16 @@
       "cells_wide": 4,
       "cells_tall": 1,
       "turns": true
+    },
+    {
+      "id": "soft_eraser",
+      "label": "Soft eraser",
+      "short": "Soft",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
     },
     {
       "id": "stats",

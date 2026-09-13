@@ -56,8 +56,16 @@ object ToolCatalogue {
      *
      * 3: `projects`, which opens the gallery. The first entry that is about the
      * drawing rather than about the marks on it. See `docs/projects-plan.md`.
+     *
+     * 6: `eraser` and `eraser_size` **removed**, `hard_eraser` and
+     * `soft_eraser` added. The first removal this list has ever recorded, and
+     * the reason the number exists: a reader that has cached version 5 needs to
+     * know that two ids it believes in are gone. `ToolItem.WAS` turns the first
+     * of them into `hard_eraser` on the way in, so a file written against 5
+     * still opens — with a four-cell hole where its eraser size slider was.
+     * See `docs/ui-space-plan.md`.
      */
-    const val VERSION = 5
+    const val VERSION = 6
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

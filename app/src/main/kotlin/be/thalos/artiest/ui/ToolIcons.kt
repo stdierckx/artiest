@@ -51,8 +51,8 @@ object ToolIcons {
         ToolItem.PEN -> pen
         ToolItem.PENCIL -> pencil
         ToolItem.MARKER -> marker
-        ToolItem.ERASER -> eraser
-        ToolItem.ERASER_SIZE -> eraser
+        ToolItem.HARD_ERASER -> eraser
+        ToolItem.SOFT_ERASER -> softEraser
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -188,6 +188,35 @@ object ToolIcons {
                 moveTo(8.4f, 6.5f)
                 lineTo(17.1f, 15.2f)
                 moveTo(9.6f, 21.4f)
+                lineTo(20.8f, 21.4f)
+            }
+        }
+    }
+
+    /**
+     * The same block of rubber, with the mark it leaves fading out under it.
+     *
+     * The two erasers sit next to each other on a bar, so they have to be told
+     * apart at 21dp without reading a label. The difference is the line at the
+     * bottom: the hard one takes it off in a single piece, this one leaves it
+     * broken — three dashes where [eraser] has one stroke — which is what
+     * "fades rather than cuts" looks like drawn small.
+     */
+    val softEraser: ImageVector by lazy {
+        icon("soft_eraser") {
+            stroke {
+                moveTo(12.3f, 2.6f)
+                lineTo(21.0f, 11.3f)
+                lineTo(13.2f, 19.1f)
+                lineTo(4.5f, 10.4f)
+                close()
+                moveTo(8.4f, 6.5f)
+                lineTo(17.1f, 15.2f)
+                moveTo(9.6f, 21.4f)
+                lineTo(12.4f, 21.4f)
+                moveTo(14.8f, 21.4f)
+                lineTo(17.0f, 21.4f)
+                moveTo(19.2f, 21.4f)
                 lineTo(20.8f, 21.4f)
             }
         }

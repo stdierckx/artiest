@@ -78,7 +78,8 @@ object ShippedWorkspaces {
                     // A sketcher tunes a pencil more than anybody, so this is
                     // the workspace that most wants somewhere to keep one.
                     ToolItem.BRUSHES to Cell(0, 3),
-                    ToolItem.ERASER to Cell(0, 4),
+                    ToolItem.HARD_ERASER to Cell(0, 4),
+                    ToolItem.SOFT_ERASER to Cell(0, 5),
                     ToolItem.COLOUR to Cell(0, 6),
                 ),
                 DockLayout.anchored(
@@ -92,10 +93,13 @@ object ShippedWorkspaces {
                     ToolItem.FIT to Cell(0, 2),
                 ),
                 DockLayout.anchored(
-                    "s4", Side.BOTTOM, 14, 1,
+                    // Nine, not fourteen: the eraser's own size slider went
+                    // when the eraser became a brush, and a sketching
+                    // workspace is the one that can least afford a bar with a
+                    // gap in it.
+                    "s4", Side.BOTTOM, 9, 1,
                     ToolItem.SIZE to Cell(0, 0),
                     ToolItem.SMOOTHING to Cell(5, 0),
-                    ToolItem.ERASER_SIZE to Cell(10, 0),
                 ),
             ),
         ),
@@ -140,7 +144,7 @@ object ShippedWorkspaces {
                         CellRegion.l(arm = 3, foot = 2),
                         listOf(
                             CellPlacement(ToolItem.PEN, 0, 0, 1, 1),
-                            CellPlacement(ToolItem.ERASER, 0, 1, 1, 1),
+                            CellPlacement(ToolItem.HARD_ERASER, 0, 1, 1, 1),
                             CellPlacement(ToolItem.COLOUR, 0, 2, 1, 1),
                             CellPlacement(ToolItem.UNDO, 1, 2, 1, 1),
                         ),

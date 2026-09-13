@@ -17,7 +17,7 @@
         {"id": "pen", "at": [0, 0]},
         {"id": "pencil", "at": [0, 1]},
         {"id": "marker", "at": [0, 2]},
-        {"id": "eraser", "at": [0, 3]},
+        {"id": "hard_eraser", "at": [0, 3]},
         {"id": "colour", "at": [0, 5]}
       ]
     },

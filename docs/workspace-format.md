@@ -90,7 +90,7 @@ corner, which a side cannot say — `"left"` is the middle of the left-hand edge
       "tools": [
         {"id": "pen", "at": [0, 0]},
         {"id": "pencil", "at": [0, 1]},
-        {"id": "eraser", "at": [0, 2]},
+        {"id": "hard_eraser", "at": [0, 2]},
         {"id": "size", "at": [0, 4]},
         {"id": "colour", "at": [0, 9]}
       ]
@@ -171,7 +171,7 @@ and lying flat otherwise.
 So this is a whole toolbar:
 
 ```json
-{"anchor": "left", "tools": ["pen", "pencil", "eraser", "colour"]}
+{"anchor": "left", "tools": ["pen", "pencil", "hard_eraser", "colour"]}
 ```
 
 There are no compulsory toolbars. A workspace with one has one, and a workspace
@@ -195,7 +195,7 @@ other tool that said nothing, in the order they are listed. So this is a
 complete, valid toolbar:
 
 ```json
-"tools": [{"id": "pen"}, {"id": "pencil"}, {"id": "eraser"}, {"id": "colour"}]
+"tools": [{"id": "pen"}, {"id": "pencil"}, {"id": "hard_eraser"}, {"id": "colour"}]
 ```
 
 A panel is the one thing that may stick out past the shape it is on: it needs

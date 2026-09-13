@@ -120,18 +120,23 @@ class InkSurfaceView(
     val ink: Brush = Brush()
 
     /**
-     * The brush the eraser uses, or **null to erase with [ink]'s own shape**.
+     * The **barrel button's** brush, or null to rub out with [ink]'s own shape.
      *
-     * Null is the behaviour this app shipped with, and it is a good default
-     * rather than an absence: erasing with the tool in your hand means the
-     * pencil rubs out with the pencil's tilt and the marker with the marker's
-     * wedge, which is what `ToolItem.ERASER`'s "a toggle, not a third tool"
-     * means. What it could not do is let you keep a *soft* rubber and a *hard*
-     * one and switch between them without changing the brush you draw with —
-     * which is what Krita's eraser presets are for, and what this field adds.
+     * Narrower than it was, and the narrowing is the whole of Us2. This used to
+     * be "the eraser's brush", because the eraser was a mode that any brush
+     * could be put into. The eraser is two brushes now — `BrushPreset`'s
+     * `HARD_ERASER` and `SOFT_ERASER` — and they arrive in [ink] like any
+     * other, so the only question left for this field is the one the toolbar
+     * cannot answer: what happens when the pen is turned over mid-stroke.
      *
-     * `eraseSizeMax` already gave the rubber its own width for exactly this
-     * reason. This gives it the rest of its shape.
+     * Null is the default and the good one. Rubbing out with the tool in your
+     * hand means the pencil rubs out with the pencil's tilt and the marker with
+     * the marker's wedge, at the width `Brush.eraseSizeMax` gives it. Naming a
+     * brush here — the shelf's *Use as eraser* — swaps that for a rubber of
+     * your choosing without changing what you draw with.
+     *
+     * It is not consulted at all while [ink] itself erases. Turning an eraser
+     * over is not a gesture with a meaning.
      */
     var rubber: Brush? = null
 
@@ -1015,18 +1020,6 @@ class InkSurfaceView(
      */
     var onTransformChanged: (() -> Unit)? = null
 
-    /**
-     * Whether the toolbar's eraser is selected. Written from the UI thread.
-     *
-     * The barrel button is the *other* way in, and the two are an `or`: holding
-     * a barrel button erases for that stroke whatever the toolbar says, and
-     * releasing it does not switch the tool back. That is the behaviour a
-     * pencil with an eraser end has, and it is the reason the button is a
-     * momentary override rather than a toggle.
-     */
-    @Volatile
-    var eraserTool: Boolean = false
-
     private var eraseDecided = false
 
     /**
@@ -1046,33 +1039,35 @@ class InkSurfaceView(
         if (eraseDecided) return
         eraseDecided = true
         val barrel = (sample.buttonState and BARREL_BUTTONS) != 0
-        val erasing = eraserTool || barrel
         // Re-chosen only when the guess at pen-down was wrong, which is only
-        // ever the barrel: `eraserTool` is a toggle that cannot move between
-        // the two, and `barrelHeld` is a field the same events update a moment
+        // ever the barrel: the brush in [ink] cannot change between pen-down
+        // and here, and `barrelHeld` is a field the same events update a moment
         // later. No dab has been emitted yet -- this runs before the sample
         // loop -- so the builder can simply be begun again.
-        if (erasing != assumedErasing) {
-            chooseBrush(erasing)
+        if (barrel != assumedBarrel) {
+            chooseBrush(barrel)
             driver.rebegin()
         }
-        pen.erase = erasing
     }
 
     /**
      * Copy [ink] or [rubber] into [pen] for the stroke that is starting.
      *
-     * The one place the two configurations become the one the engine draws
-     * with. `erase` is set by the caller rather than carried, for the reason
-     * `adoptBrush` gives: it is a mode, not a property of a brush.
+     * The one place [ink] or [rubber] becomes the brush the engine draws with.
+     * *Which* of them, and whether this stroke takes ink away, is [PenChoice]'s
+     * rule and is stated there — it is the part worth a test, and everything
+     * here is the part that needs a render thread.
      */
-    private fun chooseBrush(erasing: Boolean) {
-        assumedErasing = erasing
-        adoptBrush(if (erasing) rubber ?: ink else ink, pen)
+    private fun chooseBrush(barrel: Boolean) {
+        assumedBarrel = barrel
+        val choice = PenChoice.of(ink, rubber, barrel)
+        adoptBrush(choice.from, pen)
+        pen.erase = choice.erase
+        borrowedRubber = choice.borrowed
     }
 
     /** What [chooseBrush] was last told, so [applyEraseFor] can tell if it was wrong. */
-    private var assumedErasing = false
+    private var assumedBarrel = false
 
     /**
      * The grain shader, or null when the brush has none.
@@ -1084,19 +1079,38 @@ class InkSurfaceView(
     private fun grainShader() = grain.shaderFor(pen.grain)
 
     /**
-     * The alpha the scratch is put down at: the brush's opacity, or **1 while
-     * erasing**.
+     * The alpha the scratch is put down at: the brush's opacity, or **1 for a
+     * borrowed rubber**.
      *
-     * An eraser is not a pale brush. Everything that makes graphite look like
-     * graphite — a 0.90 ceiling, a flow that starts at 0.02, a grain mask that
-     * skips the pits — is a reason for the pencil to leave *less* ink, and
-     * inheriting all three made a full-pressure wipe remove roughly a quarter
-     * of what was under it. That is the "eraser is too soft" report. Erasing
-     * takes the brush's shape and its size and none of its translucency.
+     * ## Why a borrowed one is forced to 1
+     *
+     * A drawing brush turned into an eraser is not a pale brush. Everything
+     * that makes graphite look like graphite — a 0.90 ceiling, a flow that
+     * starts at 0.02, a grain mask that skips the pits — is a reason for the
+     * pencil to leave *less* ink, and inheriting all three made a
+     * full-pressure wipe remove roughly a quarter of what was under it. That is
+     * the "eraser is too soft" report, and it is arithmetic rather than taste.
+     *
+     * ## Why a real eraser is not
+     *
+     * Because its translucency is *its own*, and half of it is the tool. The
+     * soft eraser's whole reason to exist is that one sweep fades a passage and
+     * two fade it further — `BrushPreset.SOFT_ERASER` — and forcing this to 1
+     * would delete the difference between the two erasers, leaving a pair of
+     * tools that differ only in rim softness. See [borrowedRubber], which is
+     * the one bit that tells the two cases apart.
      */
-    private fun compositeAlpha(): Float = if (pen.erase) 1f else pen.opacity
+    private fun compositeAlpha(): Float = if (borrowedRubber) 1f else pen.opacity
 
-    /** The grain, or none while erasing. See [compositeAlpha]. */
+    /**
+     * The grain, or none while erasing — *any* erasing, borrowed or not.
+     *
+     * Unlike [compositeAlpha] this stays absolute. A grain mask is paper tooth,
+     * which is a thing ink catches on; an eraser that skipped the pits would
+     * leave a speckle of the old stroke behind and read as a failure to rub
+     * out. Neither eraser preset sets grain, so this only ever matters for a
+     * borrowed rubber and for a saved eraser somebody tuned by hand.
+     */
     private fun compositeGrain(): Shader? = if (pen.erase) null else grainShader()
 
     /**
@@ -1114,8 +1128,20 @@ class InkSurfaceView(
      */
     private fun armRasterizer() {
         rasterizer.hardness = pen.hardness
-        rasterizer.solid = pen.erase
+        rasterizer.solid = borrowedRubber
     }
+
+    /**
+     * Whether this stroke is erasing with a brush that is not an eraser.
+     *
+     * True only for the barrel button held over a drawing brush, which is the
+     * case [compositeAlpha] forces to full strength. False for the two eraser
+     * presets and for any brush saved from one, whose flow and opacity are
+     * theirs to keep.
+     *
+     * Written once per stroke, by [chooseBrush], on the render thread.
+     */
+    private var borrowedRubber = false
 
     /** The scratch's composite paint for the wet pass. See [drawWetIndirect]. */
     private val wetPaint = Paint().apply {
@@ -1834,6 +1860,11 @@ class InkSurfaceView(
             // "before one" case, and a ring that showed the last stroke's width
             // would be a ring that lies about the tool you have just picked.
             strokeOpen -> if (pen.erase) pen.eraseSizeMax else pen.sizeMax
+            // An eraser *brush* is a brush, so its ring is its own `sizeMax`
+            // like anything else's. `eraseSizeMax` is only the barrel's answer
+            // — the width a drawing brush momentarily rubs out at — and reading
+            // it here would show a rubber-sized ring for a pencil-sized nib.
+            ink.erase -> ink.sizeMax
             erasingNow -> (rubber ?: ink).eraseSizeMax
             else -> ink.sizeMax
         }
@@ -1849,7 +1880,7 @@ class InkSurfaceView(
      * is still erasing.
      */
     val erasingNow: Boolean
-        get() = if (strokeOpen) pen.erase else eraserTool || barrelHeld
+        get() = if (strokeOpen) pen.erase else ink.erase || barrelHeld
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
@@ -2007,7 +2038,7 @@ class InkSurfaceView(
             // of them would start the stroke with the previous one's numbers.
             // `barrelHeld` is the guess; `applyEraseFor` corrects it from the
             // first sample's own buttons if it was wrong.
-            chooseBrush(eraserTool || barrelHeld)
+            chooseBrush(barrelHeld)
             if (tailSmoothing.strength != pen.stabilization) {
                 tailSmoothing = Stabilizer(pen.stabilization)
             }

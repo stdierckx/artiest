@@ -10,7 +10,7 @@
   "surfaces": [
     {
       "anchor": "left",
-      "tools": ["pen", "pencil", "marker", "eraser", "colour"]
+      "tools": ["pen", "pencil", "marker", "hard_eraser", "colour"]
     },
     {
       "anchor": "top",
@@ -18,7 +18,7 @@
     },
     {
       "anchor": "bottom",
-      "tools": ["size", "smoothing", "eraser_size"]
+      "tools": ["size", "smoothing"]
     }
   ]
 }

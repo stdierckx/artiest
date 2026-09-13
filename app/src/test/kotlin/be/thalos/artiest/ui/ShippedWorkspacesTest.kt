@@ -58,7 +58,7 @@ class ShippedWorkspacesTest {
     fun `Sketcher has what a sketcher needs`() {
         val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.SKETCHER))
         for (item in listOf(
-            ToolItem.PEN, ToolItem.PENCIL, ToolItem.ERASER, ToolItem.COLOUR,
+            ToolItem.PEN, ToolItem.PENCIL, ToolItem.HARD_ERASER, ToolItem.COLOUR,
             ToolItem.SIZE, ToolItem.SMOOTHING, ToolItem.UNDO, ToolItem.REDO,
         )) {
             assertTrue(item in ws.layout, "${item.id} is not on a bar")
@@ -102,7 +102,7 @@ class ShippedWorkspacesTest {
         )
         // Something to draw with, something to undo with, and a colour.
         assertTrue(ToolItem.PEN in ws.layout)
-        assertTrue(ToolItem.ERASER in ws.layout)
+        assertTrue(ToolItem.HARD_ERASER in ws.layout)
         assertTrue(ToolItem.COLOUR in ws.layout)
         assertTrue(ToolItem.UNDO in ws.layout)
     }
@@ -142,7 +142,7 @@ class ShippedWorkspacesTest {
             val phone = ws.layout.settled(12, 8).fittedTo(12, 8)
             for ((id, lost) in phone.overflow) {
                 assertEquals(
-                    listOf(ToolItem.ERASER_SIZE),
+                    listOf(ToolItem.FLOW),
                     lost.map { it.item },
                     "${ws.id}/$id loses more on a phone than the last slider",
                 )

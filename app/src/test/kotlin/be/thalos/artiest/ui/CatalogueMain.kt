@@ -54,7 +54,7 @@ internal fun exampleWorkspace(): Workspace {
             listOf(
                 CellPlacement(ToolItem.PEN, 0, 6, 1, 1),
                 CellPlacement(ToolItem.PENCIL, 0, 7, 1, 1),
-                CellPlacement(ToolItem.ERASER, 0, 8, 1, 1),
+                CellPlacement(ToolItem.HARD_ERASER, 0, 8, 1, 1),
                 CellPlacement(ToolItem.SIZE, 0, 10, 1, 4),
                 CellPlacement(ToolItem.COLOUR, 0, 15, 1, 1),
             ),

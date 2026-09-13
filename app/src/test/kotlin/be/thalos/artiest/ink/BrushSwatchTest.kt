@@ -183,4 +183,70 @@ class BrushSwatchTest {
         BrushSwatches.render(wide, w, h, Color.BLACK)
         assertEquals(2, BrushSwatches.rendered, "the same id, a different mark")
     }
+
+    /**
+     * An eraser's swatch is a hole, not a band.
+     *
+     * The shelf showed the hard eraser as a fat black stroke on its first
+     * build, which is a picture of a marker. Every other swatch is honest
+     * because it is the mark; an eraser's mark is an absence, and an absence
+     * drawn on an empty page is nothing at all. So the page is washed and the
+     * stroke is punched out of it — see `BrushSwatch.rubbedOut`.
+     *
+     * The claim under test is the one a user reads off the row: **most of the
+     * swatch is tone and the stroke is where the tone is gone**, which is the
+     * exact opposite of every other row.
+     */
+    @Test
+    fun `an eraser shows the ink it takes away`() {
+        val rubber = swatchOf("hard_eraser")
+        val marker = swatchOf("marker")
+
+        // The corner is the tell. No sample stroke reaches it, so in every
+        // other swatch it is bare page; in an eraser's it is the wash the
+        // stroke was cut out of.
+        assertTrue(Color.alpha(rubber.getPixel(2, 2)) > 128, "no tone to rub out")
+        assertTrue(Color.alpha(marker.getPixel(2, 2)) < 8, "and no wash anywhere else")
+
+        // Most of the page carries tone, which is the opposite of every other
+        // row — a mark covers a fraction of its swatch, a hole leaves the rest.
+        assertTrue(
+            inked(rubber) > inked(marker),
+            "${inked(rubber)} of ${w * h} against the marker's ${inked(marker)}",
+        )
+
+        // And the gap is real: a run of the middle row is clear through.
+        val centre = (0 until w).count { Color.alpha(rubber.getPixel(it, h / 2)) < 8 }
+        assertTrue(centre > w / 4, "the stroke did not come out: $centre columns clear")
+    }
+
+    /**
+     * The soft eraser leaves some of the tone behind and the hard one does not.
+     *
+     * This is the whole reason there are two, and it is the one thing that
+     * could silently stop being true: `InkSurfaceView.compositeAlpha` used to
+     * force every erasing stroke to full strength, which would make these two
+     * swatches differ only at the rim.
+     */
+    @Test
+    fun `the soft eraser fades where the hard one cuts`() {
+        val hard = swatchOf("hard_eraser")
+        val soft = swatchOf("soft_eraser")
+        assertTrue(
+            partial(soft) > partial(hard),
+            "soft ${partial(soft)} is not softer than hard ${partial(hard)}",
+        )
+    }
+
+    /** Pixels the eraser took *some* of, but not all: the fade. */
+    private fun partial(b: Bitmap): Int {
+        var n = 0
+        for (y in 0 until b.height) {
+            for (x in 0 until b.width) {
+                val a = Color.alpha(b.getPixel(x, y))
+                if (a in 24..180) n++
+            }
+        }
+        return n
+    }
 }

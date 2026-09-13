@@ -16,7 +16,7 @@
       "tools": [
         {"id": "pen", "at": [0, 0]},
         {"id": "pencil", "at": [0, 1]},
-        {"id": "eraser", "at": [0, 2]},
+        {"id": "hard_eraser", "at": [0, 2]},
         {"id": "colour", "at": [0, 3]},
         {"id": "size", "at": [1, 4]},
         {"id": "smoothing", "at": [5, 4]},

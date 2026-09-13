@@ -1,7 +1,8 @@
 package be.thalos.artiest.engine.brush
 
 /**
- * The tools the app ships with. Three, and the third one earned its place.
+ * The tools the app ships with. Five: three that make a mark and two that take
+ * one away.
  *
  * **Why the marker was refused, and why it is here now.** The plan's first
  * draft specced a marker and its second a broad chisel shader, and both were
@@ -15,6 +16,12 @@ package be.thalos.artiest.engine.brush
  * terms rather than by being wider: a wedge nib turned by the barrel, one flat
  * pass that darkens where strokes cross, and no paper tooth at all. None of
  * those is something the pencil can be talked into doing.
+ *
+ * **The two erasers are presets and not a mode**, which is a reversal and is
+ * argued where it happens, at [HARD_ERASER]. The short version: the user asked
+ * for the eraser to be a tool you pick rather than a switch you flick, and once
+ * it is a tool there is no reason for it to be one tool — a rubber that takes a
+ * line out and a rubber that lifts a tone are different jobs.
  */
 enum class BrushPreset(
     /**
@@ -288,6 +295,112 @@ enum class BrushPreset(
             brush.isotropicSpacing = false
         }
     },
+
+    /**
+     * The eraser, as a tool rather than as a mode.
+     *
+     * ## Why this is a preset at all
+     *
+     * Because the user asked for it in those words:
+     *
+     * > *"The eraser: Now it is some sort of toggle button on a brush, that is
+     * > not how i like it. I want the eraser to be a separate tool. We should
+     * > have 2 erasers: a hard one, and a soft one. No toggles, just a separate
+     * > "brush" with the name: (Hard/Soft) eraser."*
+     *
+     * It reverses a decision made three commits earlier — `adoptBrush` stopped
+     * copying [Brush.erase] — and the reversal is the point rather than a
+     * correction of it. That decision was right while erase was a *mode owned
+     * by a toggle*: copying the field meant writing something the next pen-down
+     * overwrote from the toggle. There is no toggle now. `erase` is a property
+     * of the brush, `adoptBrush` carries it, and picking this row is how you
+     * reach for a rubber.
+     *
+     * ## What makes it hard
+     *
+     * Everything the pen is: opaque, hard-edged, round, and full strength on
+     * the first pass. An eraser that needed two passes to clear a line would be
+     * the soft one, and the whole reason there are two is that these are
+     * different jobs — this is the one for taking a line *out*.
+     *
+     * 96 doc px, which is about 7 mm on this tablet at a fitted page and was
+     * the old eraser slider's default. The width is the `SIZE` slider now, like
+     * every other brush's, which is what let the second size slider go.
+     * [Brush.eraseSizeMax] is set to the same number so that
+     * `Brush.modeScale` — which exists for the barrel button, where a *drawing*
+     * brush momentarily rubs out at rubber width — is exactly 1 here and
+     * changes nothing.
+     */
+    HARD_ERASER("hard_eraser", "Hard eraser") {
+        override fun applyTo(brush: Brush) {
+            reset(brush)
+            brush.erase = true
+            // A rubber has no point. The lightest touch that registers puts the
+            // whole end of it on the paper, exactly as the marker's nib does,
+            // so the floor is most of the ceiling rather than a dot. Without
+            // this the start of every rub is a taper that leaves a hair of the
+            // line behind — the single most annoying thing an eraser can do.
+            brush.sizeMin = 60f
+            brush.sizeMax = 96f
+            brush.eraseSizeMax = 96f
+            brush.hardness = 1f
+            brush.opacity = 1f
+            brush.flow = 1f
+            // More than the pen's. Rubbing out is a gesture made at speed and
+            // without looking closely, and the hand's tremor in it is not
+            // information the way a sketching pencil's is.
+            brush.stabilization = 0.25f
+        }
+    },
+
+    /**
+     * The eraser that fades rather than cuts.
+     *
+     * Soft at the rim and weak per pass, so that going over a passage twice
+     * takes out more than going over it once. That is what a soft eraser is
+     * *for* — lifting a tone, opening a highlight, easing a construction line
+     * back rather than deleting it — and it is the half of the pair that cannot
+     * be had by making the hard one smaller.
+     *
+     * It costs the indirect path, and that is already paid for: [Brush.erase]'s
+     * own KDoc says an eraser beads exactly as a translucent brush does and
+     * `InkSurfaceView.indirectNeeded` routes any erasing stroke through the
+     * scratch buffer for precisely this reason. So a soft eraser at 0.45 flow
+     * takes out 45% of a passage per *stroke*, not per dab, and crossing its
+     * own path does not punch through.
+     *
+     * Wider than the hard one because that is how it is used: a hard eraser is
+     * aimed at a line and a soft one is swept over an area.
+     */
+    SOFT_ERASER("soft_eraser", "Soft eraser") {
+        override fun applyTo(brush: Brush) {
+            reset(brush)
+            brush.erase = true
+            brush.sizeMin = 72f
+            brush.sizeMax = 128f
+            brush.eraseSizeMax = 128f
+            // The rim, and the reason the two erasers look different before
+            // they are used. 0.35 is softer than the pencil's 0.72 by about as
+            // much again, which puts the falloff across most of the radius
+            // rather than at the edge of it.
+            brush.hardness = 0.35f
+            // The ceiling for the whole stroke. Below 1, so that one sweep
+            // cannot clear a passage however many times it crosses itself.
+            brush.opacity = 0.85f
+            brush.flowOption.combine = CurveOption.Combine.MULTIPLY
+            brush.flowOption.min = 0.08f
+            brush.flowOption.max = 0.45f
+            // Press harder, take out more. The curve is gentler than the
+            // pencil's because an eraser is not trying to hold a tonal range —
+            // it is trying to be controllable at the light end, where the work
+            // of easing something back actually happens.
+            brush.flowOption.drive(
+                Sensor.PRESSURE,
+                ResponseCurve.of(0f to 0.18f, 0.5f to 0.62f, 1f to 1f),
+            )
+            brush.stabilization = 0.25f
+        }
+    },
     ;
 
     /** Configure [brush] to be this preset. Overwrites everything it sets. */
@@ -370,6 +483,12 @@ enum class BrushPreset(
         brush.isotropicSpacing = d.isotropicSpacing
         brush.grain = d.grain
         brush.burnish = d.burnish
+        // Cleared here, and it was not before. `erase` is a property of the
+        // brush now rather than a mode over the top of one — see [HARD_ERASER]
+        // — so a preset that does not set it has to be able to say so, or
+        // switching from the eraser to the pencil would leave the pencil
+        // rubbing out.
+        brush.erase = d.erase
         brush.eraseSizeMax = d.eraseSizeMax
         for (o in listOf(brush.aspect, brush.rotation, brush.scatter, brush.sizeJitter)) {
             o.clearInputs()

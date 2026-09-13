@@ -178,7 +178,7 @@ class DockLayoutTest {
         val full = DockLayout.of(listOf(bar("a", Cell(0, 0), 2), bar("b", Cell(6, 0), 1)))
             .place("a", ToolItem.PEN, Cell(0, 0))
             .place("a", ToolItem.PENCIL, Cell(1, 0))
-            .place("b", ToolItem.ERASER, Cell(6, 0))
+            .place("b", ToolItem.HARD_ERASER, Cell(6, 0))
         assertNull(full.move("b", Cell(6, 0), "a"))
     }
 
@@ -308,13 +308,13 @@ class DockLayoutTest {
             FlowOrder.RIGHT_THEN_DOWN,
             SurfaceLayout.of(
                 CellRegion.strip(4, Axis.HORIZONTAL).translated(at.x, at.y),
-                listOf(CellPlacement(ToolItem.ERASER, at.x, at.y, 1, 1)),
+                listOf(CellPlacement(ToolItem.HARD_ERASER, at.x, at.y, 1, 1)),
             ),
         )
         val layout = DockLayout.of(
             listOf(withEraser("a", Cell(0, 0)), withEraser("b", Cell(0, 4))),
         )
-        assertEquals("a", layout.on(ToolItem.ERASER), "the first surface listed wins")
+        assertEquals("a", layout.on(ToolItem.HARD_ERASER), "the first surface listed wins")
         assertEquals(1, layout.all().size)
     }
 
@@ -372,7 +372,7 @@ class DockLayoutTest {
             listOf(Surface("l", FlowOrder.DOWN_THEN_RIGHT, SurfaceLayout.empty(l))),
         )
         for (item in listOf(
-            ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.ERASER,
+            ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.HARD_ERASER,
             ToolItem.COLOUR, ToolItem.LAYERS, ToolItem.ZOOM_IN,
         )) {
             layout = layout.place("l", item, assertNotNull(layout.firstFit("l", item)))
@@ -463,7 +463,7 @@ class DockLayoutTest {
         // selection panel, which is the panel that says what it does.
         for (item in listOf(
             ToolItem.PEN, ToolItem.PENCIL, ToolItem.MARKER, ToolItem.BRUSHES,
-            ToolItem.ERASER, ToolItem.COLOUR,
+            ToolItem.HARD_ERASER, ToolItem.COLOUR,
         )) {
             assertEquals("s1", starter.on(item), item.id)
         }
@@ -479,23 +479,25 @@ class DockLayoutTest {
         )) {
             assertEquals("s3", starter.on(item), item.id)
         }
-        for (item in listOf(
-            ToolItem.SIZE, ToolItem.SMOOTHING, ToolItem.GRAIN, ToolItem.ERASER_SIZE,
-        )) {
+        for (item in listOf(ToolItem.SIZE, ToolItem.SMOOTHING, ToolItem.GRAIN)) {
             assertEquals("s4", starter.on(item), item.id)
         }
     }
 
     @Test
     fun `the starter layout leaves a gap between groups`() {
-        // The separators are load-bearing: they are the only thing saying that
-        // the ink tools and the colour are two ideas rather than one run. The
-        // left one moved down a cell when the brush shelf joined the tools
-        // above it; what is pinned here is that there is still a gap, not which
-        // cell it happens to fall in.
+        // One gap, on the top bar, and it is load-bearing: it is the only thing
+        // saying that undo/redo and the file buttons are two ideas rather than
+        // one run.
+        //
+        // The left column has none any more, and that is a decision rather than
+        // a loss. It had a spare cell between the ink tools and the colour;
+        // Us2's second eraser went in it, because two erasers was the user's
+        // ask and a seventh cell of column was not available without the bar
+        // reaching the bottom one. A full column is what the trade cost.
         val starter = DockLayout.STARTER
-        assertNull(starter.surface("s1")!!.slots.covering(Cell(0, 5)))
         assertNull(starter.surface("s2")!!.slots.covering(Cell(2, 0)))
+        assertEquals(7, starter.surface("s1")!!.slots.placements.size, "and s1 is full")
     }
 
     @Test
@@ -514,14 +516,14 @@ class DockLayoutTest {
     }
 
     @Test
-    fun `the starter layout is whole on a tablet and says what a phone cannot show`() {
+    fun `the starter layout is whole on a tablet and on a small phone`() {
         assertTrue(DockLayout.STARTER.settled(24, 12).fittedTo(24, 12).isWhole)
-        // Twelve by eight cells is 528 by 352dp, a small phone in landscape. The
-        // four-slider bar is sixteen cells, so the last one goes to the chevron
-        // rather than being left out of the default everywhere.
-        val small = DockLayout.STARTER.settled(12, 8).fittedTo(12, 8)
-        assertEquals(listOf(ToolItem.ERASER_SIZE), small.overflow["s4"]?.map { it.item })
-        assertEquals(1, small.overflow.size, "and nothing else falls off")
+        // Twelve by eight cells is 528 by 352dp, a small phone in landscape.
+        // The slider bar used to be sixteen cells and the last one went to the
+        // overflow chevron there; it is twelve now that the eraser's own size
+        // slider has gone, so the default fits a phone whole. That is Us5
+        // showing up somewhere nobody was looking for it.
+        assertTrue(DockLayout.STARTER.settled(12, 8).fittedTo(12, 8).isWhole)
     }
 
     @Test

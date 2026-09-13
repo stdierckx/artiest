@@ -186,12 +186,24 @@ class DockCodecTest {
         val layout = assertNotNull(DockCodec.decode(stored), "it fell back to the starter")
 
         assertEquals(5, layout.surfaces.size)
-        assertEquals(13, layout.all().size)
+        assertEquals(12, layout.all().size, "twelve, not thirteen: `eraser_size` is gone")
         assertEquals(Cell(0, 5), layout.locate(ToolItem.PEN)?.cell)
         assertEquals(Cell(24, 8), layout.locate(ToolItem.LAYERS_PANEL)?.cell)
         assertEquals(4 to 12, layout.locate(ToolItem.LAYERS_PANEL)?.placement?.let { it.w to it.h })
         assertTrue(!layout.hasAnchors, "it had already been on a screen")
-        assertEquals(stored, DockCodec.encode(layout), "and it goes back out unchanged")
+
+        // **Not unchanged any more**, and the two differences are the whole of
+        // what Us2 did to somebody who had already arranged their bars. The
+        // eraser toggle became the hard eraser in the cell it was already in —
+        // see `ToolItem.WAS` — and the eraser's own size slider left the
+        // catalogue without a replacement, so its cell is simply free. Nothing
+        // else about the arrangement moved.
+        assertEquals(
+            stored
+                .replace("0,9=eraser", "0,9=hard_eraser")
+                .replace(",17,16=eraser_size", ""),
+            DockCodec.encode(layout),
+        )
     }
 
     // ---- the four older formats -------------------------------------------
@@ -302,7 +314,7 @@ class DockCodecTest {
         val left = assertNotNull(layout.surface("left"))
         assertEquals(ToolItem.PEN, left.at(Cell(0, 0))?.item)
         assertNull(left.at(Cell(0, 1)))
-        assertEquals(ToolItem.ERASER, left.at(Cell(0, 2))?.item)
+        assertEquals(ToolItem.HARD_ERASER, left.at(Cell(0, 2))?.item)
     }
 
     @Test
@@ -312,7 +324,7 @@ class DockCodecTest {
         )
         assertEquals(ToolItem.PEN, layout.surface("left")?.at(Cell(0, 0))?.item)
         assertEquals(ToolItem.UNDO, layout.surface("top")?.at(Cell(0, 0))?.item)
-        assertNull(layout.locate(ToolItem.ERASER))
+        assertNull(layout.locate(ToolItem.HARD_ERASER))
     }
 
     @Test
@@ -333,7 +345,7 @@ class DockCodecTest {
     @Test
     fun `the same item on two surfaces keeps the first, so no control is in two places`() {
         val layout = assertNotNull(DockCodec.decode("v3|left:12:0=eraser|top:24:4=eraser"))
-        assertEquals("left", layout.locate(ToolItem.ERASER)?.surface?.id)
+        assertEquals("left", layout.locate(ToolItem.HARD_ERASER)?.surface?.id)
         assertEquals(1, layout.all().size)
     }
 
