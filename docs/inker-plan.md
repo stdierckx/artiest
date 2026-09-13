@@ -266,7 +266,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik8** | **DONE.** `StrokeGeometry`, `StrokeSplitter`, `StrokeEraser`, `EraseMode`, the record's time origin, and the mode selector. See **What Ik8 built**. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
 | **Ik9** | **DONE.** `StrokeTransform` in `:engine`, `StrokeMove` in `:app`, `TransformBox` over the picked strokes with a live highlight preview. See **What Ik9 built**. | `:app` | Med | Ik7, Ik5 | 4–6 |
 | **Ik10** | **DONE, and the four operations turned out to be one.** `StrokeOp.Restyle`, `StrokeRestyle`, and three buttons that appear only when strokes are picked. See **What Ik10 built**. | `:app` | Low | Ik4, Ik7 | 3–5 |
-| **Ik11** | **Sharp at any zoom**, and export at any scale: re-render the visible region at view scale on a zoom settle, and let `PngExporter` ask a vector sheet for 2x or 4x. **Gated on Ik0.** | `:app` | **High** | Ik4 | 5–8 |
+| **Ik11** | **Not built, and held rather than cut.** Sharp at any zoom, and export at any scale. Both halves turned out to need a decision rather than a day — see **Why Ik11 is not built**. | `:app` | **High** | Ik4 | 5–8 |
 
 **Vector subtotal: 47–71 days**, against `docs/vector-plan.md`'s 30–45 for its
 "smallest set genuinely worth building". The difference is not scope creep: that
@@ -1506,10 +1506,54 @@ daily value), then **Ik11** (sharp at zoom — editing is the reason for the
 feature, sharpness is the poster), then **Ik10** (restyle), then **Ik14**'s
 curve and ellipse rulers, leaving the straight and parallel ones.
 
+> **2026-09-13: everything below the first two is built.** Ik10 and all four of
+> Ik14's rulers shipped, so what the cut order still describes is Ik15 and Ik11
+> — and both of those are held for the reason the next section gives rather
+> than for time: they are the two items **The questions only you can answer**
+> asks about by name. Ik11 has a further reason of its own, recorded below,
+> which is that its cheap half turned out not to be cheap.
+
 **Do not cut Ik0** — Phase 1's strongest lesson is that a plan built on unmeasured
 numbers produces confident wrong answers. **Do not cut Ik2** — without it every
 later item quietly alters the drawing. **Do not cut Ik6** — an editable stroke
 that does not survive closing the app is a demo.
+
+## Why Ik11 is not built, which is more than "it was next to be cut"
+
+Ik11 is one sentence with two halves — *sharp at any zoom*, and *export at any
+scale* — and the plan assumed the second was the cheap one that could be done
+alone. It is not, and the reason is one of this plan's own achievements.
+
+**Stop condition 3 said: one compositor.** Ik4 cleared it by making `rebuild`
+call `stampStroke`, the commit path's own method, with the commit path's
+`ScratchLayer` and `DabRasterizer` — all of which are the **render thread's**.
+An export runs on `Dispatchers.IO`. So "re-render this sheet's strokes at twice
+the size" cannot be written where the exporter is without building a second
+rasterizer, a second scratch buffer and a second stamp cache, which is exactly
+the second compositor that stop condition forbids. The honest shape is a new
+method on `InkSurfaceView` that renders into caller-supplied layers on the
+render thread, and a handshake between it and the export coroutine. That is a
+design, not a chore.
+
+The memory is the second reason and it is arithmetic. A 3300 by 2160 page at 2x
+is 108.8 MiB a sheet, and the export needs the output bitmap as well, so 2x is
+about 218 MiB against W0's measured 4.4 GiB free — affordable — and 4x is 870
+MiB, which is not, without tiling the export. The plan's sentence says "2x or
+4x" as though they were the same feature.
+
+**And the on-screen half has a cheaper shape than the plan implies**, which is
+worth recording because it changes the estimate: re-render only the *visible*
+document rectangle at *view* resolution on a zoom settle. That is 12.7 MiB
+whatever the zoom, and Ik0's patch numbers say the redraw is 281 ms for the pen
+and 1.69 s for the pencil over a comparable output area — a settle, not a
+gesture. What it costs is a change to `StackCompositor` to prefer a sharp
+overlay over the scaled layer for vector sheets, on the thread whose latency
+this whole project organises itself around.
+
+Both halves are therefore real work with a real design question in them, and
+the question at the top of **The questions only you can answer** — *is a line
+that stays crisp at 800% what you picture when you say vector?* — is what says
+whether that work comes next or not at all.
 
 ## Risks and tripwires
 
