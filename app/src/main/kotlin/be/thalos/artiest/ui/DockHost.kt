@@ -40,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +64,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import be.thalos.artiest.engine.brush.BrushEntry
 import kotlin.math.roundToInt
 
 /**
@@ -862,6 +864,94 @@ private fun DragGhost(drag: DockDrag) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The brushes the chooser may offer, and the ink they are drawn in.
+ *
+ * ## Why this is a composition local and nothing else in this file is
+ *
+ * Everything else the chooser needs — the layout, the filter, the cell — is
+ * about *arranging*, which is what this file is for, and it is threaded through
+ * by hand because the signatures are the design. This is not. A brush is the
+ * one thing the dock deliberately does not know about: `ToolItem.BRUSH` carries
+ * an opaque `arg` precisely so that the layout can hold a brush button without
+ * the layout ever having heard of a brush.
+ *
+ * Threading a `List<BrushEntry>` from `MainActivity` down through `DockHost`,
+ * `SurfaceView`, `ChromeSurface` and `ShapedCell` would put the engine's name
+ * in four signatures that have no other reason to mention it — and each of
+ * those four would then have to be changed again for the next argument-taking
+ * control. A local puts it in exactly the two places that use it: the screen
+ * that has the brushes, and the menu that offers them.
+ *
+ * `compositionLocalOf` and not `staticCompositionLocalOf`: [ink] changes every
+ * time the user picks a colour, and a static local would not recompose the
+ * swatches.
+ *
+ * The default is empty, which is the right default — a chooser with no brushes
+ * behind it shows no Brushes tab, and every test that renders a dock without an
+ * app around it gets exactly that.
+ */
+class BrushChoices(
+    val entries: List<BrushEntry> = emptyList(),
+    /** What a swatch is drawn in, so the tab shows the mark you would make. */
+    val ink: Int = 0xFF000000.toInt(),
+)
+
+/** See [BrushChoices]. */
+val LocalBrushChoices = compositionLocalOf { BrushChoices() }
+
+/**
+ * One tab of the chooser.
+ *
+ * The strip used to be `ToolGroup.entries` and it cannot be any more, because
+ * the user asked for a fifth tab that is not a group:
+ *
+ * > *"in arrange mode, when you click a + button, the menu with all the
+ * > controls that pop up? It has 4 categories. Edit, draw, Canvas and File.
+ * > Make a new categorie: brushes."*
+ *
+ * Brushes is not a [ToolGroup] and must not become one. A group is a property
+ * of a catalogue entry, and the catalogue has exactly one entry for every brush
+ * there will ever be — `ToolItem.BRUSH`, which means nothing without its
+ * argument. So the tab strip stops being the groups and becomes *the tabs*, of
+ * which four are groups and one is the shelf.
+ */
+internal sealed interface ChooserTab {
+    val label: String
+
+    @JvmInline
+    value class Group(val group: ToolGroup) : ChooserTab {
+        override val label: String get() = group.label
+    }
+
+    data object Brushes : ChooserTab {
+        override val label: String get() = "Brushes"
+    }
+}
+
+/**
+ * The tabs this chooser has, in order.
+ *
+ * A plain function on plain data, and out here rather than inside the
+ * composable because it is the only *decision* the tab strip makes and the
+ * rest is a `Row` of chips. `ChooserTabsTest` is what keeps the two rules
+ * below true:
+ *
+ * - a group with nothing in it after the filter has no tab, which is what
+ *   makes a narrowed workspace read as a smaller chooser rather than as a
+ *   chooser full of empty drawers;
+ * - Brushes is last, and only when there is a brush and the filter offers
+ *   `ToolItem.BRUSH` at all. A workspace that hides brush buttons hides the
+ *   tab, not just its contents.
+ */
+internal fun chooserTabs(filter: CatalogueFilter, hasBrushes: Boolean): List<ChooserTab> =
+    buildList {
+        for (g in ToolGroup.entries) {
+            if (ToolItem.entries.any { it.group == g && it in filter }) add(ChooserTab.Group(g))
+        }
+        if (hasBrushes && ToolItem.BRUSH in filter) add(ChooserTab.Brushes)
+    }
+
+/**
  * What can go in this cell.
  *
  * ## Tabs, because the list outgrew a menu
@@ -902,10 +992,13 @@ internal fun ToolChooser(
 ) {
     val occupant = bar.slots.covering(cell)
     var query by remember { mutableStateOf("") }
-    val groups = remember(filter) {
-        ToolGroup.entries.filter { g -> ToolItem.entries.any { it.group == g && it in filter } }
+    val brushes = LocalBrushChoices.current
+    val tabs = remember(filter, brushes.entries) {
+        chooserTabs(filter, brushes.entries.isNotEmpty())
     }
-    var tab by remember(groups) { mutableStateOf(groups.firstOrNull() ?: ToolGroup.DRAW) }
+    var tab by remember(tabs) {
+        mutableStateOf(tabs.firstOrNull() ?: ChooserTab.Group(ToolGroup.DRAW))
+    }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss, modifier = Modifier.width(292.dp)) {
         ToolSearch(
@@ -946,18 +1039,20 @@ internal fun ToolChooser(
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            for (group in groups) {
-                Chip(group.label, lit = group == tab) { tab = group }
+            for (entry in tabs) {
+                Chip(entry.label, lit = entry == tab) { tab = entry }
             }
         }
 
         Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            // `BRUSH` is skipped, and it is the only entry that ever is: it
-            // needs an argument to mean anything, and a `BRUSH` with none is a
-            // button that loads nothing. It reaches a toolbar from the shelf,
-            // where the brush is what you are pointing at. See `ToolItem.BRUSH`.
+            val group = (tab as? ChooserTab.Group)?.group
+            if (group == null) BrushChoiceList(layout, bar, cell, brushes, onLayout)
+            // `BRUSH` is skipped in the group tabs, and it is the only entry
+            // that ever is: it needs an argument to mean anything, and a
+            // `BRUSH` with none is a button that loads nothing. Its arguments
+            // are what the Brushes tab above lists.
             for (item in ToolItem.entries.filter {
-                it.group == tab && it in filter && it != ToolItem.BRUSH
+                group != null && it.group == group && it in filter && it != ToolItem.BRUSH
             }) {
                 val fits = layout.fits(bar.id, item, cell, ignoring = cell)
                 val already = item == occupant?.item
@@ -982,6 +1077,57 @@ internal fun ToolChooser(
                 )
             }
         }
+    }
+}
+
+/**
+ * Every brush on the shelf, as something you can put in this cell.
+ *
+ * This is the user's third item, and it is the whole of it:
+ *
+ * > *"I press the "Put on a toolbar" button, but you dont know where, and if
+ * > there is no empty target button available, it does nothing."*
+ *
+ * Both halves are answered by *where the menu was opened from* rather than by
+ * anything this function does. The `+` was pressed in a cell, so the button
+ * lands in that cell — there is no guessing and nothing to hunt for afterwards —
+ * and the cell is empty, because a `+` is only drawn on an empty one.
+ *
+ * The row shows the mark and the name, in that order. [BrushMark] and not a
+ * glyph, for the reason `ToolItem.BRUSH` is a `SWATCH`: two pencils tuned
+ * differently have the same name shape and different marks, and the mark is the
+ * thing you are choosing between.
+ *
+ * A brush already on a bar is named as such, and picking it *moves* that button
+ * here rather than making a second one — `DockLayout.place` is arg-aware and
+ * that is what it does. Two buttons for one brush is not the feature; two
+ * buttons for two differently tuned brushes is, and those are two entries.
+ */
+@Composable
+private fun BrushChoiceList(
+    layout: DockLayout,
+    bar: Surface,
+    cell: Cell,
+    brushes: BrushChoices,
+    onLayout: (DockLayout) -> Unit,
+) {
+    for (entry in brushes.entries) {
+        val here = layout.locate(ToolItem.BRUSH, entry.id) != null
+        val fits = layout.fits(bar.id, ToolItem.BRUSH, cell, ignoring = cell, arg = entry.id)
+        DropdownMenuItem(
+            text = {
+                Text(
+                    if (here) "${entry.label}  ·  on a toolbar" else entry.label,
+                    fontSize = 13.sp,
+                )
+            },
+            leadingIcon = {
+                BrushMark(entry, brushes.ink, Modifier.size(width = 30.dp, height = 17.dp))
+            },
+            enabled = fits,
+            onClick = { onLayout(layout.place(bar.id, ToolItem.BRUSH, cell, entry.id)) },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -1055,7 +1201,15 @@ private fun ToolSearch(
     val hits = ToolItem.entries.filter {
         needle in it.label.lowercase() || needle in it.id || needle in it.short.lowercase()
     }
-    if (hits.isEmpty()) {
+    // And the shelf. Typing "eraser" has to find the eraser whether it is a
+    // catalogue entry or a brush, and after Us2 it is a brush — a search that
+    // knew only about the catalogue would answer "nothing called that" for the
+    // one word every drawing app has.
+    val brushes = LocalBrushChoices.current
+    val brushHits = brushes.entries.filter {
+        needle in it.label.lowercase() || needle in it.id
+    }
+    if (hits.isEmpty() && brushHits.isEmpty()) {
         Text(
             "nothing called that",
             fontSize = 12.sp,
@@ -1086,6 +1240,22 @@ private fun ToolSearch(
             onClick = {
                 if (!offered) onFilter(filter.offering(item))
                 onLayout(layout.place(bar.id, item, cell))
+            },
+        )
+    }
+
+    for (entry in brushHits.take(MAX_HITS)) {
+        val offered = ToolItem.BRUSH in filter
+        val fits = layout.fits(bar.id, ToolItem.BRUSH, cell, ignoring = cell, arg = entry.id)
+        DropdownMenuItem(
+            text = { Text(entry.label, fontSize = 13.sp) },
+            leadingIcon = {
+                BrushMark(entry, brushes.ink, Modifier.size(width = 30.dp, height = 17.dp))
+            },
+            enabled = fits,
+            onClick = {
+                if (!offered) onFilter(filter.offering(ToolItem.BRUSH))
+                onLayout(layout.place(bar.id, ToolItem.BRUSH, cell, entry.id))
             },
         )
     }

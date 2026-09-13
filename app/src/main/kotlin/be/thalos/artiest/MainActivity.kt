@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -80,7 +81,9 @@ import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.ui.Cell
+import be.thalos.artiest.ui.BrushChoices
 import be.thalos.artiest.ui.BrushCursor
+import be.thalos.artiest.ui.LocalBrushChoices
 import be.thalos.artiest.ui.SelectionButton
 import be.thalos.artiest.ui.SelectionPanelCard
 import be.thalos.artiest.ui.SelectionOverlay
@@ -1426,6 +1429,12 @@ private fun CanvasScreen(
             }
         }
 
+        // The chooser's Brushes tab, handed down rather than threaded through
+        // four signatures that have no other reason to mention a brush. See
+        // `BrushChoices` for the argument.
+        CompositionLocalProvider(
+            LocalBrushChoices provides BrushChoices(library.entries, ink),
+        ) {
         DockHost(
             layout = docks,
             onLayout = { keep(it) },
@@ -1639,6 +1648,7 @@ private fun CanvasScreen(
                     },
                     onExport = doExport,
                 )
+        }
         }
 
         // Over everything, including the chrome: it is the whole screen while

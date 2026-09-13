@@ -474,6 +474,19 @@ private fun BrushRow(
  * brush that has already been drawn does not blink through a frame of nothing
  * on its way back.
  */
+/**
+ * The same mark, for a caller outside this file.
+ *
+ * The chooser's Brushes tab draws it, and it has to be the *same* picture the
+ * shelf draws or the two would be two opinions about what a brush looks like —
+ * which is the one thing a swatch exists to settle. A wrapper rather than
+ * widening [Swatch] itself, so the shelf's own call sites keep reading as the
+ * shelf's.
+ */
+@Composable
+internal fun BrushMark(entry: BrushEntry, ink: Int, modifier: Modifier = Modifier) =
+    Swatch(entry, ink, modifier)
+
 @Composable
 private fun Swatch(entry: BrushEntry, ink: Int, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier) {
