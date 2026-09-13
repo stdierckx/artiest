@@ -1034,7 +1034,10 @@ after a restart; do not read it from a screencap taken a second after a gesture.
 
 ## What Ik10 built
 
-> 2026-09-13. `:app`. Nine tests.
+> 2026-09-13. `:app`. Nine tests, and the tablet: three ink strokes given the
+> pencil repaint in **466 ms** — a pencil is the dear nib, which is Ik0's number
+> showing up again — as one undo step, and the undo puts the pen back in
+> **34.5 ms**.
 
 Pick some strokes and give them the colour in your hand, or the brush in your
 hand, or rub them out. Three buttons in the selection panel, shown only when
@@ -1064,6 +1067,15 @@ still has to be cleared, or the wide version's edges stay behind. Each
 replacement therefore carries the union of what it painted and what it will
 paint, which is what makes `VectorStep.damage` right.
 
+### Undo drops the selection, and that is left as it is
+
+Undoing a restyle brings the original records back with their *original* ids, so
+the picked set — which is on the replacements — prunes to nothing. The strokes
+are right and the selection is empty. Restoring it would mean an undo step that
+remembers what was picked when it was made, which is a fourth thing for
+`VectorStep` to carry for a convenience; it is written down here rather than
+built.
+
 ### The picked set has to follow the replacements
 
 A restyled stroke is a **new record with a new id**, because an undo step whose
@@ -1074,7 +1086,8 @@ would watch their selection vanish for having changed its colour.
 ## What Ik9 built
 
 > 2026-09-13. `StrokeTransform` in `:engine`, `StrokeMove` in `:app`. Twenty
-> tests.
+> tests, and the tablet: three strokes lassoed and dragged repaint in
+> **56.9 ms**, as one undo step, with the selection still on them afterwards.
 
 Pick some strokes and the transform box appears over them. Drag to move, a
 corner to scale, the knob to turn. The highlight follows the hand; the strokes
