@@ -4,6 +4,7 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +73,20 @@ fun TransformBox(
      * such moment, so the end of the drag is the moment.
      */
     onSettled: ((Matrix) -> Unit)? = null,
+    /**
+     * A tap on the canvas outside the box, or null for a box that has no such
+     * ending.
+     *
+     * **The way out.** While this box is up it takes every pointer over the
+     * canvas — see the class header — so nothing under it can be drawn on or
+     * tapped, and a box with no ending is a mode the user is stuck in. The
+     * float's box is the one that keeps null here on purpose: pixels in the air
+     * have to be *put somewhere*, and Move, Paste and Cancel are three endings
+     * that say what happens to them. Picked strokes are already on the page, so
+     * letting go of them is the obvious fourth, and a tap on empty paper is
+     * where every hand tries it first.
+     */
+    onTapOutside: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     if (sourceBounds == null) return
@@ -84,7 +99,23 @@ fun TransformBox(
     val session = remember(token) { DragSession() }
 
     Canvas(
-        modifier.pointerInput(token) {
+        modifier
+            // Before the drag detector, so a tap is settled here rather than
+            // being swallowed as a drag of no distance.
+            .then(
+                if (onTapOutside == null) {
+                    Modifier
+                } else {
+                    Modifier.pointerInput(token) {
+                        detectTapGestures { at ->
+                            if (!inside(at, corners(sourceBounds, user, docToView()))) {
+                                onTapOutside()
+                            }
+                        }
+                    }
+                },
+            )
+            .pointerInput(token) {
             detectDragGestures(
                 onDragStart = { at ->
                     session.begin(at, corners(sourceBounds, user, docToView()))

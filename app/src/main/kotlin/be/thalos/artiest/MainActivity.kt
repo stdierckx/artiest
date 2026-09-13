@@ -1436,6 +1436,19 @@ private fun CanvasScreen(
                     document.requestStrokeOp(be.thalos.artiest.doc.StrokeOp.Transform(values))
                     surface?.redrawDry()
                 },
+                // The way out, and it was missing: this box takes every pointer
+                // over the canvas, so until there was a tap ending there was no
+                // gesture that could end the pick -- not drawing, not tapping
+                // the paper, not picking something else. The float's box has
+                // three endings on the panel and says so; this one had none.
+                // `redrawDry` as well as the request, for the reason every
+                // other caller of `requestStrokeOp` does it: the op is queued
+                // for the render thread and a queue nobody asks to drain is a
+                // tap that does nothing until the next stroke.
+                onTapOutside = {
+                    document.requestStrokeOp(be.thalos.artiest.doc.StrokeOp.None)
+                    surface?.redrawDry()
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }

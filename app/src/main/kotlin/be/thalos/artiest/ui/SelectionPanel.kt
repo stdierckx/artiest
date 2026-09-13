@@ -408,6 +408,13 @@ private fun SelectionBody(
                     Choice(ToolIcons.trash, "Rub them out", false) {
                         onStrokeOp(StrokeOp.DeletePicked)
                     }
+                    // The ending, in words. There is a second one -- a tap on
+                    // the paper outside the box -- and this is here anyway,
+                    // because the box covers the canvas and a way out you have
+                    // to guess at is not one. See `TransformBox.onTapOutside`.
+                    Choice(ToolIcons.selectNone, "Let them go", false) {
+                        onStrokeOp(StrokeOp.None)
+                    }
                 }
             }
         }

@@ -2879,6 +2879,10 @@ class InkSurfaceView(
             if (tailSmoothing.strength != pen.stabilization) {
                 tailSmoothing = Stabilizer(pen.stabilization)
             }
+            // The barrel turned out to disagree with what pen-down assumed, so
+            // the guide decision is made again from the brush that actually
+            // won. See `onStrokeStart`.
+            builder.snap = if (pen.erase) null else document.guides.snap
             builder.begin(inkColorArgb)
             beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
         }
@@ -3036,6 +3040,16 @@ class InkSurfaceView(
             // it must be fixed before any dab is laid, which is what
             // [applyEraseFor] does on the first sample and never again.
             eraseDecided = false
+            // Ik13. Read **once, here**, and kept for the stroke, which is the
+            // discipline `ink` follows and for the same reason: a ruler dragged
+            // while the pen is down must not bend the half of the line that is
+            // already on the page. `GuideSet.snap` is a volatile reference to
+            // an immutable Snap over immutable guides, so one read is enough.
+            //
+            // Not while erasing. A rubber that only rubs along a ruler is a
+            // rubber nobody can take a mistake out with, and taking the mistake
+            // out is what the ruler made likely.
+            builder.snap = if (pen.erase) null else document.guides.snap
             builder.begin(inkColorArgb)
             // Reset, never reallocated: this is filled one sample at a time at
             // 321.75 Hz, and it is the only new per-sample work Ik3 adds.

@@ -95,6 +95,17 @@ class Document(
     val selection: Selection = Selection(widthPx, heightPx)
 
     /**
+     * The rulers and guides on this page. Ik13.
+     *
+     * On the document for [selection]'s reason and one more: a guide is a
+     * property of the *drawing* rather than of a sheet, and a perspective grid
+     * that vanished when you added a layer would be a grid nobody would set up.
+     * It is saved in `project.json` and it is **not** in the undo history — see
+     * [GuideSet].
+     */
+    val guides: GuideSet = GuideSet()
+
+    /**
      * Pixels lifted off a sheet and not yet put back, or null.
      *
      * **Render thread**, like everything else that touches pixels — but read by
