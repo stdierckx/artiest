@@ -451,7 +451,7 @@ class DockLayoutTest {
     @Test
     fun `the starter layout survives its own normalisation`() {
         val starter = DockLayout.STARTER
-        assertEquals(22, starter.all().size)
+        assertEquals(23, starter.all().size)
         assertEquals(starter.all().size, starter.all().map { it.item }.toSet().size)
         assertTrue(starter.hasAnchors, "it has not met a screen yet")
 

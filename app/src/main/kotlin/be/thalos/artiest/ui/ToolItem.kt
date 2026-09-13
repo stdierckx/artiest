@@ -350,6 +350,34 @@ enum class ToolItem(
         ToolKind.PANEL, cellsTall = 11,
     ),
 
+    /**
+     * The guides panel, as a button that opens it. Ik13.
+     *
+     * In [ToolGroup.CANVAS] beside the selection and the layers, and not in
+     * DRAW, for the reason `docs/inker-plan.md` gives when it says guides are
+     * *furniture*: a ruler does not change what the nib is or what the mark
+     * looks like. It is a thing lying on the page, like a selection is a region
+     * of it, and the pen is helped by it without being changed.
+     *
+     * One slot and a panel, the shape [LAYERS], [COLOUR] and [SELECTION] have:
+     * a list as long as the page has rulers, with two sliders under it, is not
+     * something a bar can show.
+     */
+    GUIDES("guides", "Guides", "Guides", 1, ToolGroup.CANVAS),
+
+    /**
+     * The same panel, kept. Six cells by seven, which is 264 by 308dp.
+     *
+     * The shortest of the four kept panels, because it has the least to say: a
+     * button, a handful of rows and two sliders. A card with room for eleven
+     * rows of rulers would be a card that is mostly empty on every page anybody
+     * draws.
+     */
+    GUIDES_PANEL(
+        "guides_panel", "Guides panel", "Guides", 6, ToolGroup.CANVAS,
+        ToolKind.PANEL, cellsTall = 7,
+    ),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

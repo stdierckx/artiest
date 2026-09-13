@@ -160,11 +160,24 @@ object ShippedWorkspaces {
         layout = DockLayout.of(
             listOf(
                 DockLayout.anchored(
-                    // Seven, and full. Five things that make a mark and two
-                    // that choose one, with no gap between them — on an ink
-                    // sheet choosing a line is the same kind of act as drawing
-                    // one, so they read as a single run on purpose.
-                    "s1", Side.LEFT, 1, 7,
+                    // Eight, and full. Five things that make a mark, two that
+                    // choose one and one that the mark is drawn against, with
+                    // no gap between them — on an ink sheet choosing a line is
+                    // the same kind of act as drawing one, so they read as a
+                    // single run on purpose.
+                    //
+                    // Eight is one more than `DockLayout.STARTER`'s left column
+                    // dares, and the reason it fits here is that this
+                    // workspace's bottom bar is nine cells rather than twelve:
+                    // on a 12x8 phone the starter's bar reaches x=0 and this
+                    // one starts at x=1, so the column has the corner to itself.
+                    //
+                    // **Guides are on the tool side, not the view side**, which
+                    // is where `STARTER` puts them and where they belong in the
+                    // catalogue. This is the workspace that disagrees: an inker
+                    // lays a ruler down and inks along it, which makes it a
+                    // thing the hand reaches for rather than a way of looking.
+                    "s1", Side.LEFT, 1, 8,
                     ToolItem.PEN to Cell(0, 0),
                     ToolItem.MARKER to Cell(0, 1),
                     ToolItem.BRUSHES to Cell(0, 2),
@@ -172,6 +185,7 @@ object ShippedWorkspaces {
                     ToolItem.COLOUR to Cell(0, 4),
                     ToolItem.MARQUEE to Cell(0, 5),
                     ToolItem.SELECTION to Cell(0, 6),
+                    ToolItem.GUIDES to Cell(0, 7),
                 ),
                 DockLayout.anchored(
                     // What you did, and the way back to your drawings. The gap

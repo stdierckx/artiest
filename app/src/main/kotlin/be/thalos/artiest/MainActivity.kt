@@ -86,6 +86,14 @@ import be.thalos.artiest.ui.BrushCursor
 import be.thalos.artiest.ui.LocalBrushChoices
 import be.thalos.artiest.ui.SelectionButton
 import be.thalos.artiest.ui.SelectionPanelCard
+import be.thalos.artiest.ui.GuideAct
+import be.thalos.artiest.ui.GuideHandles
+import be.thalos.artiest.ui.GuideInfo
+import be.thalos.artiest.ui.GuideOverlay
+import be.thalos.artiest.ui.GuidesButton
+import be.thalos.artiest.ui.GuidesPanelCard
+import be.thalos.artiest.ui.MAX_REACH_DOC
+import be.thalos.artiest.ui.labelFor
 import be.thalos.artiest.ui.SelectionOverlay
 import be.thalos.artiest.ui.TransformBox
 import be.thalos.artiest.ui.LayersButton
@@ -556,6 +564,35 @@ private fun CanvasScreen(
     /** The highlight, republished by the render thread. See `StrokePickInfo`. */
     var pickInfo by remember { mutableStateOf(be.thalos.artiest.doc.StrokePickInfo.NONE) }
 
+    /**
+     * Bumped whenever a guide changes. Ik13.
+     *
+     * `GuideSet` is a plain mutable object, deliberately: it is read on the
+     * render thread at pen-down and a Compose snapshot would not survive that
+     * crossing. So the panel reads a `GuideInfo` rebuilt on this counter, and
+     * the overlay reads the set itself inside its draw lambda -- which is the
+     * `outlineTick` arrangement one line down, for the same reason.
+     */
+    var guideTick by remember { mutableIntStateOf(0) }
+
+    /**
+     * What the guides panel is looking at, rebuilt when they change.
+     *
+     * A snapshot rather than the set, because a composable that read the set
+     * directly would never recompose: nothing in it is Compose state.
+     */
+    val guideInfo = remember(guideTick) {
+        val set = document.guides
+        GuideInfo(
+            rows = set.all().mapIndexed { at, line ->
+                GuideInfo.Row(line.id, labelFor(line, at), line.on)
+            },
+            strength = set.strength,
+            reachDoc = set.reachDoc,
+        )
+    }
+
+
     /** Ik9's live transform, or null when nothing is being dragged. */
     var pickMatrix by remember { mutableStateOf<android.graphics.Matrix?>(null) }
 
@@ -621,6 +658,12 @@ private fun CanvasScreen(
     // must not be the renderer's, which the render thread concatenates.
     val outlineMatrix = remember { android.graphics.Matrix() }
 
+    // Ik13's two scratch paths and the rectangle they are cut to. One each for
+    // the life of the screen: these are refilled on every pan and zoom frame,
+    // and a `Path` per frame is a native allocation per frame.
+    val guidePath = remember { android.graphics.Path() }
+    val guideDim = remember { android.graphics.Path() }
+
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -667,6 +710,44 @@ private fun CanvasScreen(
 
     var docks by remember { mutableStateOf(startup.second) }
     var arranging by remember { mutableStateOf(false) }
+
+    /**
+     * The one place a guide is changed, so that the redraw and the counter
+     * cannot be forgotten at one of six call sites.
+     *
+     * A fresh ruler lands **across the middle of the page** rather than where
+     * the last one was or where the pen is: a ruler you cannot see is a ruler
+     * you cannot pick up, and the middle of the page is the one place that is
+     * on screen at every zoom and pan a fresh drawing has.
+     */
+    val onGuideAct: (GuideAct) -> Unit = { act ->
+        val set = document.guides
+        when (act) {
+            GuideAct.AddRuler -> {
+                val w = document.widthPx.toFloat()
+                val h = document.heightPx.toFloat()
+                set.put(
+                    be.thalos.artiest.doc.Guideline(
+                        set.nextId(),
+                        be.thalos.artiest.doc.GuideKind.RULER,
+                        floatArrayOf(w * 0.15f, h * 0.5f, w * 0.85f, h * 0.5f),
+                    ),
+                )
+                // Arrange mode, because the next thing a hand wants to do with
+                // a ruler that has just appeared is move it -- and that is the
+                // only mode it can be moved in. The same three lines every
+                // fixate does, and for the same reason.
+                arranging = true
+            }
+
+            is GuideAct.SetOn -> set.setOn(act.id, act.on)
+            is GuideAct.Remove -> set.remove(act.id)
+            GuideAct.Clear -> set.clear()
+            is GuideAct.SetStrength -> set.strength = act.value
+            is GuideAct.SetReach -> set.reachDoc = if (act.value < 1f) 0f else act.value
+        }
+        guideTick++
+    }
 
     /** Save the arrangement to both stores. The fast one always, the file too. */
     fun keep(next: DockLayout) {
@@ -771,6 +852,13 @@ private fun CanvasScreen(
 
             is OpenResult.Failed -> projectNote = "could not open ${p.name}: ${opened.reason}"
         }
+        // The drawing that has just arrived brought its own rulers, and nothing
+        // else would say so: `GuideSet` is a plain object, so the overlay and
+        // the panel both hang off this counter. Without it a drawing opens with
+        // its guides live -- the pen really is snapping -- and nothing on
+        // screen drawn to say why.
+        guideTick++
+        outlineTick.intValue++
         surface?.redrawDry()
     }
 
@@ -1356,6 +1444,70 @@ private fun CanvasScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // Ik13's rulers, under the selection's outline and under the chrome.
+        //
+        // Under the outline on purpose: a guide is furniture and a selection is
+        // something you are doing, so where they cross the thing being done
+        // wins. Both are over the paper, which is the only order that matters
+        // against the canvas itself.
+        //
+        // The paths are rebuilt inside the draw lambda rather than held as
+        // state, for `SelectionOverlay`'s reason and one of its own: an
+        // infinite ruler has to be cut to what is visible before it can be
+        // transformed, so the geometry genuinely depends on the pan and the
+        // zoom and there is nothing to cache across one.
+        GuideOverlay(
+            live = {
+                guideTick
+                outlineTick.intValue
+                if (document.guides.isEmpty) null else {
+                    document.guides.outline(guidePath, visibleDoc(surface, document), on = true)
+                    guidePath
+                }
+            },
+            dim = {
+                guideTick
+                outlineTick.intValue
+                if (document.guides.isEmpty) null else {
+                    document.guides.outline(guideDim, visibleDoc(surface, document), on = false)
+                    guideDim
+                }
+            },
+            // Null outside arrange mode, which is what makes the handles
+            // invisible there rather than a flag inside the overlay: a caller
+            // that has decided not to offer handles should not be building
+            // their positions every frame. See `GuideHandles`.
+            handles = {
+                guideTick
+                if (!arranging || document.guides.isEmpty) null else handlesOf(document.guides)
+            },
+            docToView = {
+                outlineTick.intValue
+                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                outlineMatrix
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // And the hand that moves them, which takes a pointer only when there
+        // is a ruler under it -- so a drag on empty paper in arrange mode still
+        // reaches whatever the dock wanted to do with it.
+        if (arranging && !document.guides.isEmpty) {
+            GuideHandles(
+                guides = document.guides,
+                docToView = {
+                    outlineTick.intValue
+                    surface?.let { outlineMatrix.setDocToView(it.transform) }
+                    outlineMatrix
+                },
+                onChanged = {
+                    guideTick++
+                    outlineTick.intValue++
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         // Above the canvas and below the chrome, for the reason the ring is
         // there: the outline belongs over the paper.
         SelectionOverlay(
@@ -1770,6 +1922,9 @@ private fun CanvasScreen(
                     onInk = { ink = it },
                     sizeMax = sizeMax,
                     onSizeMax = { sizeMax = it },
+                    guideInfo = guideInfo,
+                    arranging = arranging,
+                    onGuideAct = onGuideAct,
                     layerRows = layerRows,
                     activeLayer = activeLayer,
                     onLayerOp = onLayerOp,
@@ -2029,6 +2184,9 @@ private fun ToolSlot(
     onEraseMode: (be.thalos.artiest.doc.EraseMode) -> Unit,
     pickInfo: be.thalos.artiest.doc.StrokePickInfo,
     onStrokeOp: (be.thalos.artiest.doc.StrokeOp) -> Unit,
+    guideInfo: GuideInfo,
+    arranging: Boolean,
+    onGuideAct: (GuideAct) -> Unit,
     /** `BrushCodec.encode` of the brush in the hand. See `StrokeOp.Restyle`. */
     brushText: () -> String,
     onSelecting: (Boolean) -> Unit,
@@ -2256,6 +2414,20 @@ private fun ToolSlot(
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
         )
+        ToolItem.GUIDES -> GuidesButton(
+            info = guideInfo,
+            arranging = arranging,
+            onAct = onGuideAct,
+            onFixate = { onFixate(ToolItem.GUIDES_PANEL, it) },
+        )
+
+        /** The same panel, kept. See [ToolItem.GUIDES_PANEL]. */
+        ToolItem.GUIDES_PANEL -> GuidesPanelCard(
+            info = guideInfo,
+            arranging = arranging,
+            onAct = onGuideAct,
+        )
+
         ToolItem.LAYERS -> LayersButton(
             layers = layerRows,
             activeId = activeLayer,
@@ -2798,6 +2970,83 @@ private fun gib(bytes: Long): String = r(bytes / (1024f * 1024f * 1024f), 2)
 private const val DEFAULT_SIZE_MAX = 24f
 
 /** `Brush.stabilization`'s default. The plan's number, on the plan's slider. */
+/**
+ * The part of the page that is on screen, in document coordinates.
+ *
+ * What an infinite ruler is cut to before it is drawn — see
+ * `Guideline.outline`, which explains why that is not an optimisation. A little
+ * wider than the glass, so that a ruler which only clips the very edge still
+ * has a segment to draw rather than flickering in and out at the boundary.
+ *
+ * The whole page when there is no view yet, which is the one frame between the
+ * composition starting and the surface arriving.
+ */
+private fun visibleDoc(
+    surface: InkSurfaceView?,
+    document: be.thalos.artiest.doc.Document,
+): android.graphics.RectF {
+    val out = visibleScratch
+    val v = surface
+    if (v == null || v.width == 0 || v.height == 0) {
+        out.set(0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat())
+        return out
+    }
+    // The four corners of the glass, back through the transform, and the box
+    // round them. The corners and not the origin plus a size, because the
+    // canvas can be *rotated*: the document-space image of a rotated screen is
+    // a diamond, and its bounding box is bigger than the screen in both axes.
+    val t = v.transform
+    val margin = MARGIN_VIEW_PX / (if (t.scale > 0f) t.scale else 1f)
+    val w = v.width.toFloat()
+    val h = v.height.toFloat()
+    var left = Float.MAX_VALUE
+    var top = Float.MAX_VALUE
+    var right = -Float.MAX_VALUE
+    var bottom = -Float.MAX_VALUE
+    val corner = visibleCorner
+    for (i in 0 until 4) {
+        t.viewToDoc(if (i == 1 || i == 2) w else 0f, if (i >= 2) h else 0f, corner)
+        left = minOf(left, corner[0])
+        top = minOf(top, corner[1])
+        right = maxOf(right, corner[0])
+        bottom = maxOf(bottom, corner[1])
+    }
+    out.set(left - margin, top - margin, right + margin, bottom + margin)
+    return out
+}
+
+/** [visibleDoc]'s own rectangle. UI thread only, and it never escapes a draw. */
+private val visibleScratch = android.graphics.RectF()
+
+/** [visibleDoc]'s corner scratch. Same thread, same life. */
+private val visibleCorner = FloatArray(2)
+
+/** How far past the glass a guide is still drawn. See [visibleDoc]. */
+private const val MARGIN_VIEW_PX = 64f
+
+/**
+ * Every guide's handles, as document-space x, y pairs.
+ *
+ * Rebuilt per frame rather than kept, and that is affordable because it is a
+ * handful of floats: a page has a few rulers on it, each with two ends. The
+ * alternative is a cache invalidated by a drag that moves one of them, which is
+ * more state than the thing it would save.
+ */
+private fun handlesOf(guides: be.thalos.artiest.doc.GuideSet): FloatArray {
+    var n = 0
+    for (i in 0 until guides.size) n += guides[i].pointCount
+    val out = FloatArray(n * 2)
+    var at = 0
+    for (i in 0 until guides.size) {
+        val line = guides[i]
+        for (j in 0 until line.pointCount) {
+            out[at++] = line.xAt(j)
+            out[at++] = line.yAt(j)
+        }
+    }
+    return out
+}
+
 private const val DEFAULT_SMOOTHING = 0.15f
 
 /**

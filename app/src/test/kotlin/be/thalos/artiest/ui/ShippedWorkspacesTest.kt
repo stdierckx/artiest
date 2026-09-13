@@ -83,6 +83,9 @@ class ShippedWorkspacesTest {
             // A rough under an ink, and the zoom that says whether the ink was
             // good.
             ToolItem.LAYERS, ToolItem.ZOOM_IN, ToolItem.ZOOM_OUT, ToolItem.FIT,
+            // Ik13, and on the tool side rather than the view side — this is
+            // the workspace that lays a ruler down and inks along it.
+            ToolItem.GUIDES,
         )) {
             assertTrue(item in ws.layout, "${item.id} is not on a bar")
             assertTrue(item in ws.filter, "${item.id} is not even offered")

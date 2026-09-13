@@ -176,6 +176,7 @@ class DockStore(context: Context) {
             ToolItem.BRUSHES,
             ToolItem.HARD_ERASER,
             ToolItem.SOFT_ERASER,
+            ToolItem.GUIDES,
         )
 
     }

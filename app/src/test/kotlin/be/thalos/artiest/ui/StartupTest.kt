@@ -88,13 +88,16 @@ class StartupTest {
         // The bottom bar is where Us2 shows up on an install that already
         // existed. `eraser_size` left the catalogue, so its four cells are
         // free; `introduce` finds them and puts the two controls this install
-        // has never been offered — the brush shelf and the soft eraser — in
-        // them. The eraser itself is not introduced, because the toggle the
-        // user already had *is* it: `ToolItem.WAS` turned `eraser` into
-        // `hard_eraser` in the cell it was standing in, which is the left bar
-        // above, unmoved.
+        // has never been offered — the brush shelf, the soft eraser and Ik13's
+        // guides — in them. The eraser itself is not introduced, because the
+        // toggle the user already had *is* it: `ToolItem.WAS` turned `eraser`
+        // into `hard_eraser` in the cell it was standing in, which is the left
+        // bar above, unmoved.
         assertEquals(
-            listOf("size", "smoothing", "grain", "brushes", "soft_eraser", "opacity", "flow"),
+            listOf(
+                "size", "smoothing", "grain", "brushes", "soft_eraser", "guides",
+                "opacity", "flow",
+            ),
             docks.surface("bottom")!!.slots.placements.map { it.item.id },
         )
         assertNotNull(docks.surface("f4"), "and the panel they fixated")

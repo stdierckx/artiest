@@ -129,6 +129,26 @@
       "turns": true
     },
     {
+      "id": "guides",
+      "label": "Guides",
+      "short": "Guides",
+      "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "guides_panel",
+      "label": "Guides panel",
+      "short": "Guides",
+      "group": "canvas",
+      "kind": "panel",
+      "cells_wide": 6,
+      "cells_tall": 7,
+      "turns": false
+    },
+    {
       "id": "hard_eraser",
       "label": "Hard eraser",
       "short": "Hard",

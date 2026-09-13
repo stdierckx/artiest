@@ -360,6 +360,58 @@ class ProjectRoundTripTest {
     }
 
     @Test
+    fun `laying a ruler down is a change worth saving`() {
+        // The guides are the page's and touch no layer and no stroke list, so
+        // without a counter of their own the autosave's poll would answer
+        // "nothing to write" and a grid somebody spent five minutes placing
+        // would be gone on the next launch.
+        val made = document()
+        val project = assertNotNull(files.create("Ruled again", 64, 48, 1_000L))
+        val saver = ProjectSaver(files)
+        val saved = assertIs<SaveResult.Saved>(runBlocking { saver.save(project, made, 2_000L) })
+        assertFalse(saver.dirty(made), "nothing has happened since")
+
+        made.guides.put(
+            be.thalos.artiest.doc.Guideline(
+                1, be.thalos.artiest.doc.GuideKind.RULER, floatArrayOf(0f, 8f, 60f, 8f),
+            ),
+        )
+        assertTrue(saver.dirty(made), "a ruler is a change")
+
+        assertIs<SaveResult.Saved>(runBlocking { saver.save(saved.project, made, 3_000L) })
+        assertFalse(saver.dirty(made), "and once written it is not one any more")
+
+        made.guides.strength = 0.5f
+        assertTrue(saver.dirty(made), "so is how hard it pulls")
+    }
+
+    @Test
+    fun `opening a drawing does not make it dirty`() {
+        // The seed records the revision the files on disk describe. Get the
+        // order wrong and the first poll after every open rewrites the whole
+        // drawing to produce the bytes that are already there.
+        val made = document()
+        made.guides.put(
+            be.thalos.artiest.doc.Guideline(
+                1, be.thalos.artiest.doc.GuideKind.RULER, floatArrayOf(0f, 8f, 60f, 8f),
+            ),
+        )
+        val project = assertNotNull(files.create("Ruled thrice", 64, 48, 1_000L))
+        val saved = assertIs<SaveResult.Saved>(
+            runBlocking { ProjectSaver(files).save(project, made, 2_000L) }
+        )
+
+        val opened = document()
+        val reader = ProjectSaver(files)
+        val stored = assertNotNull(files.load(saved.project.id)).project!!
+        assertIs<OpenResult.Opened>(
+            runBlocking { ProjectLoader.open(files, stored, opened, reader) }
+        )
+        opened.render()
+        assertFalse(reader.dirty(opened))
+    }
+
+    @Test
     fun `a drawing with no rulers on it says nothing about rulers`() {
         // The version 3 fields are written only when there is something to say,
         // so a drawing made without a ruler encodes to what version 2 wrote.

@@ -97,6 +97,19 @@ class ProjectSaver(private val files: ProjectFiles) {
     private var describedActive: Int = -1
 
     /**
+     * The guide revision at the last save, or -1 for never.
+     *
+     * A counter of its own because the guides are the *page's* and not a
+     * sheet's: laying a ruler down touches no layer and no stroke list, so
+     * without this the autosave's poll would answer "nothing to write" and a
+     * perspective grid somebody spent five minutes placing would be gone on the
+     * next launch. See [dirty], which exists precisely so that a new kind of
+     * change cannot be forgotten by whoever adds it — and this is the line that
+     * keeps that true.
+     */
+    private var describedGuides: Int = -1
+
+    /**
      * What was at each index's *stroke* file when it was last written: the
      * sheet, and the revision it was at. Null where the sheet at that index
      * kept no strokes.
@@ -115,13 +128,20 @@ class ProjectSaver(private val files: ProjectFiles) {
      * open re-encodes the whole drawing to produce the bytes that are already
      * there — eight sheets, several seconds, for nothing.
      */
-    fun seed(project: Project, layers: List<Layer>, sheets: List<VectorSheet?> = emptyList()) {
+    fun seed(
+        project: Project,
+        layers: List<Layer>,
+        sheets: List<VectorSheet?> = emptyList(),
+        /** The guide revision these files describe. See [describedGuides]. */
+        guides: Int = -1,
+    ) {
         written = layers.map { it to it.revision }
         writtenStrokes = layers.indices.map { i ->
             sheets.getOrNull(i)?.let { it to it.revision }
         }
         described = project.sheets
         describedActive = project.active
+        describedGuides = guides
     }
 
     /** Nothing on disk belongs to what is in the document. After a New. */
@@ -130,6 +150,7 @@ class ProjectSaver(private val files: ProjectFiles) {
         writtenStrokes = emptyList()
         described = emptyList()
         describedActive = -1
+        describedGuides = -1
     }
 
     /**
@@ -150,6 +171,7 @@ class ProjectSaver(private val files: ProjectFiles) {
         if (count == 0) return false
         if (count != written.size || count != described.size) return true
         if (stack.activePosition != describedActive) return true
+        if (document.guides.revision != describedGuides) return true
         for (i in 0 until count) {
             val entry = stack.entryAt(i)
             if (!clean(i, entry.layer, entry.layer.revision)) return true
@@ -281,6 +303,7 @@ class ProjectSaver(private val files: ProjectFiles) {
             writtenStrokes = nowStrokes
             described = sheets
             describedActive = saved.active
+            describedGuides = guides.revision
 
             val thumbStartNs = System.nanoTime()
             thumbnail(project, document)

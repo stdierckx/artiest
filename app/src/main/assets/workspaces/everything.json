@@ -41,7 +41,7 @@
     {
       "id": "s3",
       "anchor": "right",
-      "rects": [[0, 0, 1, 6]],
+      "rects": [[0, 0, 1, 7]],
       "flow": "down_right",
       "tools": [
         {"id": "zoom_in", "at": [0, 0]},
@@ -49,7 +49,8 @@
         {"id": "fit", "at": [0, 2]},
         {"id": "layers", "at": [0, 3]},
         {"id": "marquee", "at": [0, 4]},
-        {"id": "selection", "at": [0, 5]}
+        {"id": "selection", "at": [0, 5]},
+        {"id": "guides", "at": [0, 6]}
       ]
     },
     {

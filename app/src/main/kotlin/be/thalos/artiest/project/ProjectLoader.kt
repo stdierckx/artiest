@@ -78,20 +78,29 @@ object ProjectLoader {
         // The files on disk are already a picture of these sheets, so the first
         // save after an open writes nothing. Without this it would re-encode the
         // whole drawing to produce bytes that are already there.
-        saver.seed(project, ok.sheets.map { it.layer }, ok.sheets.map { it.vector })
+        // The guides go on before the seed, so the revision the seed records is
+        // the one the files on disk actually describe. The other way round and
+        // the first poll after an open would call the drawing dirty and rewrite
+        // the whole of it to produce the bytes that are already there.
+        document.guides.strength = project.guideStrength
+        document.guides.reachDoc = project.guideReachDoc
+        document.guides.load(GuideText.decodeAll(project.guides))
+        saver.seed(
+            project,
+            ok.sheets.map { it.layer },
+            ok.sheets.map { it.vector },
+            document.guides.revision,
+        )
 
         // The UI thread's half of the swap: the stroke bookkeeping is its list.
         // The undo history is the render thread's and is cleared as the
         // operation lands -- see `Document.resetHistory`.
         document.forgetStrokes()
-        // The rulers on the page. Set here, on the UI thread, because that is
-        // where they are edited and drawn; the sheets' own guide tables went in
-        // with the sheets, and the two are deliberately not the same list --
-        // see `VectorSheet.snapAt` for why a stroke keeps the ruler it was
-        // drawn against rather than reading the one on the page now.
-        document.guides.strength = project.guideStrength
-        document.guides.reachDoc = project.guideReachDoc
-        document.guides.load(GuideText.decodeAll(project.guides))
+        // The rulers on the page went on above, before the seed. The sheets'
+        // own guide tables went in with the sheets, and the two are deliberately
+        // not the same list -- see `VectorSheet.snapAt` for why a stroke keeps
+        // the ruler it was drawn against rather than reading the one on the
+        // page now.
         document.requestLayers(LayerOp.Open(ok.sheets, project.active))
 
         return OpenResult.Opened(

@@ -726,7 +726,7 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
                         ToolItem.STATS to Cell(6, 0),
                     ),
                     anchored(
-                        "s3", Side.RIGHT, 1, 6,
+                        "s3", Side.RIGHT, 1, 7,
                         ToolItem.ZOOM_IN to Cell(0, 0),
                         ToolItem.ZOOM_OUT to Cell(0, 1),
                         ToolItem.FIT to Cell(0, 2),
@@ -735,6 +735,11 @@ class DockLayout private constructor(val surfaces: List<Surface>) {
                         // the panel that says what selecting does.
                         ToolItem.MARQUEE to Cell(0, 4),
                         ToolItem.SELECTION to Cell(0, 5),
+                        // Ik13. On this column and not the tool one, because a
+                        // ruler is a thing lying on the page rather than
+                        // something the nib does -- the same reason it is in
+                        // `ToolGroup.CANVAS`.
+                        ToolItem.GUIDES to Cell(0, 6),
                     ),
                     anchored(
                         // Twelve, not sixteen. The eraser's own size slider

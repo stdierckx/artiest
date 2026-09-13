@@ -12,7 +12,7 @@
     {
       "id": "s1",
       "anchor": "left",
-      "rects": [[0, 0, 1, 7]],
+      "rects": [[0, 0, 1, 8]],
       "flow": "down_right",
       "tools": [
         {"id": "pen", "at": [0, 0]},
@@ -21,7 +21,8 @@
         {"id": "hard_eraser", "at": [0, 3]},
         {"id": "colour", "at": [0, 4]},
         {"id": "marquee", "at": [0, 5]},
-        {"id": "selection", "at": [0, 6]}
+        {"id": "selection", "at": [0, 6]},
+        {"id": "guides", "at": [0, 7]}
       ]
     },
     {

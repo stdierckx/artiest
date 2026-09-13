@@ -58,6 +58,8 @@ object ToolIcons {
         ToolItem.SELECTION -> selectionPanel
         ToolItem.SELECTION_PANEL -> selectionPanel
         ToolItem.LAYERS_PANEL -> layers
+        ToolItem.GUIDES -> guides
+        ToolItem.GUIDES_PANEL -> guides
         // The swatch shows the ink. A palette symbol beside it would be a label
         // for something already visible — but the chooser lists items before
         // they are placed, where there is no ink to show, so the glyph exists.
@@ -929,6 +931,52 @@ object ToolIcons {
                 lineTo(19.6f, 10.4f)
                 moveTo(16.2f, 7f)
                 lineTo(23f, 7f)
+            }
+        }
+    }
+
+    /**
+     * A ruler lying across the page, with a tick on it. Ik13's guides.
+     *
+     * A *drawn* ruler and not a set-square or a grid, because the thing it
+     * opens is a list of lines you lay on the page: the picture and the noun
+     * are the same object, which is the one thing that stops an icon needing a
+     * caption.
+     */
+    val ruler: ImageVector by lazy {
+        icon("ruler") {
+            stroke {
+                moveTo(2.4f, 15.2f)
+                lineTo(15.2f, 2.4f)
+                lineTo(21.6f, 8.8f)
+                lineTo(8.8f, 21.6f)
+                close()
+                moveTo(6.6f, 11f)
+                lineTo(9.2f, 13.6f)
+                moveTo(10.2f, 7.4f)
+                lineTo(12.8f, 10f)
+                moveTo(13.8f, 3.8f)
+                lineTo(16.4f, 6.4f)
+            }
+        }
+    }
+
+    /**
+     * The same ruler with a plus beside it. Making one.
+     *
+     * Shares [addVector]'s plus, deliberately: two "add a thing of this kind"
+     * buttons in one app that draw their plus differently are two buttons
+     * nobody reads as a pair.
+     */
+    val guides: ImageVector by lazy {
+        icon("guides") {
+            stroke {
+                moveTo(2.4f, 21.6f)
+                lineTo(21.6f, 2.4f)
+                moveTo(2.4f, 13.6f)
+                lineTo(13.6f, 2.4f)
+                moveTo(10.4f, 21.6f)
+                lineTo(21.6f, 10.4f)
             }
         }
     }
