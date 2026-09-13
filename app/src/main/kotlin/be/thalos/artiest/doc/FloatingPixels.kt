@@ -72,6 +72,19 @@ class FloatingPixels private constructor(
      * a hard-edged ghost of itself behind.
      */
     val mask: Bitmap?,
+
+    /**
+     * True when the pixels are a **copy**: the source stays where it is, both
+     * while the float is in the air and after it lands.
+     *
+     * This is the whole of duplicate, and it is one flag because of the choice
+     * the class header describes. A lift does not cut anything out — it leaves
+     * the sheet alone and *hides* the source region at draw time, and writes
+     * the hole at drop. So a copy is not a second mechanism with a second set
+     * of undo rules: it is the same lift with the hiding turned off, in the one
+     * method that does it. See [punchInto].
+     */
+    val keepSource: Boolean = false,
 ) {
 
     /**
@@ -163,7 +176,7 @@ class FloatingPixels private constructor(
      * which is the same trap the eraser's wet pass documents.
      */
     fun punchInto(canvas: Canvas) {
-        if (!isOpen) return
+        if (!isOpen || keepSource) return
         val stencil = mask
         if (stencil == null) {
             canvas.drawRect(RectF(sourceBounds), clearPaint)
@@ -335,12 +348,16 @@ class FloatingPixels private constructor(
          * region with no area. The sheet is **not** modified: see the class
          * header.
          */
-        fun lift(entry: LayerStack.Entry, selection: Selection): FloatingPixels? {
+        fun lift(
+            entry: LayerStack.Entry,
+            selection: Selection,
+            keepSource: Boolean = false,
+        ): FloatingPixels? {
             if (!selection.active) return null
             val bounds = Rect(selection.bounds)
             val mask = selection.maskBitmap() ?: return null
             val pixels = cut(entry.layer, bounds, mask) ?: return null
-            return FloatingPixels(entry.id, bounds, pixels, mask)
+            return FloatingPixels(entry.id, bounds, pixels, mask, keepSource)
         }
 
         /**
@@ -364,6 +381,32 @@ sealed interface FloatOp {
 
     /** Lift the selection off the active sheet. Refused when nothing is selected. */
     object LiftSelection : FloatOp
+
+    /**
+     * The same lift, leaving the original behind — duplicate.
+     *
+     * A separate op rather than a flag on [LiftSelection] because it is a
+     * separate button and a separate thing to mean, and because the ops are
+     * what the undo history and the instruments are read in terms of.
+     */
+    object CopySelection : FloatOp
+
+    /**
+     * Mirror what is in the air, left-to-right ([across]) or top-to-bottom.
+     *
+     * **It lifts first if it has to.** A flip with a selection and nothing
+     * floating is the ordinary case — you draw half a face, select it, flip it
+     * — and a button that answered "lift it first" would be a button that does
+     * nothing the first time it is pressed. The lift and the mirror are one
+     * op because they are one press.
+     *
+     * The mirror is applied *before* whatever the user has already done, about
+     * the middle of the source region, so a float that has been dragged and
+     * turned flips about its own axis and stays where it is. Post-multiplying
+     * would mirror it about the middle of the page and throw it across the
+     * screen.
+     */
+    class Flip(val across: Boolean) : FloatOp
 
     /** Lift the whole active sheet. */
     object LiftLayer : FloatOp

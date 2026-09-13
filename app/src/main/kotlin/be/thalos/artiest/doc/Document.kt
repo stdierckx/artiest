@@ -1,6 +1,7 @@
 package be.thalos.artiest.doc
 
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Rect
 import be.thalos.artiest.engine.ink.Bounds
 import be.thalos.artiest.engine.ink.Stroke
@@ -539,6 +540,30 @@ class Document(
                 if (current != null) return false
                 val lifted = FloatingPixels.lift(layers.active, selection) ?: return false
                 floating = lifted
+                true
+            }
+
+            FloatOp.CopySelection -> {
+                if (current != null) return false
+                val lifted = FloatingPixels.lift(layers.active, selection, keepSource = true)
+                    ?: return false
+                floating = lifted
+                true
+            }
+
+            is FloatOp.Flip -> {
+                // Lifts first when it has to, so the button works the first
+                // time it is pressed. See `FloatOp.Flip`.
+                val float = current
+                    ?: FloatingPixels.lift(layers.active, selection)?.also { floating = it }
+                    ?: return false
+                val cx = float.sourceBounds.exactCenterX()
+                val cy = float.sourceBounds.exactCenterY()
+                // Replaced and not mutated: the render thread concatenates this
+                // instance every frame the float is on screen.
+                val next = Matrix(float.matrix)
+                if (op.across) next.preScale(-1f, 1f, cx, cy) else next.preScale(1f, -1f, cx, cy)
+                float.matrix = next
                 true
             }
 

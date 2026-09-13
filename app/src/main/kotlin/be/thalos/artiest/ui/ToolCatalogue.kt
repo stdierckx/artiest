@@ -64,8 +64,16 @@ object ToolCatalogue {
      * of them into `hard_eraser` on the way in, so a file written against 5
      * still opens — with a four-cell hole where its eraser size slider was.
      * See `docs/ui-space-plan.md`.
+     *
+     * 7: the **Selection** group, and the selection panel taken apart into the
+     * twenty-one buttons it is made of — three shapes, four combine modes,
+     * all/none/invert, move, copy, the two flips, sheet, paste, cancel, pick
+     * strokes, and the rubber's three modes. Nothing is removed: `marquee`,
+     * `selection` and `selection_panel` moved out of Draw and Canvas into the
+     * new group, which changes which *tab* they are listed under and nothing
+     * else. A reader that has cached version 6 keeps every id it believes in.
      */
-    const val VERSION = 6
+    const val VERSION = 7
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

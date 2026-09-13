@@ -25,7 +25,9 @@ class ChooserTabsTest {
     @Test
     fun `everything offers the groups and then brushes`() {
         assertEquals(
-            listOf("Edit", "Draw", "Canvas", "File", "Instruments", "Brushes"),
+            // Selection is the sixth, and it sits third because that is where
+            // the hand reaches for it. See `ToolGroup.SELECT`.
+            listOf("Edit", "Draw", "Selection", "Canvas", "File", "Instruments", "Brushes"),
             labels(CatalogueFilter.EVERYTHING, hasBrushes = true),
         )
     }

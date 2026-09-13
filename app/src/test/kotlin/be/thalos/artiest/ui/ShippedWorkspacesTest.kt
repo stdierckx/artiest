@@ -100,6 +100,38 @@ class ShippedWorkspacesTest {
     }
 
     @Test
+    fun `Inker offers the selection panel's buttons one at a time`() {
+        // The panel is twenty-odd buttons in one card and the tablet said so.
+        // Every one of them is a catalogue entry now, and this is the workspace
+        // that has to offer them: an inker picks a line they are not happy
+        // with, and copies, flips and rubs one back to a junction.
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.INKER))
+        for (item in listOf(
+            ToolItem.PICK_STROKES, ToolItem.MARQUEE_LASSO, ToolItem.SELECT_ADD,
+            ToolItem.SELECT_ALL, ToolItem.FLOAT_MOVE, ToolItem.FLOAT_COPY,
+            ToolItem.FLIP_ACROSS, ToolItem.FLIP_DOWN, ToolItem.FLOAT_PASTE,
+            ToolItem.ERASE_JUNCTION,
+        )) {
+            assertTrue(item in ws.filter, "${item.id} is not offered")
+        }
+        // And none of them is *placed*: a workspace that put twenty new buttons
+        // on the bars would have answered the report with a worse version of
+        // the thing being complained about.
+        assertFalse(ToolItem.FLOAT_COPY in ws.layout)
+        assertFalse(ToolItem.SELECT_ALL in ws.layout)
+    }
+
+    @Test
+    fun `Clean keeps the marquee it always offered`() {
+        // Selecting lived in Draw until the panel was taken apart. Clean
+        // filters to Draw and Edit, so without the name it would have lost a
+        // tool to a refactor, which `CatalogueFilter`'s header forbids.
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.CLEAN))
+        assertTrue(ToolItem.MARQUEE in ws.filter)
+        assertFalse(ToolItem.SELECT_ALL in ws.filter, "and none of the rest of the group")
+    }
+
+    @Test
     fun `Inker leans the pen before the line is drawn`() {
         // The one shipped workspace with anything in its defaults, and the one
         // number that separates inking from sketching. WorkspaceDefaults' KDoc

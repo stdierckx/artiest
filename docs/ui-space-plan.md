@@ -247,3 +247,59 @@ that, the four measurable halves of it, and where each stands:
 The colour panel is nine device-independent pixels short of the third and the
 number is left as it is rather than shaved to meet it: the next dp has to come
 off the disc, and the disc is already smaller than Krita's.
+
+## The selection panel, taken apart
+
+Asked for from the tablet, and it is the same complaint this document opens
+with, made about a different panel: *"Some panels, like the selection panel,
+have lots of buttons. Making it a bit overwhelming. Cool would be if the user
+could choose to add these buttons separately to a toolbar by himself. Maybe the
+tool popup needs a new category: selection."*
+
+That is exactly what the catalogue is for, so the answer is the mechanism the
+app already has rather than a new one: **every button in the panel is a
+catalogue entry.** Twenty-one of them, in a new `ToolGroup.SELECT` — three
+shapes, four combine modes, all/none/invert, move, copy, the two flips, sheet,
+paste, cancel, pick strokes, and the rubber's three modes.
+
+Three decisions inside that:
+
+- **Nothing is removed from the panel.** It is still the only thing that shows
+  the state of all of it at once, and somebody who wants the lot in one card
+  still has it. What changed is that anybody who uses three of these can put
+  those three on a bar and never open the card again.
+- **They are dumb one-slot buttons, not a pre-built "selection bar".** A bar the
+  user assembled out of the pieces they use is what the dock exists to make
+  possible; a strip somebody else arranged would be a second answer to the
+  question the dock already answers.
+- **The eraser's three modes went to Draw, not Selection.** The same report
+  said *"I dont get the eraser buttons on the selection"*, which is fair: they
+  are about the rubber. They stay in the panel — it is the panel that talks
+  about strokes, and there is nowhere else that does — but in the catalogue they
+  sit with the erasers, where somebody looking for them would look.
+
+`marquee`, `selection` and `selection_panel` moved out of Draw and Canvas into
+the new group. That changes which tab they are listed under and nothing else,
+but *Clean* filters to Draw and Edit, so it now names the marquee explicitly:
+a workspace quietly losing a tool because a group was split is the one thing
+`CatalogueFilter`'s header forbids.
+
+### Copy and flip
+
+Asked for in the same breath: *"we got move, but we dont have copy (or
+duplicate) for a selection. Also flip, would be nice."*
+
+Both are small because of a decision made long before them. `FloatingPixels`
+does not cut anything out — it leaves the sheet alone and *hides* the source
+region at draw time, writing the hole only at drop. So:
+
+- **Copy is one flag.** `keepSource` turns the hiding off, in the one method
+  that does it, and both the live float and the drop follow. Cancel is still
+  free, a paste is still one press of undo.
+- **Flip is one op with no new state.** The mirror goes on *before* whatever the
+  user has already done, about the middle of the source region, so a float that
+  has been dragged and turned flips about its own axis instead of being thrown
+  across the page. It lifts for itself when nothing is floating yet, because a
+  flip with something selected is the ordinary case and a button that did
+  nothing until you pressed Move first would be a button with a rule to
+  remember.

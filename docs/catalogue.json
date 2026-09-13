@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 6,
+  "version": 7,
   "cell_dp": 44,
   "groups": [
     {
@@ -10,6 +10,10 @@
     {
       "id": "draw",
       "label": "Draw"
+    },
+    {
+      "id": "select",
+      "label": "Selection"
     },
     {
       "id": "canvas",
@@ -89,6 +93,36 @@
       "turns": false
     },
     {
+      "id": "erase_junction",
+      "label": "Erase to the junction",
+      "short": "Junct",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "erase_part",
+      "label": "Erase what it touches",
+      "short": "Part",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "erase_whole",
+      "label": "Erase whole stroke",
+      "short": "Whole",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
       "id": "export",
       "label": "Export PNG",
       "short": "Export",
@@ -103,6 +137,76 @@
       "label": "Fit to screen",
       "short": "Fit",
       "group": "canvas",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "flip_across",
+      "label": "Flip",
+      "short": "Flip",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "flip_down",
+      "label": "Flip down",
+      "short": "Down",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "float_cancel",
+      "label": "Cancel the move",
+      "short": "Cancel",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "float_copy",
+      "label": "Copy selection",
+      "short": "Copy",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "float_move",
+      "label": "Move selection",
+      "short": "Move",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "float_paste",
+      "label": "Paste",
+      "short": "Paste",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "float_sheet",
+      "label": "Move the sheet",
+      "short": "Sheet",
+      "group": "select",
       "kind": "button",
       "cells_wide": 1,
       "cells_tall": 1,
@@ -202,7 +306,37 @@
       "id": "marquee",
       "label": "Select",
       "short": "Select",
-      "group": "draw",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "marquee_lasso",
+      "label": "Free draw",
+      "short": "Lasso",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "marquee_oval",
+      "label": "Ellipse",
+      "short": "Oval",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "marquee_rect",
+      "label": "Rectangle",
+      "short": "Rect",
+      "group": "select",
       "kind": "toggle",
       "cells_wide": 1,
       "cells_tall": 1,
@@ -239,6 +373,16 @@
       "turns": false
     },
     {
+      "id": "pick_strokes",
+      "label": "Pick strokes",
+      "short": "Pick",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
       "id": "projects",
       "label": "Drawings",
       "short": "Files",
@@ -259,10 +403,80 @@
       "turns": false
     },
     {
+      "id": "select_add",
+      "label": "Add to selection",
+      "short": "Add",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_all",
+      "label": "Select all",
+      "short": "All",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_invert",
+      "label": "Invert selection",
+      "short": "Invert",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_new",
+      "label": "New selection",
+      "short": "New",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_none",
+      "label": "Select none",
+      "short": "None",
+      "group": "select",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_overlap",
+      "label": "Overlap",
+      "short": "Lap",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "select_subtract",
+      "label": "Subtract from selection",
+      "short": "Sub",
+      "group": "select",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
       "id": "selection",
       "label": "Selection",
       "short": "Select",
-      "group": "canvas",
+      "group": "select",
       "kind": "button",
       "cells_wide": 1,
       "cells_tall": 1,
@@ -272,7 +486,7 @@
       "id": "selection_panel",
       "label": "Selection panel",
       "short": "Select",
-      "group": "canvas",
+      "group": "select",
       "kind": "panel",
       "cells_wide": 6,
       "cells_tall": 8,

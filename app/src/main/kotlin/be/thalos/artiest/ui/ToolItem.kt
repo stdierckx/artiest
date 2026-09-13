@@ -286,7 +286,7 @@ enum class ToolItem(
      * applies to a marquee word for word, so the pen's own path is the one that
      * forks.
      */
-    MARQUEE("marquee", "Select", "Select", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+    MARQUEE("marquee", "Select", "Select", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
 
     /**
      * The selection panel: shape, what a gesture does to what is already
@@ -296,7 +296,7 @@ enum class ToolItem(
      * shapes, four combine modes and three commands is ten controls; a toolbar
      * that carried them would be a toolbar with nothing else on it.
      */
-    SELECTION("selection", "Selection", "Select", 1, ToolGroup.CANVAS),
+    SELECTION("selection", "Selection", "Select", 1, ToolGroup.SELECT),
 
     /**
      * The same panel, kept. Six cells by eight, which is 264 by 352dp.
@@ -309,9 +309,102 @@ enum class ToolItem(
      * itself the moment the pen touches the page.
      */
     SELECTION_PANEL(
-        "selection_panel", "Selection panel", "Select", 6, ToolGroup.CANVAS,
+        "selection_panel", "Selection panel", "Select", 6, ToolGroup.SELECT,
         ToolKind.PANEL, cellsTall = 8,
     ),
+
+    /**
+     * ## The selection panel, taken apart
+     *
+     * The panel above is twenty-odd buttons in one card, and the report that
+     * produced these entries said so: *"Some panels, like the selection panel,
+     * have lots of buttons. Making it a bit overwhelming. Cool would be if the
+     * user could choose to add these buttons separately to a toolbar by
+     * himself."*
+     *
+     * So every button in it is also a catalogue entry. Nothing is removed from
+     * the panel — somebody who wants the lot in one place still has it, and the
+     * panel is still the only thing that shows the *state* of all of it at once
+     * — but anybody who uses three of them can put those three on a bar and
+     * never open the card again.
+     *
+     * The entries below are deliberately dumb one-slot buttons rather than a
+     * clever "selection bar" item. A bar the user assembled out of the pieces
+     * they use is the thing this app's whole dock exists to make possible, and
+     * a pre-built strip would be a second answer to the question the dock
+     * already answers.
+     *
+     * They share the panel's icons on purpose: a button you pulled out of a
+     * panel should be the *same picture* as the one you pulled it from, or
+     * nobody would recognise it on the bar.
+     */
+    PICK_STROKES("pick_strokes", "Pick strokes", "Pick", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+
+    MARQUEE_RECT("marquee_rect", "Rectangle", "Rect", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+    MARQUEE_OVAL("marquee_oval", "Ellipse", "Oval", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+    MARQUEE_LASSO("marquee_lasso", "Free draw", "Lasso", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+
+    /**
+     * The four combine modes. A toggle each, because between them they are one
+     * setting — the panel shows that by lighting one of four, and a bar shows
+     * it the same way.
+     */
+    SELECT_NEW("select_new", "New selection", "New", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+    SELECT_ADD("select_add", "Add to selection", "Add", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+    SELECT_SUBTRACT(
+        "select_subtract", "Subtract from selection", "Sub", 1, ToolGroup.SELECT, ToolKind.TOGGLE,
+    ),
+    SELECT_OVERLAP("select_overlap", "Overlap", "Lap", 1, ToolGroup.SELECT, ToolKind.TOGGLE),
+
+    SELECT_ALL("select_all", "Select all", "All", 1, ToolGroup.SELECT),
+    SELECT_NONE("select_none", "Select none", "None", 1, ToolGroup.SELECT),
+    SELECT_INVERT("select_invert", "Invert selection", "Invert", 1, ToolGroup.SELECT),
+
+    FLOAT_MOVE("float_move", "Move selection", "Move", 1, ToolGroup.SELECT),
+
+    /**
+     * Duplicate: the same lift, leaving the original where it is.
+     *
+     * Asked for from the tablet — *"we got move, but we dont have copy (or
+     * duplicate) for a selection"* — and it is one flag in the document. See
+     * `FloatingPixels.keepSource`.
+     */
+    FLOAT_COPY("float_copy", "Copy selection", "Copy", 1, ToolGroup.SELECT),
+
+    /**
+     * Mirror what is in the air, or what is selected — the op lifts for itself.
+     *
+     * Two entries and not one with a mode, because a mirror has no state to
+     * remember: you press the one you meant and the pixels turn. A single
+     * button with an axis setting would be a thing to set before a thing to
+     * press.
+     */
+    FLIP_ACROSS("flip_across", "Flip", "Flip", 1, ToolGroup.SELECT),
+    FLIP_DOWN("flip_down", "Flip down", "Down", 1, ToolGroup.SELECT),
+
+    FLOAT_SHEET("float_sheet", "Move the sheet", "Sheet", 1, ToolGroup.SELECT),
+    FLOAT_PASTE("float_paste", "Paste", "Paste", 1, ToolGroup.SELECT),
+    FLOAT_CANCEL("float_cancel", "Cancel the move", "Cancel", 1, ToolGroup.SELECT),
+
+    /**
+     * The rubber's three modes, in **Draw** and not in Selection.
+     *
+     * They live in the selection *panel* because that is the panel that talks
+     * about strokes, and the same tablet report that asked for these entries
+     * said *"I dont get the eraser buttons on the selection"* — which is a fair
+     * thing not to get. They are about the eraser. So the catalogue puts them
+     * where the erasers are, and anybody who finds them surprising in the panel
+     * can put the one they use on a bar beside the rubber and never look at
+     * that row again.
+     *
+     * They do nothing on a sheet that does not keep its strokes, which is why
+     * the panel only shows the row on one that does.
+     */
+    ERASE_WHOLE("erase_whole", "Erase whole stroke", "Whole", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+    ERASE_JUNCTION(
+        "erase_junction", "Erase to the junction", "Junct", 1, ToolGroup.DRAW, ToolKind.TOGGLE,
+    ),
+    ERASE_PART("erase_part", "Erase what it touches", "Part", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
      * The colour wheel as a control you can keep, rather than a popup you
@@ -494,6 +587,16 @@ enum class ToolItem(
 enum class ToolGroup(val label: String) {
     EDIT("Edit"),
     DRAW("Draw"),
+
+    /**
+     * Selecting, and everything done to what is selected.
+     *
+     * Third because it is what a hand reaches for third, and its own group
+     * because it had outgrown Canvas: the panel's twenty-odd buttons are all
+     * catalogue entries now, and twenty of them inside Canvas would have buried
+     * Layers and the zoom controls.
+     */
+    SELECT("Selection"),
     CANVAS("Canvas"),
     FILE("File"),
     DEBUG("Instruments"),

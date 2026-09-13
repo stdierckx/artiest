@@ -1,12 +1,12 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 6,
+  "catalogue": 7,
   "id": "clean",
   "name": "Clean",
   "description": "The paper, and four controls in the corner.",
   "author": "artiest",
   "revision": 1,
-  "filter": {"groups": ["edit", "draw"], "hide": [], "show": []},
+  "filter": {"groups": ["edit", "draw"], "hide": [], "show": ["marquee"]},
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {

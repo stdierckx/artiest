@@ -110,8 +110,12 @@ object ShippedWorkspaces {
                 ),
             ),
         ),
+        // Selection joins Draw and Edit rather than being put back by name:
+        // selecting was inside Draw until the panel was taken apart, so leaving
+        // it out here would quietly remove the marquee from a workspace that
+        // has always offered it.
         filter = CatalogueFilter
-            .of(ToolGroup.DRAW, ToolGroup.EDIT)
+            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT)
             .offering(ToolItem.LAYERS)
             .offering(ToolItem.LAYERS_PANEL)
             .offering(ToolItem.FIT),
@@ -214,12 +218,17 @@ object ShippedWorkspaces {
                 ),
             ),
         ),
-        // Draw, Edit and Canvas: an inker works on the drawing, and the one
-        // thing outside those three that inking ends in is a finished picture
-        // leaving the app. Drawings is offered whatever this says — see
+        // Draw, Edit, Selection and Canvas: an inker works on the drawing, and
+        // the one thing outside those four that inking ends in is a finished
+        // picture leaving the app. Drawings is offered whatever this says — see
         // [ToolItem.essential].
+        //
+        // Selection is its own group now that the panel's buttons are catalogue
+        // entries, and this is the workspace that needs them most: on an ink
+        // sheet the marquee picks *strokes*, and picking a line you are not
+        // happy with is half of what inking is.
         filter = CatalogueFilter
-            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.CANVAS)
+            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT, ToolGroup.CANVAS)
             .offering(ToolItem.EXPORT),
         defaults = WorkspaceDefaults(
             brush = BrushPreset.PEN.id,
@@ -286,7 +295,14 @@ object ShippedWorkspaces {
                 ),
             ),
         ),
-        filter = CatalogueFilter.of(ToolGroup.DRAW, ToolGroup.EDIT),
+        // Draw and Edit, and the marquee by name. Clean does not want the
+        // twenty buttons the Selection group now holds — that is the whole
+        // point of its name — but the marquee used to sit inside Draw, and a
+        // workspace quietly losing a tool because a group was split is the one
+        // thing `CatalogueFilter`'s header says must not happen.
+        filter = CatalogueFilter
+            .of(ToolGroup.DRAW, ToolGroup.EDIT)
+            .offering(ToolItem.MARQUEE),
     )
 
     /**

@@ -2478,6 +2478,137 @@ private fun ToolSlot(
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
         )
+        // ---- the selection panel, taken apart ------------------------------
+        //
+        // Each of these is the panel's own button on a bar of its own. They
+        // share the panel's state, its icons and its enabling rules, because
+        // they are the same controls -- see `ToolItem.PICK_STROKES` for why
+        // they exist at all.
+
+        ToolItem.PICK_STROKES -> IconToolButton(
+            ToolIcons.addVector,
+            item.label,
+            { onPicking(picking != true) },
+            selected = picking == true,
+            // Null means the sheet keeps no strokes, so there is nothing to
+            // pick. Disabled rather than hidden: a button that vanished when
+            // the active sheet changed would be a hole in the bar.
+            enabled = picking != null,
+        )
+
+        // Choosing a shape turns selecting on, which is what the panel does
+        // too: nobody picks "ellipse" meaning "and keep drawing".
+        ToolItem.MARQUEE_RECT -> IconToolButton(
+            ToolIcons.marquee,
+            item.label,
+            { onMarqueeShape(MarqueeShape.RECTANGLE); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.RECTANGLE,
+        )
+        ToolItem.MARQUEE_OVAL -> IconToolButton(
+            ToolIcons.marqueeOval,
+            item.label,
+            { onMarqueeShape(MarqueeShape.ELLIPSE); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.ELLIPSE,
+        )
+        ToolItem.MARQUEE_LASSO -> IconToolButton(
+            ToolIcons.marqueeLasso,
+            item.label,
+            { onMarqueeShape(MarqueeShape.LASSO); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.LASSO,
+        )
+
+        ToolItem.SELECT_NEW -> IconToolButton(
+            ToolIcons.selectNew,
+            item.label,
+            { onMarqueeMode(SelectMode.NEW) },
+            selected = marqueeMode == SelectMode.NEW,
+        )
+        ToolItem.SELECT_ADD -> IconToolButton(
+            ToolIcons.selectAdd,
+            item.label,
+            { onMarqueeMode(SelectMode.ADD) },
+            selected = marqueeMode == SelectMode.ADD,
+        )
+        ToolItem.SELECT_SUBTRACT -> IconToolButton(
+            ToolIcons.selectSubtract,
+            item.label,
+            { onMarqueeMode(SelectMode.SUBTRACT) },
+            selected = marqueeMode == SelectMode.SUBTRACT,
+        )
+        ToolItem.SELECT_OVERLAP -> IconToolButton(
+            ToolIcons.selectIntersect,
+            item.label,
+            { onMarqueeMode(SelectMode.INTERSECT) },
+            selected = marqueeMode == SelectMode.INTERSECT,
+        )
+
+        ToolItem.SELECT_ALL -> IconToolButton(
+            ToolIcons.selectAll, item.label, { onSelectOp(SelectOp.All) },
+        )
+        ToolItem.SELECT_NONE -> IconToolButton(
+            ToolIcons.selectNone, item.label, { onSelectOp(SelectOp.None) },
+            enabled = hasSelection,
+        )
+        ToolItem.SELECT_INVERT -> IconToolButton(
+            ToolIcons.selectInvert, item.label, { onSelectOp(SelectOp.Invert) },
+            enabled = hasSelection,
+        )
+
+        ToolItem.FLOAT_MOVE -> IconToolButton(
+            ToolIcons.moveFloat, item.label, { onFloatOp(FloatOp.LiftSelection) },
+            enabled = hasSelection && !floating,
+        )
+        ToolItem.FLOAT_COPY -> IconToolButton(
+            ToolIcons.copyFloat, item.label, { onFloatOp(FloatOp.CopySelection) },
+            enabled = hasSelection && !floating,
+        )
+        // Live with a selection or a float, because the op lifts for itself.
+        ToolItem.FLIP_ACROSS -> IconToolButton(
+            ToolIcons.flipAcross, item.label, { onFloatOp(FloatOp.Flip(across = true)) },
+            enabled = hasSelection || floating,
+        )
+        ToolItem.FLIP_DOWN -> IconToolButton(
+            ToolIcons.flipDown, item.label, { onFloatOp(FloatOp.Flip(across = false)) },
+            enabled = hasSelection || floating,
+        )
+        ToolItem.FLOAT_SHEET -> IconToolButton(
+            ToolIcons.moveSheet, item.label, { onFloatOp(FloatOp.LiftLayer) },
+            enabled = !floating,
+        )
+        ToolItem.FLOAT_PASTE -> IconToolButton(
+            ToolIcons.dropFloat, item.label, { onFloatOp(FloatOp.Drop) },
+            enabled = floating,
+        )
+        ToolItem.FLOAT_CANCEL -> IconToolButton(
+            ToolIcons.close, item.label, { onFloatOp(FloatOp.Cancel) },
+            enabled = floating,
+        )
+
+        // The rubber's three modes. In Draw rather than Selection -- see
+        // `ToolItem.ERASE_WHOLE`. Dimmed on a sheet that keeps no strokes,
+        // where there is no stroke to take back to a junction.
+        ToolItem.ERASE_WHOLE -> IconToolButton(
+            ToolIcons.eraser,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.WHOLE) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.WHOLE,
+            enabled = picking != null,
+        )
+        ToolItem.ERASE_JUNCTION -> IconToolButton(
+            ToolIcons.selectIntersect,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.TO_JUNCTION) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.TO_JUNCTION,
+            enabled = picking != null,
+        )
+        ToolItem.ERASE_PART -> IconToolButton(
+            ToolIcons.softEraser,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.PART) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.PART,
+            enabled = picking != null,
+        )
+
         ToolItem.GUIDES -> GuidesButton(
             info = guideInfo,
             arranging = arranging,

@@ -208,7 +208,15 @@ private fun SelectionPanel(
                 // and this card would be sitting over the pixels it moves.
                 onFloatOp = { op ->
                     onFloatOp(op)
-                    if (op === FloatOp.LiftSelection || op === FloatOp.LiftLayer) onDismiss()
+                    // Anything that puts pixels in the air closes the panel:
+                    // the transform box is on the canvas and this card would be
+                    // sitting over the pixels it moves. A flip counts, because
+                    // it lifts for itself when nothing is floating yet.
+                    if (op === FloatOp.LiftSelection || op === FloatOp.LiftLayer ||
+                        op === FloatOp.CopySelection || op is FloatOp.Flip
+                    ) {
+                        onDismiss()
+                    }
                 },
                 onFixate = onFixate,
             )
@@ -483,12 +491,33 @@ private fun SelectionBody(
             Act(ToolIcons.moveFloat, "Move", false, enabled = hasSelection && !floating) {
                 onFloatOp(FloatOp.LiftSelection)
             }
+            // Beside Move because it is Move with one thing changed, and that
+            // is exactly what it is in the document too -- one flag on the
+            // lift. See `FloatingPixels.keepSource`.
+            Act(ToolIcons.copyFloat, "Copy", false, enabled = hasSelection && !floating) {
+                onFloatOp(FloatOp.CopySelection)
+            }
             Act(ToolIcons.moveSheet, "Sheet", false, enabled = !floating) {
                 onFloatOp(FloatOp.LiftLayer)
             }
             Act(ToolIcons.dropFloat, "Paste", false, enabled = floating) {
                 onFloatOp(FloatOp.Drop)
             }
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Live with a selection *or* a float, because the op lifts for
+            // itself: a flip with something selected and nothing in the air is
+            // the ordinary case, and a button that had to be pressed after
+            // Move would be a button with a rule to remember.
+            Act(
+                ToolIcons.flipAcross, "Flip", false,
+                enabled = hasSelection || floating,
+            ) { onFloatOp(FloatOp.Flip(across = true)) }
+            Act(
+                ToolIcons.flipDown, "Flip down", false,
+                enabled = hasSelection || floating,
+            ) { onFloatOp(FloatOp.Flip(across = false)) }
             // "Cancel" and not "Undo": there is a real Undo on the top bar,
             // and this is not it -- nothing has been written, so there is
             // nothing in the history to walk back.

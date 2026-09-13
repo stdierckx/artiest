@@ -43,6 +43,23 @@ class ToolIconsTest {
         setOf("brushes", "brush_shelf"),
         setOf("brushes", "brush"),
         setOf("brush_shelf", "brush"),
+        // The selection panel taken apart. Each of these is a button that was
+        // already drawn that way *inside* the panel, and a control pulled out
+        // onto a bar has to be the same picture as the one it was pulled from
+        // or nobody recognises it. See `ToolItem.PICK_STROKES`.
+        //
+        // - the marquee toggle and the rectangle shape: choosing the rectangle
+        //   also turns selecting on, so on a bar they are very nearly the same
+        //   press, and the three shapes differ from *each other*, which is the
+        //   distinction that has to survive
+        // - overlap and erase-to-junction are both "where two things cross"
+        // - the two erasers already have faces that tell them apart, and the
+        //   modes borrow them: whole-stroke is the hard rubber's, part is the
+        //   soft one's
+        setOf("marquee", "marquee_rect"),
+        setOf("select_overlap", "erase_junction"),
+        setOf("hard_eraser", "erase_whole"),
+        setOf("soft_eraser", "erase_part"),
     )
 
     @Test

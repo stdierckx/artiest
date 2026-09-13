@@ -76,6 +76,16 @@ class FloatingPixelsTest {
 
     private fun translated(dx: Float, dy: Float) = Matrix().apply { setTranslate(dx, dy) }
 
+    /** A solid block on the active sheet, for the tests that need a shape with a side. */
+    private fun block(document: Document, l: Int, t: Int, r: Int, b: Int) {
+        document.layer.write { canvas ->
+            canvas.drawRect(
+                l.toFloat(), t.toFloat(), r.toFloat(), b.toFloat(),
+                Paint().apply { color = Color.BLACK },
+            )
+        }
+    }
+
     // --- the lift -----------------------------------------------------------
 
     @Test
@@ -142,6 +152,135 @@ class FloatingPixelsTest {
         val float = assertNotNull(document.floating)
         assertEquals(w, float.sourceBounds.width())
         assertNull(float.mask, "a whole-sheet lift has no stencil")
+    }
+
+    // --- the copy -----------------------------------------------------------
+
+    @Test
+    fun `a copy leaves the original where it was`() {
+        // Duplicate, and the whole of it is one flag. The lift already leaves
+        // the sheet alone; a copy is the same lift that never punches the hole.
+        val document = document()
+        inked(document)
+        selectRect(document, 10f, 10f, 20f, 20f)
+
+        assertTrue(document.applyFloat(FloatOp.CopySelection))
+        assertTrue(assertNotNull(document.floating).keepSource)
+        document.applyFloat(FloatOp.Move(translated(24f, 0f)))
+        assertTrue(document.applyFloat(FloatOp.Drop))
+
+        assertEquals(Color.BLACK, pixel(document, 15, 15), "the original stayed")
+        assertEquals(Color.BLACK, pixel(document, 39, 15), "and the copy landed")
+    }
+
+    @Test
+    fun `a copy with nothing selected is refused`() {
+        val document = document()
+        inked(document)
+        assertFalse(document.applyFloat(FloatOp.CopySelection))
+        assertNull(document.floating)
+    }
+
+    @Test
+    fun `a copy is still one press of undo`() {
+        // A block rather than a full sheet, so "the copy is gone" is a real
+        // reading: on an inked sheet every pixel is black already and the
+        // assertion would pass with the copy still sitting there.
+        val document = document()
+        block(document, 10, 10, 20, 20)
+        selectRect(document, 10f, 10f, 20f, 20f)
+        document.applyFloat(FloatOp.CopySelection)
+        document.applyFloat(FloatOp.Move(translated(24f, 0f)))
+        document.applyFloat(FloatOp.Drop)
+
+        assertEquals(1, document.undoDepth)
+        assertTrue(document.applyUndo())
+        assertEquals(0, Color.alpha(pixel(document, 39, 15)), "the copy is gone")
+        assertEquals(Color.BLACK, pixel(document, 15, 15), "the original never moved")
+    }
+
+    // --- the flip -----------------------------------------------------------
+
+    @Test
+    fun `a flip mirrors the pixels and leaves them where they were`() {
+        // A bar down the left of the selection comes back down the right,
+        // inside the same rectangle. Mirroring about the middle of the *page*
+        // instead would throw it across the drawing, which is the failure this
+        // is written against.
+        val document = document()
+        block(document, 10, 10, 14, 30)
+        selectRect(document, 10f, 10f, 30f, 30f)
+
+        assertTrue(document.applyFloat(FloatOp.Flip(across = true)))
+        assertTrue(document.applyFloat(FloatOp.Drop))
+
+        assertEquals(0, Color.alpha(pixel(document, 12, 20)), "the left is empty")
+        assertEquals(Color.BLACK, pixel(document, 28, 20), "and the bar is on the right")
+    }
+
+    @Test
+    fun `a flip down mirrors the other way`() {
+        val document = document()
+        block(document, 10, 10, 30, 14)
+        selectRect(document, 10f, 10f, 30f, 30f)
+
+        document.applyFloat(FloatOp.Flip(across = false))
+        document.applyFloat(FloatOp.Drop)
+
+        assertEquals(0, Color.alpha(pixel(document, 20, 12)), "the top is empty")
+        assertEquals(Color.BLACK, pixel(document, 20, 28), "and the bar is at the bottom")
+    }
+
+    @Test
+    fun `flipping twice is where you started`() {
+        val document = document()
+        block(document, 10, 10, 14, 30)
+        selectRect(document, 10f, 10f, 30f, 30f)
+
+        document.applyFloat(FloatOp.Flip(across = true))
+        document.applyFloat(FloatOp.Flip(across = true))
+        document.applyFloat(FloatOp.Drop)
+
+        assertEquals(Color.BLACK, pixel(document, 12, 20), "back on the left")
+        assertEquals(0, Color.alpha(pixel(document, 28, 20)), "and nothing on the right")
+    }
+
+    @Test
+    fun `a flip lifts for itself, and only once`() {
+        val document = document()
+        inked(document)
+        selectRect(document, 10f, 10f, 30f, 30f)
+
+        assertNull(document.floating)
+        assertTrue(document.applyFloat(FloatOp.Flip(across = true)))
+        val float = assertNotNull(document.floating)
+        assertTrue(document.applyFloat(FloatOp.Flip(across = false)))
+        assertTrue(float === document.floating, "the second flip turned the same pixels")
+    }
+
+    @Test
+    fun `a flip with nothing selected and nothing floating is refused`() {
+        val document = document()
+        inked(document)
+        assertFalse(document.applyFloat(FloatOp.Flip(across = true)))
+        assertNull(document.floating)
+    }
+
+    @Test
+    fun `a flip after a drag turns the pixels where they are now`() {
+        // The mirror goes on *before* what the user has already done, so a
+        // float that has been dragged flips about its own axis rather than
+        // jumping back to where it was lifted from.
+        val document = document()
+        block(document, 10, 10, 14, 30)
+        selectRect(document, 10f, 10f, 30f, 30f)
+        document.applyFloat(FloatOp.LiftSelection)
+        document.applyFloat(FloatOp.Move(translated(20f, 0f)))
+        document.applyFloat(FloatOp.Flip(across = true))
+        document.applyFloat(FloatOp.Drop)
+
+        assertEquals(Color.BLACK, pixel(document, 48, 20), "the bar moved and mirrored")
+        assertEquals(0, Color.alpha(pixel(document, 32, 20)), "and left its old side empty")
     }
 
     // --- the cancel ---------------------------------------------------------

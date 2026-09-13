@@ -1,12 +1,12 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 6,
+  "catalogue": 7,
   "id": "inker",
   "name": "Inker",
   "description": "A hard edge, a steady hand, and the pen picks lines too.",
   "author": "artiest",
   "revision": 1,
-  "filter": {"groups": ["edit", "draw", "canvas"], "hide": [], "show": ["export"]},
+  "filter": {"groups": ["edit", "draw", "select", "canvas"], "hide": [], "show": ["export"]},
   "defaults": {"brush": "pen", "shelf": [], "stabilisation": 0.55},
   "surfaces": [
     {

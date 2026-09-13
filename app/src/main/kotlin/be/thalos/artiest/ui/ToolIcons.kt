@@ -58,6 +58,31 @@ object ToolIcons {
         ToolItem.SELECTION -> selectionPanel
         ToolItem.SELECTION_PANEL -> selectionPanel
         ToolItem.LAYERS_PANEL -> layers
+
+        // The panel, taken apart. Every one of these is the picture the panel
+        // draws for the same button: a control pulled out onto a bar has to be
+        // recognisable as the one it was pulled from.
+        ToolItem.PICK_STROKES -> addVector
+        ToolItem.MARQUEE_RECT -> marquee
+        ToolItem.MARQUEE_OVAL -> marqueeOval
+        ToolItem.MARQUEE_LASSO -> marqueeLasso
+        ToolItem.SELECT_NEW -> selectNew
+        ToolItem.SELECT_ADD -> selectAdd
+        ToolItem.SELECT_SUBTRACT -> selectSubtract
+        ToolItem.SELECT_OVERLAP -> selectIntersect
+        ToolItem.SELECT_ALL -> selectAll
+        ToolItem.SELECT_NONE -> selectNone
+        ToolItem.SELECT_INVERT -> selectInvert
+        ToolItem.FLOAT_MOVE -> moveFloat
+        ToolItem.FLOAT_COPY -> copyFloat
+        ToolItem.FLIP_ACROSS -> flipAcross
+        ToolItem.FLIP_DOWN -> flipDown
+        ToolItem.FLOAT_SHEET -> moveSheet
+        ToolItem.FLOAT_PASTE -> dropFloat
+        ToolItem.FLOAT_CANCEL -> close
+        ToolItem.ERASE_WHOLE -> eraser
+        ToolItem.ERASE_JUNCTION -> selectIntersect
+        ToolItem.ERASE_PART -> softEraser
         ToolItem.GUIDES -> guides
         ToolItem.GUIDES_PANEL -> guides
         // The swatch shows the ink. A palette symbol beside it would be a label
@@ -866,6 +891,54 @@ object ToolIcons {
                 moveTo(12f, 2.8f); lineTo(12f, 14.4f)
                 moveTo(7.6f, 10.0f); lineTo(12f, 14.4f); lineTo(16.4f, 10.0f)
                 moveTo(3.4f, 14.6f); lineTo(3.4f, 20.6f); lineTo(20.6f, 20.6f); lineTo(20.6f, 14.6f)
+            }
+        }
+    }
+
+    /**
+     * The selection staying put, and a copy of it lifted off.
+     *
+     * Dashed for the thing left behind and solid for the thing in your hand,
+     * which is the same vocabulary the marquee and the transform box already
+     * use: ants mean a region, a solid frame means pixels that are moving.
+     */
+    val copyFloat: ImageVector by lazy {
+        icon("copy-float") {
+            dashedBox(2.6f, 2.6f, 13.6f, 13.6f)
+            stroke { rect(9.6f, 9.6f, 21.4f, 21.4f) }
+        }
+    }
+
+    /**
+     * Mirror left to right: an axis with a solid arrow one side and a hollow
+     * one the other.
+     *
+     * Solid and hollow rather than two identical shapes, because two identical
+     * shapes about a line is a picture of *symmetry* and this is a picture of
+     * one thing **becoming** its reflection. [flipDown] is the same glyph
+     * turned a quarter, which is the point: they are one idea on two axes.
+     */
+    val flipAcross: ImageVector by lazy {
+        icon("flip-across") {
+            stroke { moveTo(12f, 2.4f); lineTo(12f, 21.6f) }
+            fill {
+                moveTo(9.4f, 5.6f); lineTo(9.4f, 18.4f); lineTo(2.8f, 12f); close()
+            }
+            stroke {
+                moveTo(14.6f, 5.6f); lineTo(14.6f, 18.4f); lineTo(21.2f, 12f); close()
+            }
+        }
+    }
+
+    /** Mirror top to bottom. [flipAcross]'s glyph, turned a quarter. */
+    val flipDown: ImageVector by lazy {
+        icon("flip-down") {
+            stroke { moveTo(2.4f, 12f); lineTo(21.6f, 12f) }
+            fill {
+                moveTo(5.6f, 9.4f); lineTo(18.4f, 9.4f); lineTo(12f, 2.8f); close()
+            }
+            stroke {
+                moveTo(5.6f, 14.6f); lineTo(18.4f, 14.6f); lineTo(12f, 21.2f); close()
             }
         }
     }
