@@ -1834,3 +1834,33 @@ Run against the build before the fix it reproduces the report exactly — the in
 scales, the guides do not. Run against the build after it, the rays, the arcs
 and the drawing move together, through a spread, a squeeze and a 35-degree
 twist.
+
+### "Two finger tap undo — most artists have muscle memory doing it"
+
+Drawn from the same session and the same tool. A line goes wrong, the hand
+already on the glass taps twice-fingered, and the line is gone without the eye
+leaving the paper.
+
+`TwoFingerTap` in `:engine` is the recogniser and `InkSurfaceView.undoFromTap`
+is the policy. Two things in it are not obvious:
+
+- **It puts the transform back.** A tap is two fingers landing and leaving, and
+  the solver has been folding their wobble into a pan the whole time. Three
+  undos in a row and the drawing has walked across the screen.
+- **It does not call `undo()`.** That method abandons the open stroke, and this
+  one runs *inside* the router's own dispatch — abandoning there would send a
+  second decision through the sink while the first is still being handled.
+  There is no stroke to abandon anyway: a gesture and a pen stroke cannot
+  overlap.
+
+**The two-finger double tap that fitted the canvas is retired**, and it had to
+be: a double tap starts with a tap, so every fit would have undone a stroke on
+the way in. The choice is not close. Undoing is what a hand does mid-drawing,
+several times a minute; fitting is done between drawings and has a button. And
+**taps come in runs** — three strokes wrong is three taps as fast as the hand
+can make them, which is exactly the input a double-tap policy reads as "fit the
+canvas". Any scheme that keeps both breaks the case the gesture exists for.
+
+Checked on the DTH-A116 with `tools/pinch.sh`: one stroke drawn and one tap
+takes it off; two strokes drawn and two taps in a run take both; a pinch in and
+back out moves nothing but the canvas.

@@ -48,7 +48,7 @@ import be.thalos.artiest.engine.input.PenSample
 import be.thalos.artiest.engine.input.PredictionGate
 import be.thalos.artiest.engine.input.RejectionCounters
 import be.thalos.artiest.engine.input.Stabilizer
-import be.thalos.artiest.engine.input.TwoFingerDoubleTap
+import be.thalos.artiest.engine.input.TwoFingerTap
 import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.ink.DabRasterizer
 import be.thalos.artiest.ink.GrainTexture
@@ -2657,6 +2657,42 @@ class InkSurfaceView(
     }
 
     /**
+     * Called after a two-finger tap has undone something, so the chrome can
+     * catch up. See [undoFromTap].
+     *
+     * A callback for [onTransformChanged]'s reason: this class is the render
+     * path and knows nothing about Compose. The undo *button* bumps the same
+     * counter in the activity, and an undo that arrived from the glass has to
+     * look exactly like one that arrived from the bar.
+     */
+    var onCanvasUndo: (() -> Unit)? = null
+
+    /**
+     * Undo, because two fingers tapped the paper.
+     *
+     * **Not [undo]**, and the missing line is `router.abandon()`. There is no
+     * stroke to abandon by construction — a gesture and a pen stroke cannot
+     * overlap, that is `StrokeExclusivity`'s whole job — and calling it from
+     * here would be re-entrant: this runs inside `onTouchEvent`, one frame
+     * deep in the router's own dispatch. Abandoning from inside a dispatch
+     * would send a second decision through the sink while the first is still
+     * being handled.
+     *
+     * The transform goes back to where the gesture found it. A tap is two
+     * fingers landing and leaving, and the solver has been folding their
+     * wobble into a pan the whole time — a few pixels each tap, always in the
+     * direction the hand happens to roll. Undo three strokes and the drawing
+     * has walked across the screen. Putting it back is one assignment and it is
+     * what makes the gesture feel like a button rather than a nudge.
+     */
+    private fun undoFromTap() {
+        applyTransform(gestures.transformAtBegin)
+        document.requestUndo()
+        redrawDry()
+        onCanvasUndo?.invoke()
+    }
+
+    /**
      * Change what is selected, and redraw.
      *
      * The same three lines as [clear] and [undo], and the open stroke is
@@ -3028,13 +3064,13 @@ class InkSurfaceView(
 
         private val gate = PredictionGate()
 
-        /** Two fingers down and up twice puts the canvas back. */
-        private val doubleTap = TwoFingerDoubleTap()
+        /** Two fingers down and straight up takes the last stroke back. */
+        private val tap = TwoFingerTap()
 
-        /** When the current gesture opened, for [doubleTap]'s tap duration. */
+        /** When the current gesture opened, for [tap]'s duration. */
         private var gestureBeganNanos = 0L
 
-        /** Whether [doubleTap] has been given this gesture's first centroid. */
+        /** Whether [tap] has been given this gesture's first centroid. */
         private var tapPrimed = false
 
         /**
@@ -3609,21 +3645,21 @@ class InkSurfaceView(
             // measured from (0, 0) and every tap would look like a fling across
             // the whole screen.
             if (tapPrimed) {
-                doubleTap.move(count, cx, cy)
+                tap.move(count, cx, cy)
             } else {
-                doubleTap.begin(gestureBeganNanos, count, cx, cy)
+                tap.begin(gestureBeganNanos, count, cx, cy)
                 tapPrimed = true
             }
         }
 
         override fun onGestureEnd() {
             gestures.end()
-            if (doubleTap.end(System.nanoTime())) fitToView()
+            if (tap.end(System.nanoTime())) undoFromTap()
         }
 
         override fun onGestureCancel() {
             gestures.cancel()
-            doubleTap.cancel()
+            tap.cancel()
         }
 
         override fun onPenPresence(inRange: Boolean) = Unit

@@ -1,6 +1,7 @@
 package be.thalos.artiest.canvas
 
 import android.view.Choreographer
+import be.thalos.artiest.engine.xform.CanvasTransform
 import be.thalos.artiest.engine.xform.GestureSolver
 
 /**
@@ -51,11 +52,23 @@ class GestureController(private val surface: InkSurfaceView) {
 
     private val frame = Choreographer.FrameCallback { onFrame() }
 
+    /**
+     * Where the canvas was when this gesture opened.
+     *
+     * Kept for the gesture that turns out not to have been a movement at all:
+     * a two-finger tap is undo, and the solver has still been folding the
+     * fingers' wobble into a pan for the 60 ms they were down. See
+     * `InkSurfaceView.undoFromTap`.
+     */
+    var transformAtBegin: CanvasTransform = CanvasTransform.IDENTITY
+        private set
+
     fun begin() {
         // The user has moved the canvas themselves, so it stops following the
         // window. A rotation must not throw away a pan and zoom someone set up
         // on purpose; until there is a gesture there is nothing to throw away.
         surface.fitOnResize = false
+        transformAtBegin = surface.transform
         solver.begin(surface.transform)
     }
 

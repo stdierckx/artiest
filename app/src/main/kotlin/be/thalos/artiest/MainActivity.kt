@@ -1492,6 +1492,12 @@ private fun CanvasScreen(
                         outlineTick.intValue++
                     }
                     it.onTransformChanged = { outlineTick.intValue++ }
+                    // A two-finger tap on the paper is an undo, and the chrome
+                    // has to hear about it exactly as it hears about the
+                    // button: the same counter, so a readout and the
+                    // vector/pixel answer for the active layer are recomputed
+                    // whichever hand did it.
+                    it.onCanvasUndo = { generation++ }
                     onView(it)
                 }
             },
@@ -1785,11 +1791,11 @@ private fun CanvasScreen(
                         polling = false
                         g.start { polling = true; generation++ }
                     },
-                    onDoubleTap = {
+                    onTap = {
                         val v = surface ?: return@DebugRow
                         val g = pinch ?: GestureStress(v).also { pinch = it }
                         polling = false
-                        g.doubleTap { polling = true; generation++ }
+                        g.tap { polling = true; generation++ }
                     },
                     onReject = {
                         val v = surface ?: return@DebugRow
@@ -2616,7 +2622,7 @@ private fun DebugRow(
     rejectRunning: Boolean,
     stressRunning: Boolean,
     onPinch: () -> Unit,
-    onDoubleTap: () -> Unit,
+    onTap: () -> Unit,
     onReject: () -> Unit,
     onPredict: () -> Unit,
     onStamp: () -> Unit,
@@ -2671,7 +2677,7 @@ private fun DebugRow(
             Text(panelStatus, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
         TextButton(enabled = surface != null && !pinchRunning, onClick = onPinch) { Text("Pinch") }
-        TextButton(enabled = surface != null && !pinchRunning, onClick = onDoubleTap) { Text("Tap2") }
+        TextButton(enabled = surface != null && !pinchRunning, onClick = onTap) { Text("Tap2") }
         TextButton(enabled = surface != null && !rejectRunning, onClick = onReject) { Text("Reject") }
         TextButton(onClick = onPredict) {
             Text(if (surface?.predictionEnabled == true) "Predict ON" else "Predict off")
