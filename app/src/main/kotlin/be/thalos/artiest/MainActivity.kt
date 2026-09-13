@@ -103,6 +103,7 @@ import be.thalos.artiest.ui.DockLayout
 import be.thalos.artiest.ui.ChromeCounters
 import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
+import be.thalos.artiest.ui.WorkspaceDefaults
 import be.thalos.artiest.ui.ProjectGallery
 import be.thalos.artiest.ui.WorkspaceMenu
 import be.thalos.artiest.ui.WorkspaceStore
@@ -652,6 +653,18 @@ private fun CanvasScreen(
     var workspace by remember { mutableStateOf(startup.first) }
     var entries by remember { mutableStateOf(workspaces.list()) }
 
+    /**
+     * The defaults of the workspace just switched to, waiting to be applied.
+     *
+     * A hand-off and not a call, because the subsystems that receive them --
+     * the brush library, the sliders -- are declared further down this function
+     * than [switchTo] is, and because it is the honest place to say **on
+     * arrival and not on every launch**: a `LaunchedEffect` keyed on the
+     * workspace would re-apply them each time the app opens, which would quietly
+     * undo the tuning somebody did in the session before.
+     */
+    var arriving by remember { mutableStateOf<WorkspaceDefaults?>(null) }
+
     var docks by remember { mutableStateOf(startup.second) }
     var arranging by remember { mutableStateOf(false) }
 
@@ -677,6 +690,10 @@ private fun CanvasScreen(
         docks = next.layout
         store.save(next.layout)
         entries = workspaces.list()
+        // "Apply whichever defaults have a subsystem to receive them", which
+        // WorkspaceStore's KDoc has promised since the feature landed and which
+        // was empty until Inker had something to say. See `arriving`.
+        arriving = next.defaults.takeIf { !it.isEmpty }
     }
 
     // ---- the drawing that is being kept ------------------------------------
@@ -1190,6 +1207,22 @@ private fun CanvasScreen(
             brushModified = false
             generation++
         }
+    }
+
+    // The other half of `arriving`: a workspace that has just been switched to
+    // puts its brush in the hand and its stabilisation on the slider.
+    //
+    // The order matters and is not interchangeable. `adopt` pulls every slider
+    // back from the brush it just picked -- that is its whole second half -- so
+    // a stabilisation applied first would be overwritten by the pen's own. The
+    // workspace has the last word, because a workspace that could not override
+    // a brush parameter could not say anything a brush does not already say.
+    LaunchedEffect(arriving, surface) {
+        val want = arriving ?: return@LaunchedEffect
+        if (surface == null) return@LaunchedEffect
+        want.brush?.let { adopt(library.entryFor(it)) }
+        want.stabilisation?.let { smoothing = it }
+        arriving = null
     }
 
     /**

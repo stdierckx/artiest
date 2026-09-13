@@ -175,6 +175,18 @@ Given the order above, they should be:
 do**, and not before. A workspace with a name and nothing behind it is the one
 way this feature can make the app feel worse instead of better.
 
+**Inker shipped on 2026-09-13, and is the fourth.** What made it honest is
+`docs/inker-plan.md`'s Ik1–Ik12: an ink layer keeps the strokes that made it, so
+the marquee on one picks *lines* rather than pixels, an overshoot rubs back to
+its junction, and a picked line can be moved, turned or given another weight.
+Before those, *Inker* would have been *Sketcher* with a different set of buttons
+on it — which is exactly the failure the paragraph above names.
+
+It is also the first workspace with anything in its `defaults`: it arrives with
+the pen in the hand and stabilisation at 0.55 against the app's own 0.15, which
+is the difference between the two workspaces stated as a number rather than as
+an arrangement.
+
 ## The documents this orders
 
 | Plan | Days | Gate |

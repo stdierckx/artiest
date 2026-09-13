@@ -124,9 +124,9 @@ class StartupTest {
         WorkspaceStore(context)
         val store = WorkspaceStore(context)
         assertEquals(
-            listOf("Clean", "Everything", "Sketcher"),
+            listOf("Clean", "Everything", "Inker", "Sketcher"),
             store.list().map { it.name },
-            "three files, read back by name",
+            "every shipped file, read back by name",
         )
         for (id in ShippedWorkspaces.ids) {
             val loaded = assertNotNull(store.load(id), id)

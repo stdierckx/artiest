@@ -8,14 +8,14 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * The three workspaces that ship, and the promise each of their names makes.
+ * The workspaces that ship, and the promise each of their names makes.
  *
  * `docs/master-plan.md` is blunt about the risk: **a workspace with a name and
  * nothing behind it is the one way this feature can make the app feel worse
  * instead of better.** So the tests here are not about serialisation. They are
  * about whether the names are honest — whether *Sketcher* actually has what a
- * sketcher needs, whether *Clean* is actually clean, whether *Everything*
- * actually offers everything.
+ * sketcher needs, whether *Inker* has what Ik1–Ik12 built, whether *Clean* is
+ * actually clean, whether *Everything* actually offers everything.
  */
 class ShippedWorkspacesTest {
 
@@ -42,7 +42,7 @@ class ShippedWorkspacesTest {
     @Test
     fun `each shipped file reads back through the importer with nothing dropped`() {
         // This is why they are shipped as files rather than only compiled in:
-        // the three of them are a permanent test of the decoder an import uses,
+        // they are a permanent test of the decoder an import uses,
         // so a break shows up on the first run rather than on the day somebody
         // is sent a file.
         for (workspace in ShippedWorkspaces.all()) {
@@ -68,6 +68,63 @@ class ShippedWorkspacesTest {
         // back by name — a sketch has a rough under an ink.
         assertTrue(ToolItem.LAYERS in ws.filter)
         assertTrue(ToolItem.LAYERS in ws.layout)
+    }
+
+    @Test
+    fun `Inker has what an inker needs, and leaves out what an inker does not`() {
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.INKER))
+        for (item in listOf(
+            ToolItem.PEN, ToolItem.MARKER, ToolItem.HARD_ERASER, ToolItem.COLOUR,
+            ToolItem.SIZE, ToolItem.SMOOTHING, ToolItem.UNDO, ToolItem.REDO,
+            // The two that make it an inker rather than a sketcher: on an ink
+            // sheet the marquee picks strokes, and the panel is where rubbing
+            // one back to its junction lives. See docs/inker-plan.md.
+            ToolItem.MARQUEE, ToolItem.SELECTION,
+            // A rough under an ink, and the zoom that says whether the ink was
+            // good.
+            ToolItem.LAYERS, ToolItem.ZOOM_IN, ToolItem.ZOOM_OUT, ToolItem.FIT,
+        )) {
+            assertTrue(item in ws.layout, "${item.id} is not on a bar")
+            assertTrue(item in ws.filter, "${item.id} is not even offered")
+        }
+        // Ink is a hard edge. Both of these are still offered -- the filter is
+        // Draw -- and both are one tap away on the shelf; what is bought by
+        // leaving them off the bar is the cells the marquee sits in.
+        assertFalse(ToolItem.PENCIL in ws.layout, "an inker does not ink in pencil")
+        assertFalse(ToolItem.SOFT_ERASER in ws.layout, "nor fade the end of a line")
+        assertTrue(ToolItem.PENCIL in ws.filter)
+        assertTrue(ToolItem.SOFT_ERASER in ws.filter)
+    }
+
+    @Test
+    fun `Inker leans the pen before the line is drawn`() {
+        // The one shipped workspace with anything in its defaults, and the one
+        // number that separates inking from sketching. WorkspaceDefaults' KDoc
+        // says a field lands in the commit that makes it do something; this is
+        // that commit, so the test is that the field is not empty and that what
+        // is in it is an inking value rather than the app's own.
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.INKER))
+        assertFalse(ws.defaults.isEmpty, "Inker has nothing to say on arrival")
+        assertEquals("pen", ws.defaults.brush, "and the pen is what it says first")
+        val steady = assertNotNull(ws.defaults.stabilisation)
+        assertTrue(steady > 0.3f, "an inker's hand is steadier than that: $steady")
+        assertTrue(steady < 0.7f, "past here the wet tail trails the nib: $steady")
+
+        // And nothing else ships with defaults, so switching away from Inker
+        // does not quietly put a pencil in your hand.
+        for (other in ShippedWorkspaces.all().filter { it.id != ShippedWorkspaces.INKER }) {
+            assertTrue(other.defaults.isEmpty, "${other.id} moves a tool on arrival")
+        }
+    }
+
+    @Test
+    fun `the Inker stabilisation survives the round trip it is written through`() {
+        // A float in a JSON file that came back as 0.55000001 would make `each
+        // shipped file is what the app would write` fail on a day nobody had
+        // touched the workspace, which is the worst kind of failing test.
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.INKER))
+        val read = assertNotNull(WorkspaceJson.decode(WorkspaceJson.encode(ws)).workspace)
+        assertEquals(ws.defaults, read.defaults)
     }
 
     @Test

@@ -1,17 +1,23 @@
 package be.thalos.artiest.ui
 
+import be.thalos.artiest.engine.brush.BrushPreset
+
 /**
- * The three workspaces that come with the app.
+ * The four workspaces that come with the app.
  *
  * `docs/master-plan.md` chose them, and the choosing is the interesting part:
  * **a workspace with a name and nothing behind it is the one way this feature
- * can make the app feel worse instead of better.** *Inker*, *Painter*,
- * *Webtoon* and *Animator* ship when the tools behind them do, and not before.
- * These three are honest today.
+ * can make the app feel worse instead of better.** *Painter*, *Webtoon* and
+ * *Animator* ship when the tools behind them do, and not before. These four
+ * are honest today.
  *
  * - **Sketcher** — what is in your hand and what you just did, and nothing
  *   else. The reason it is honest now is that a sketcher's whole list is
  *   already built: brushes, an eraser, size, stabilisation, colour, undo.
+ * - **Inker** — the same paper with a different set of habits on it: a hard
+ *   edge, a steady hand, and a pen that picks a line as readily as it draws
+ *   one. It became honest with `docs/inker-plan.md`'s Ik1–Ik12 — before those,
+ *   *Select* meant pixels and there was nothing to lean a line against.
  * - **Clean** — the paper, and four controls in an L in the corner. It is the
  *   one that demonstrates the shape, and it is the one to open when the
  *   interface is in the way.
@@ -30,7 +36,7 @@ package be.thalos.artiest.ui
  * ## Compiled in *and* shipped as files
  *
  * These definitions are the source of truth, and
- * the three files under `app/src/main/assets/workspaces/` are generated from
+ * the files under `app/src/main/assets/workspaces/` are generated from
  * them by `./gradlew :app:catalogueJson`. The app reads the **assets**, through
  * the same decoder an import uses, which makes those files a permanent
  * test of the importer: if the decoder breaks, the app opens wrong on the first
@@ -41,6 +47,7 @@ package be.thalos.artiest.ui
 object ShippedWorkspaces {
 
     const val SKETCHER = "sketcher"
+    const val INKER = "inker"
     const val CLEAN = "clean"
     const val EVERYTHING = "everything"
 
@@ -48,9 +55,9 @@ object ShippedWorkspaces {
     const val DIRECTORY = "workspaces"
 
     /** In the order the chooser lists them: the one you want most, first. */
-    val ids: List<String> = listOf(SKETCHER, CLEAN, EVERYTHING)
+    val ids: List<String> = listOf(SKETCHER, INKER, CLEAN, EVERYTHING)
 
-    fun all(): List<Workspace> = listOf(sketcher(), clean(), everything())
+    fun all(): List<Workspace> = listOf(sketcher(), inker(), clean(), everything())
 
     fun byId(id: String): Workspace? = all().firstOrNull { it.id == id }
 
@@ -109,6 +116,118 @@ object ShippedWorkspaces {
             .offering(ToolItem.LAYERS_PANEL)
             .offering(ToolItem.FIT),
     )
+
+
+    /**
+     * The same paper as *Sketcher*, with a different set of habits on it.
+     *
+     * An inker does four things over and over: lay a confident line, zoom in to
+     * see whether it was confident, pick a line that was not, and fix it. This
+     * arrangement is those four and very little else.
+     *
+     * ## What is missing, and that is the design
+     *
+     * **No pencil and no soft eraser.** Ink is a hard edge — a soft eraser
+     * fades a passage, which is exactly what an ink line must not do at its
+     * end. Both are one tap away on the shelf, and the shelf is on the bar; what
+     * is bought by leaving them off is the two cells that
+     * [ToolItem.MARQUEE] and [ToolItem.SELECTION] now sit in, on the side the
+     * free hand rests on.
+     *
+     * **The marquee is in the tool column, not with the view controls.** This
+     * is the one place this workspace disagrees with [DockLayout.STARTER], and
+     * `docs/inker-plan.md` is the reason: on an ink sheet the marquee picks
+     * *strokes*, so rubbing a line back to its junction or giving six lines
+     * another weight is done with it. That is not a view control. It is a tool,
+     * and it belongs where the hand looks for tools.
+     *
+     * **Stabilisation is the first slider, and it arrives turned up.** A
+     * sketcher wants the wobble; an inker is trying to get rid of it. That is
+     * the whole difference between the two workspaces in one number, and it is
+     * the reason [WorkspaceDefaults] finally has a field filled in — see
+     * [INKING_STABILISATION].
+     *
+     * **Zoom and fit are on the far side from the tools**, for the reason
+     * [DockLayout.STARTER] gives and an inker feels hardest: putting them on
+     * the tool side is how you zoom when you meant to erase, and an inker
+     * reaches for the eraser more than anybody.
+     */
+    private fun inker(): Workspace = Workspace(
+        id = INKER,
+        name = "Inker",
+        description = "A hard edge, a steady hand, and the pen picks lines too.",
+        author = "artiest",
+        layout = DockLayout.of(
+            listOf(
+                DockLayout.anchored(
+                    // Seven, and full. Five things that make a mark and two
+                    // that choose one, with no gap between them — on an ink
+                    // sheet choosing a line is the same kind of act as drawing
+                    // one, so they read as a single run on purpose.
+                    "s1", Side.LEFT, 1, 7,
+                    ToolItem.PEN to Cell(0, 0),
+                    ToolItem.MARKER to Cell(0, 1),
+                    ToolItem.BRUSHES to Cell(0, 2),
+                    ToolItem.HARD_ERASER to Cell(0, 3),
+                    ToolItem.COLOUR to Cell(0, 4),
+                    ToolItem.MARQUEE to Cell(0, 5),
+                    ToolItem.SELECTION to Cell(0, 6),
+                ),
+                DockLayout.anchored(
+                    // What you did, and the way back to your drawings. The gap
+                    // is deliberate: undoing a line and leaving the drawing are
+                    // not the same kind of act and should not be adjacent.
+                    "s2", Side.TOP, 4, 1,
+                    ToolItem.UNDO to Cell(0, 0),
+                    ToolItem.REDO to Cell(1, 0),
+                    ToolItem.PROJECTS to Cell(3, 0),
+                ),
+                DockLayout.anchored(
+                    // Where you are looking, and what you are looking at.
+                    "s3", Side.RIGHT, 1, 4,
+                    ToolItem.ZOOM_IN to Cell(0, 0),
+                    ToolItem.ZOOM_OUT to Cell(0, 1),
+                    ToolItem.FIT to Cell(0, 2),
+                    ToolItem.LAYERS to Cell(0, 3),
+                ),
+                DockLayout.anchored(
+                    // Stabilisation first and size second, which is the other
+                    // way round from Sketcher. The order of two sliders is not
+                    // usually worth a comment; here it is the statement.
+                    "s4", Side.BOTTOM, 9, 1,
+                    ToolItem.SMOOTHING to Cell(0, 0),
+                    ToolItem.SIZE to Cell(5, 0),
+                ),
+            ),
+        ),
+        // Draw, Edit and Canvas: an inker works on the drawing, and the one
+        // thing outside those three that inking ends in is a finished picture
+        // leaving the app. Drawings is offered whatever this says — see
+        // [ToolItem.essential].
+        filter = CatalogueFilter
+            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.CANVAS)
+            .offering(ToolItem.EXPORT),
+        defaults = WorkspaceDefaults(
+            brush = BrushPreset.PEN.id,
+            stabilisation = INKING_STABILISATION,
+        ),
+    )
+
+    /**
+     * What *Inker* sets stabilisation to on arrival.
+     *
+     * Nearly four times the app's own default of 0.15, and that is the point:
+     * 0.15 is enough to take the tremor out of a sketch line without the pen
+     * feeling like it is dragging, and an inker is after something else
+     * entirely — a curve that arrives where the eye said it would. Past about
+     * 0.7 the lag is visible as the wet tail trailing the nib, which reads as
+     * the tablet being slow rather than the line being smooth, so this stops
+     * short of there.
+     *
+     * It is a starting position and not a setting: the slider is on the bar,
+     * first, precisely so it can be moved.
+     */
+    const val INKING_STABILISATION: Float = 0.55f
 
     /**
      * One L in the bottom-left corner, four controls on it, and the rest of the
