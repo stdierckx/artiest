@@ -77,6 +77,7 @@ class LayerUndoTest {
                 doc.selection.apply(op)
             }
 
+            override fun onPick(op: StrokeOp) = Unit
             override fun onFloat(op: FloatOp) {
                 doc.applyFloat(op)
             }

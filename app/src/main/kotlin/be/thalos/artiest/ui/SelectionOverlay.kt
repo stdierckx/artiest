@@ -55,6 +55,16 @@ fun SelectionOverlay(
     selection: () -> Path?,
     /** The marquee being dragged, in document coordinates, or null. */
     marquee: () -> Path?,
+    /**
+     * The centrelines of the picked strokes, in document coordinates, or null.
+     *
+     * Drawn solid rather than as ants, and that is the whole of telling the two
+     * apart: a pixel selection is a *region* and its boundary is the thing to
+     * show, while a stroke selection is a *set of objects* and the thing to
+     * show is the objects. Marching ants along fifty spines would read as fifty
+     * very thin regions.
+     */
+    picked: () -> Path? = { null },
     /** Document to view, rebuilt by the caller when the canvas moves. */
     docToView: () -> Matrix,
     /** Whether there is anything to draw. Gates the animation. */
@@ -81,6 +91,32 @@ fun SelectionOverlay(
             color = DARK
         }
     }
+    /**
+     * Two paints again, and the same argument as [LIGHT] and [DARK]: there is
+     * no single colour that stays visible against white paper, black ink and a
+     * grey desk. A wide pale stroke under a narrow bright one shows on both.
+     */
+    val glow = remember {
+        Paint().asFrameworkPaint().apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = HAIR * 5f
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            isAntiAlias = true
+            color = PICK_GLOW
+        }
+    }
+    val core = remember {
+        Paint().asFrameworkPaint().apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = HAIR * 1.6f
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            isAntiAlias = true
+            color = PICK_CORE
+        }
+    }
+
     val phase = remember { mutableFloatStateOf(0f) }
 
     // Only while there is an outline. An animation ticking over an empty page
@@ -99,6 +135,7 @@ fun SelectionOverlay(
             val native = canvas.nativeCanvas
             selection()?.let { ants(native, it, matrix, transformed, light, dark) }
             marquee()?.let { ants(native, it, matrix, transformed, light, dark) }
+            picked()?.let { spine(native, it, matrix, transformed, glow, core) }
         }
     }
 }
@@ -147,6 +184,26 @@ private fun ants(
     canvas.drawPath(scratch, dark)
 }
 
+/**
+ * The picked strokes' spines, wide pale first and narrow bright over it.
+ *
+ * Shares [ants]' scratch path for the same reason and with the same safety:
+ * they are drawn one after another on one thread and neither keeps it.
+ */
+private fun spine(
+    canvas: android.graphics.Canvas,
+    path: Path,
+    matrix: Matrix,
+    scratch: Path,
+    glow: android.graphics.Paint,
+    core: android.graphics.Paint,
+) {
+    if (path.isEmpty) return
+    path.transform(matrix, scratch)
+    canvas.drawPath(scratch, glow)
+    canvas.drawPath(scratch, core)
+}
+
 /** See `BrushCursor.HAIR`: on a 230 dpi panel a 1dp stroke already reads heavy. */
 private const val HAIR = 1.4f
 
@@ -165,3 +222,14 @@ private const val SPEED_PX_PER_SECOND = 12f
 
 private const val DARK = 0xE6101010.toInt()
 private const val LIGHT = 0xE6FFFFFF.toInt()
+
+/**
+ * The picked-stroke highlight: a pale halo and a blue core.
+ *
+ * Blue rather than the ants' black and white, because the two have to be told
+ * apart at a glance — one says "these pixels", the other says "these strokes",
+ * and they can be on screen together. The halo is what keeps the core visible
+ * where a stroke is drawn in the same blue.
+ */
+private const val PICK_GLOW = 0x99FFFFFF.toInt()
+private const val PICK_CORE = 0xF23C7DFF.toInt()

@@ -77,8 +77,14 @@ fun SelectionButton(
     selecting: Boolean,
     hasSelection: Boolean,
     floating: Boolean,
+    /**
+     * Whether a select gesture picks strokes, or null when the active sheet
+     * keeps none and there is nothing to choose between.
+     */
+    picking: Boolean?,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
+    onPicking: (Boolean) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onSelecting: (Boolean) -> Unit,
@@ -109,11 +115,13 @@ fun SelectionButton(
                 selecting = selecting,
                 hasSelection = hasSelection,
                 floating = floating,
+                picking = picking,
                 onShape = {
                     onShape(it)
                     onSelecting(true)
                 },
                 onMode = onMode,
+                onPicking = onPicking,
                 onOp = onOp,
                 onFloatOp = onFloatOp,
                 onDismiss = { open = false },
@@ -133,8 +141,10 @@ private fun SelectionPanel(
     selecting: Boolean,
     hasSelection: Boolean,
     floating: Boolean,
+    picking: Boolean?,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
+    onPicking: (Boolean) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onDismiss: () -> Unit,
@@ -159,8 +169,10 @@ private fun SelectionPanel(
                 selecting = selecting,
                 hasSelection = hasSelection,
                 floating = floating,
+                picking = picking,
                 onShape = onShape,
                 onMode = onMode,
+                onPicking = onPicking,
                 onOp = onOp,
                 // Lifting closes the panel: the transform box is on the canvas
                 // and this card would be sitting over the pixels it moves.
@@ -193,8 +205,10 @@ fun SelectionPanelCard(
     selecting: Boolean,
     hasSelection: Boolean,
     floating: Boolean,
+    picking: Boolean?,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
+    onPicking: (Boolean) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
 ) {
@@ -204,8 +218,10 @@ fun SelectionPanelCard(
         selecting = selecting,
         hasSelection = hasSelection,
         floating = floating,
+        picking = picking,
         onShape = onShape,
         onMode = onMode,
+        onPicking = onPicking,
         onOp = onOp,
         onFloatOp = onFloatOp,
         onFixate = null,
@@ -227,8 +243,10 @@ private fun SelectionBody(
     selecting: Boolean,
     hasSelection: Boolean,
     floating: Boolean,
+    picking: Boolean?,
     onShape: (MarqueeShape) -> Unit,
     onMode: (SelectMode) -> Unit,
+    onPicking: (Boolean) -> Unit,
     onOp: (SelectOp) -> Unit,
     onFloatOp: (FloatOp) -> Unit,
     onFixate: (() -> Unit)?,
@@ -267,6 +285,23 @@ private fun SelectionBody(
                         MaterialTheme.colorScheme.primary,
                     )
                 }
+            }
+        }
+
+        // Only where there is a choice to make. On an ordinary sheet there are
+        // no strokes to pick, so a pair of buttons with one of them permanently
+        // disabled would be two controls saying one thing.
+        //
+        // It is a **choice and not an inference**: picking strokes whenever the
+        // sheet keeps them would make the same tool do a different thing
+        // depending on which sheet is active, with nothing on screen to say so,
+        // which is the objection `docs/inker-plan.md` raises against exactly
+        // this shortcut. This is the thing on screen that says so.
+        if (picking != null) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Choice(ToolIcons.marquee, "Select pixels", !picking) { onPicking(false) }
+                Choice(ToolIcons.addVector, "Select strokes", picking) { onPicking(true) }
             }
         }
 

@@ -529,6 +529,43 @@ private fun CanvasScreen(
     // it could call would be a callback running on the wrong thread.
     var layerRows by remember { mutableStateOf(document.layers.snapshot) }
     var activeLayer by remember { mutableIntStateOf(document.layers.activeId) }
+
+    /**
+     * Whether a select gesture picks strokes rather than pixels, on a sheet
+     * that keeps strokes. Ik7.
+     *
+     * Held here and mirrored onto the view rather than read from it, because
+     * the panel is a composable and the view is not a snapshot state object —
+     * the same arrangement `selecting` and `marqueeShape` already have.
+     *
+     * True by default, because on an ink sheet picking strokes is what the tool
+     * is for; the toggle is there so the other answer is reachable and visible.
+     */
+    var pickStrokes by remember { mutableStateOf(true) }
+
+    /** The highlight, republished by the render thread. See `StrokePickInfo`. */
+    var pickInfo by remember { mutableStateOf(be.thalos.artiest.doc.StrokePickInfo.NONE) }
+
+    /**
+     * Whether the sheet the pen is on keeps its strokes.
+     *
+     * Read off the render thread's own object rather than off `layerRows`,
+     * which only refreshes while the layers panel is open — a toggle that
+     * appeared only after opening a panel nobody needed to open would be a
+     * toggle nobody found. The read is the same benign race every number in the
+     * readout is, and `generation` is what makes it recompute: it is bumped by
+     * every operation that could change the answer.
+     */
+    val activeKeepsStrokes = remember(generation, activeLayer) {
+        document.layers.active.vector != null
+    }
+
+    // The view is told once, here, rather than at each of the places that could
+    // change the answer. A select gesture on a sheet with no strokes must not
+    // pick, whatever the panel last said.
+    LaunchedEffect(activeKeepsStrokes, pickStrokes, surface) {
+        surface?.pickingStrokes = activeKeepsStrokes && pickStrokes
+    }
     var layersOpen by remember { mutableStateOf(false) }
 
     // The stencil, and the marquee being dragged over it.
@@ -1234,6 +1271,13 @@ private fun CanvasScreen(
                     // setting a value: a marquee at 200 Hz and a pan at 90 Hz
                     // must not recompose the chrome.
                     it.onMarqueeChanged = { outlineTick.intValue++ }
+                    // The highlight is a draw-phase read like the ants, so the
+                    // tick is what redraws it; `pickInfo` is a separate state
+                    // because the panel's stroke count is a recomposition.
+                    it.onPickChanged = {
+                        pickInfo = document.picked.snapshot
+                        outlineTick.intValue++
+                    }
                     it.onTransformChanged = { outlineTick.intValue++ }
                     onView(it)
                 }
@@ -1255,6 +1299,12 @@ private fun CanvasScreen(
                 outlineTick.intValue
                 surface?.liveMarquee?.takeIf { it.isOpen }?.path
             },
+            picked = {
+                outlineTick.intValue
+                // Hidden while pixels are in the air, for the reason the ants
+                // are: the transform box is the outline then.
+                if (floatingBox != null) null else pickInfo.outline
+            },
             docToView = {
                 outlineTick.intValue
                 surface?.let { outlineMatrix.setDocToView(it.transform) }
@@ -1263,7 +1313,7 @@ private fun CanvasScreen(
             // Recomposes when the answer moves, which is once per selection
             // rather than once per frame -- and it is what stops the ants
             // ticking over a page with nothing on it.
-            showing = selectionShape.active || selecting,
+            showing = selectionShape.active || selecting || pickInfo.active,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1625,6 +1675,15 @@ private fun CanvasScreen(
                         }
                     },
                     selecting = selecting,
+                    // Null on a sheet that keeps no strokes: there is nothing
+                    // to choose between, and a pair of buttons with one of them
+                    // permanently disabled is two controls saying one thing.
+                    picking = if (activeKeepsStrokes) pickStrokes else null,
+                    onPicking = {
+                        pickStrokes = it
+                        surface?.pickingStrokes = it
+                        generation++
+                    },
                     onSelecting = { on ->
                         setSelecting(on)
                         generation++
@@ -1814,6 +1873,9 @@ private fun ToolSlot(
     onLayerDuplicate: () -> Unit,
     onLayersOpen: (Boolean) -> Unit,
     selecting: Boolean,
+    /** See `InkSurfaceView.pickingStrokes`. Null when the sheet keeps no strokes. */
+    picking: Boolean?,
+    onPicking: (Boolean) -> Unit,
     onSelecting: (Boolean) -> Unit,
     marqueeShape: MarqueeShape,
     onMarqueeShape: (MarqueeShape) -> Unit,
@@ -2003,8 +2065,10 @@ private fun ToolSlot(
             selecting = selecting,
             hasSelection = hasSelection,
             floating = floating,
+            picking = picking,
             onShape = onMarqueeShape,
             onMode = onMarqueeMode,
+            onPicking = onPicking,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
             onSelecting = onSelecting,
@@ -2018,8 +2082,10 @@ private fun ToolSlot(
             selecting = selecting,
             hasSelection = hasSelection,
             floating = floating,
+            picking = picking,
             onShape = { onMarqueeShape(it); onSelecting(true) },
             onMode = onMarqueeMode,
+            onPicking = onPicking,
             onOp = onSelectOp,
             onFloatOp = onFloatOp,
         )
@@ -2325,6 +2391,7 @@ private fun readout(
         // sheet keeps strokes and not how many it has, and how many is the
         // number that says whether the commit path is actually appending.
         "ink      ${document.vectorNote()}\n" +
+        "picked   ${document.picked.count} strokes on layer ${document.picked.layerId}\n" +
         "rebuild  ${surface.lastRebuild.name.lowercase()}   " +
         "${surface.lastRebuildStrokes} strokes   ${r(surface.lastRebuildMs.toFloat(), 1)} ms\n" +
         // The undo budget, which is the number that decides whether a long

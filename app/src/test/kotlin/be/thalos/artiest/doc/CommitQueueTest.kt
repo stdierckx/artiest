@@ -69,6 +69,7 @@ class CommitQueueTest {
             log.append('M')
         }
 
+        override fun onPick(op: StrokeOp) = Unit
         override fun onFloat(op: FloatOp) {
             log.append('F')
         }
@@ -216,6 +217,7 @@ class CommitQueueTest {
             override fun onRedo() = Unit
             override fun onLayers(op: LayerOp) = Unit
             override fun onSelect(op: SelectOp) = Unit
+            override fun onPick(op: StrokeOp) = Unit
             override fun onFloat(op: FloatOp) = Unit
         }
         val sent = ArrayList<Stroke>(total)

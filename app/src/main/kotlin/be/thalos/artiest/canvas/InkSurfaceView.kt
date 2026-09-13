@@ -25,6 +25,7 @@ import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
 import be.thalos.artiest.doc.StackCompositor
 import be.thalos.artiest.doc.SheetRebuilder
+import be.thalos.artiest.doc.StrokeOp
 import be.thalos.artiest.doc.VectorSheet
 import be.thalos.artiest.doc.VectorStep
 import be.thalos.artiest.engine.ink.DabEmitter
@@ -997,6 +998,27 @@ class InkSurfaceView(
     }
 
     /**
+     * Told on the UI thread when the picked set has changed, so the chrome can
+     * redraw its highlight. `onMarqueeChanged`'s counterpart.
+     *
+     * Invoked from the render thread, so the callback posts.
+     */
+    var onPickChanged: (() -> Unit)? = null
+
+    /**
+     * Whether a select gesture picks strokes rather than pixels. UI thread.
+     *
+     * **Set by the panel, not inferred from the sheet**, and that is the
+     * decision. Inferring it would make the same tool do a different thing
+     * depending on which sheet is active with nothing on screen to say so,
+     * which is the objection `docs/inker-plan.md` raises against exactly this
+     * shape of shortcut. The panel shows the choice, and shows it only where
+     * there is a choice to make.
+     */
+    @Volatile
+    var pickingStrokes: Boolean = false
+
+    /**
      * The one implementation of [SheetRebuilder], handed to the document so
      * that a `VectorStep` can repaint without knowing about the rasterizer or
      * the scratch buffer.
@@ -1178,10 +1200,31 @@ class InkSurfaceView(
         // layer id is known.
         override fun onUndo() {
             document.applyUndo()
+            prunePick()
         }
 
         override fun onRedo() {
             document.applyRedo()
+            prunePick()
+        }
+
+        /**
+         * Drop picked ids the sheet no longer has.
+         *
+         * Without it, undoing a stroke that was picked leaves it picked, and
+         * the next operation on the set is a no-op nobody can explain. The
+         * republish is unconditional on a *redo*, because a record that came
+         * back has the same id and the highlight has to find it again.
+         */
+        private fun prunePick() {
+            val sheet = document.layers.active.vector ?: return
+            if (document.picked.layerId != document.layers.active.id) return
+            if (document.picked.prune(sheet)) {
+                post { onPickChanged?.invoke() }
+            } else if (document.picked.active) {
+                document.picked.republish(sheet)
+                post { onPickChanged?.invoke() }
+            }
         }
 
         /**
@@ -1203,6 +1246,12 @@ class InkSurfaceView(
             // A project has just replaced the stack. Every undo step describes
             // sheets that were closed a line ago. See `Document.resetHistory`.
             if (op is be.thalos.artiest.doc.LayerOp.Open) document.resetHistory()
+            // A stroke id is unique *within a sheet*, so a picked set held
+            // across a sheet change would name other strokes — and the first
+            // thing done to it would happen to them. See `StrokePick`.
+            if (document.picked.layerId != document.layers.active.id) {
+                if (document.picked.clear()) post { onPickChanged?.invoke() }
+            }
         }
 
         /**
@@ -1225,6 +1274,28 @@ class InkSurfaceView(
          * The thumbnail is marked stale by `Document.applyFloat` itself, at the
          * one place a float actually writes pixels.
          */
+        /**
+         * Pick strokes. **Render thread**, in its turn in the queue.
+         *
+         * Against the *active* sheet, which is what the gesture was aimed at. A
+         * sheet that keeps no strokes answers nothing rather than refusing: the
+         * gesture that produced this only happens when the panel says strokes,
+         * and the panel only says strokes on an ink sheet — but the pen can be
+         * moved between the gesture and the drain, and dropping the pick is a
+         * better answer to that than picking on the wrong sheet.
+         */
+        override fun onPick(op: StrokeOp) {
+            val entry = document.layers.active
+            val sheet = entry.vector
+            // Posted, not called: this runs on the render thread and the
+            // listener touches Compose state.
+            if (sheet == null) {
+                if (document.picked.clear()) post { onPickChanged?.invoke() }
+                return
+            }
+            if (document.picked.apply(op, sheet, entry.id)) post { onPickChanged?.invoke() }
+        }
+
         override fun onFloat(op: FloatOp) {
             // A lift reads pixels and a drop writes them, and neither is a
             // stroke. See `VectorSheet.intact`. Spoiled on every float op
@@ -3138,6 +3209,18 @@ class InkSurfaceView(
          */
         private var beganAtDown = false
 
+        /**
+         * Where the select gesture went down, in document space.
+         *
+         * Needed because a **tap** is a gesture whose shape is empty: the
+         * marquee records nothing below `Marquee.MIN_STEP_DOC_PX`, so
+         * `computeBounds` on it gives a rectangle at the origin and a tap on a
+         * stroke would be tested at (0, 0). The gesture's first point is the
+         * only thing that knows where the pen actually landed.
+         */
+        private var marqueeDownX = 0f
+        private var marqueeDownY = 0f
+
         private fun extendMarquee(marquee: Marquee, samples: ArrayList<PenSample>) {
             val n = samples.size
             if (n == 0) return
@@ -3158,6 +3241,8 @@ class InkSurfaceView(
                 frozen.viewToDoc(sample.x, sample.y, docPoint)
                 if (!beganAtDown) {
                     beganAtDown = true
+                    marqueeDownX = docPoint[0]
+                    marqueeDownY = docPoint[1]
                     marquee.begin(marqueeShape, docPoint[0], docPoint[1])
                     changed = true
                 } else if (marquee.extend(docPoint[0], docPoint[1])) {
@@ -3178,6 +3263,31 @@ class InkSurfaceView(
             onMarqueeChanged?.invoke()
             // Copied into the op, which is what makes it safe to go on using
             // this builder for the next gesture. See `SelectOp.Shape`.
+            if (pickingStrokes) {
+                // A gesture that went nowhere is a tap, and a tap on a stroke
+                // has to pick that stroke rather than lassoing the three
+                // document pixels under the nib. The threshold is the marquee's
+                // own step, doubled: below it the shape has no inside to speak
+                // of, so testing against it would answer nothing on any nib.
+                val box = android.graphics.RectF()
+                shape.computeBounds(box, true)
+                // Empty as well as small: a gesture that never moved records no
+                // points at all, and its bounds is a rectangle at the origin
+                // rather than a rectangle where the pen was. Both are taps, and
+                // both are answered at the point the gesture went **down**,
+                // which is the only thing that knows where that was.
+                val tap = shape.isEmpty ||
+                    (box.width() <= TAP_SLOP_DOC && box.height() <= TAP_SLOP_DOC)
+                if (tap) {
+                    document.requestPick(
+                        StrokeOp.Tap(marqueeDownX, marqueeDownY, TAP_SLOP_DOC, marqueeMode),
+                    )
+                } else {
+                    document.requestPick(StrokeOp.Lasso(shape, marqueeMode))
+                }
+                renderer?.commit()
+                return
+            }
             select(SelectOp.Shape(shape, marqueeMode))
         }
 
@@ -3364,6 +3474,21 @@ class InkSurfaceView(
          * stroke *i* of the run it is compared against, which is what makes
          * `driftOf` a measurement of the engine rather than of a counter.
          */
+        /**
+         * How far a select gesture may travel and still be a tap, in document
+         * pixels.
+         *
+         * Four: twice `Marquee.MIN_STEP_DOC_PX`, which is the smallest step
+         * that gesture records at all. Below it the shape has no inside worth
+         * testing, so a lasso would answer nothing whatever the nib — and the
+         * user, who put the pen on a stroke, would see the app ignore them.
+         *
+         * It is also the slop the tap is given, which is the same number for a
+         * different reason: a hand aiming at a two-pixel fineliner line misses
+         * it by about that much.
+         */
+        const val TAP_SLOP_DOC: Float = 4f
+
         private const val IK0_SEED_BASE: Int = 700_000
 
         /**

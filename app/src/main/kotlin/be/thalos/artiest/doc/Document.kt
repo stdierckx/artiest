@@ -499,6 +499,22 @@ class Document(
         commits.float(op)
     }
 
+    /** Queue a change to which strokes are picked. UI thread. See [StrokeOp]. */
+    fun requestPick(op: StrokeOp) {
+        commits.pick(op)
+    }
+
+    /**
+     * Which strokes are picked, and on which sheet. **Render thread**; the UI
+     * reads `picked.snapshot`.
+     *
+     * On the document rather than on the view, beside [selection], because it
+     * is a property of the drawing rather than of the thing displaying it —
+     * `PngExporter` and `ProjectSaver` both take a `Document` and neither has
+     * ever needed a view.
+     */
+    val picked: StrokePick = StrokePick()
+
     /**
      * Apply one float operation. **Render thread**, from the commit sink.
      *

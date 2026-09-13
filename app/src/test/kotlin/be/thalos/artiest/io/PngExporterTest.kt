@@ -1,5 +1,6 @@
 package be.thalos.artiest.io
 
+import be.thalos.artiest.doc.StrokeOp
 import be.thalos.artiest.doc.PendingStroke
 import android.content.ContentProvider
 import android.content.ContentValues
@@ -572,6 +573,7 @@ class PngExporterTest {
                 document.selection.apply(op)
             }
 
+            override fun onPick(op: StrokeOp) = Unit
             override fun onFloat(op: be.thalos.artiest.doc.FloatOp) {
                 document.applyFloat(op)
             }

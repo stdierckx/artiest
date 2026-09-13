@@ -120,6 +120,17 @@ class CommitQueue {
          * or the pixels are dropped at a transform the user has already changed.
          */
         class Float(val op: FloatOp) : Commit
+
+        /**
+         * Change which *strokes* are picked.
+         *
+         * Here for the fifth time for the same reason the other four are:
+         * "select this" means *after everything I have drawn*, and a pick
+         * applied straight from the UI thread would land in front of a stroke
+         * the render thread has not stamped yet — and then fail to find it,
+         * which on a tap looks like the app ignoring the pen.
+         */
+        class Pick(val op: StrokeOp) : Commit
     }
 
     /**
@@ -138,12 +149,18 @@ class CommitQueue {
         fun onLayers(op: LayerOp)
         fun onSelect(op: SelectOp)
         fun onFloat(op: FloatOp)
+        fun onPick(op: StrokeOp)
     }
 
     private val queue = ConcurrentLinkedQueue<Commit>()
 
     /** Commits waiting for the render thread. Diagnostic only. */
     val pending: Int get() = queue.size
+
+    /** UI thread, from a picking gesture. See [Commit.Pick]. */
+    fun pick(op: StrokeOp) {
+        queue.add(Commit.Pick(op))
+    }
 
     /** UI thread, at pen-up. */
     fun commit(stroke: Stroke, record: PendingStroke? = null) {
@@ -209,6 +226,7 @@ class CommitQueue {
                 is Commit.Layers -> sink.onLayers(commit.op)
                 is Commit.Select -> sink.onSelect(commit.op)
                 is Commit.Float -> sink.onFloat(commit.op)
+                is Commit.Pick -> sink.onPick(commit.op)
             }
             applied++
         }

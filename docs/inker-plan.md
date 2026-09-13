@@ -262,7 +262,7 @@ Robolectric with native graphics, beside `ScratchLayerTest`.
 | **Ik4** | **DONE, and "identical" turned out to be the wrong word.** `InkSurfaceView.rebuild`, `Confinement`, `Layer.blank(rect)`, a coalescing throttle, and the clip table in use. See **What Ik4 built**. | `:app` | **High** | Ik3, Ik2 | 5–8 |
 | **Ik5** | **DONE.** `DocStep`, the exchange moved onto the step, `VectorStep`, `SheetRebuilder`, and undo/redo of a vector edit. Two of Ik3's three spoilers are gone. See **What Ik5 built**. | `:app` | Med | Ik4 | 4–6 |
 | **Ik6** | **DONE.** `strokes/<n>.ink` beside `layers/<n>.png`, `ProjectJson` v2, `PathText` for the clip table, save on the same debounce, load into `LayerOp.Open`. The PNG stays. See **What Ik6 built**. | `:app` | Med | Ik1, Ik3 | 4–6 |
-| **Ik7** | Picking strokes: tap, lasso (the marquee gesture, a different hit test), the selected set, and the highlight in the overlay. | `:app` | Med | Ik3 | 4–6 |
+| **Ik7** | **DONE.** `StrokeOp`, `StrokePick`, `CommitQueue.Commit.Pick`, the strokes/pixels toggle in the selection panel, and the highlight in the overlay. See **What Ik7 built**. | `:app` | Med | Ik3 | 4–6 |
 | **Ik8** | **The three eraser modes.** Whole stroke; to the nearest intersection; and an ordinary partial rub that splits a record. `StrokeGeometry.intersections` in `:engine`, JVM-tested. | `:engine`, `:app` | **High** | Ik4, Ik7 | 6–9 |
 | **Ik9** | Move, rotate and scale the selected strokes, through `TransformBox` over records instead of pixels. Drop is a `VectorStep`; grain regenerates where it lands. | `:app` | Med | Ik7, Ik5 | 4–6 |
 | **Ik10** | Restyle: recolour, re-brush, scale the width, re-stabilise. Four operations, one panel, all of them one field on a record and a re-render. | `:app` | Low | Ik4, Ik7 | 3–5 |
@@ -900,6 +900,61 @@ away.
 rather than copied — they are immutable values, and copying the samples would
 double the one cost this design is careful about — while the clip paths are
 copied, because a `Path` is not immutable.
+
+## What Ik7 built
+
+> 2026-09-13. `:app`. Verified on the DTH-A116: a tap picks one stroke, a lasso
+> over the page picks all four, and the highlight draws — 2 004 blue pixels
+> along the stroke that was tapped, and none anywhere else.
+
+The marquee gesture, pointed at strokes instead of pixels. `StrokeOp` is the
+fifth member of `CommitQueue`, for the fifth time for the same reason: "select
+this" means *after everything I have drawn*, and a pick applied straight from
+the UI thread would land in front of a stroke the render thread has not stamped
+yet — and then fail to find it, which on a tap looks like the app ignoring the
+pen.
+
+### It is a choice, not an inference
+
+Picking strokes whenever the sheet keeps them would make the same tool do a
+different thing depending on which sheet is active **with nothing on screen to
+say so** — which is the objection this plan raises against exactly that
+shortcut, in the note about confining ink. So the selection panel has a
+strokes/pixels pair, shown only on a sheet that keeps strokes, defaulting to
+strokes because that is what the tool is for there.
+
+### A tap is a gesture whose shape is empty
+
+`Marquee` records nothing below its own two-pixel step, so a tap's path has no
+points and its bounds is a rectangle at the origin. A tap is therefore answered
+at the point the gesture went **down**, which is the only thing that knows where
+the pen landed — and the same branch catches a real hand's tap, which travels a
+pixel or two rather than none. Four document pixels decides it: twice the
+marquee's step, and about how far a hand aiming at a two-pixel fineliner line
+misses it.
+
+### Two rules that are tests rather than comments
+
+**A picked set belongs to one sheet.** A stroke id is unique *within* a sheet,
+so a set carried to another sheet names other strokes — and the first thing done
+to it, an erase or a drag, happens to them. Moving the pen to another sheet
+drops the set.
+
+**A picked set cannot outlive the strokes in it.** Undoing a stroke that was
+picked un-picks it; without that the next operation is a no-op nobody can
+explain.
+
+### The highlight is the spine, and it is not ants
+
+A pixel selection is a *region* and its boundary is the thing to show. A stroke
+selection is a *set of objects*, and the thing to show is the objects — so the
+picked strokes' centrelines are drawn as a pale halo under a blue core, in the
+same overlay pass, sharing its scratch path. Marching ants along fifty spines
+would read as fifty very thin regions, and the two can be on screen at once.
+
+Centrelines and not outlines: a stroke's outline is the expensive derived thing
+this whole design avoids computing, and a line along the spine is what a vector
+editor's own highlight is.
 
 ## Stop conditions
 
