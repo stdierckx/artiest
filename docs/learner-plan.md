@@ -223,7 +223,249 @@ reference on screen and steal its colours, and can watch any drawing rebuild
 itself stroke by stroke. Everything else in the list is a consequence of those
 three being good.
 
-## Part 5 — the Learner workspace has *fewer* buttons
+## Part 5 — what each of these looks like in the hand
+
+Written before any of it is built, so that the arguing happens here rather than
+in a half-written panel. Everything below is described as **what is on the
+glass and what the hand does**, because that is the only description a plan can
+be wrong about early enough to matter.
+
+Two rules run through all of it and are not repeated each time:
+
+- **Every one of these is a catalogue entry.** `ToolItem` already decides what
+  can be put on a toolbar, and `docs/ui-space-plan.md`'s Selection work settled
+  the pattern: a panel is a convenience, and every button inside it is
+  separately placeable. The tool popup gains one category, **Learn**, the way
+  it gained **Selection**.
+- **Nothing here is modal unless it says so.** A beginner cannot recover from a
+  mode they did not know they were in.
+
+### Lr1 · The eyedropper
+
+**What it is.** A toggle button beside the pen and the erasers. There is no
+colour picker in this program at all today, so this is a hole in the drawing
+program first and a learner feature second.
+
+**What the hand does.** Tap the button, touch the drawing, lift. The colour is
+now in the hand and **the button switches itself back off** — you are holding
+the brush you were holding before. One pick, one tap, no mode to escape from.
+Press and hold the button instead and it stays on until pressed again, for the
+rare case of picking twenty colours in a row.
+
+**What is on the glass.** While the nib is down, a small ring under the pen,
+offset up and left so the hand is not covering the answer: the ring is split,
+the colour under the nib on one half and the colour you were holding on the
+other, so the choice is a comparison rather than a guess. **The pick lands on
+lift**, not on touch, so the nib can be slid to the right pixel while the ring
+updates.
+
+**What it picks.** What you can *see* — the stack as composited, which is what
+the eye meant when it chose. A switch in the colour panel says *this layer
+only* for the case where you are picking out of a reference layer that has
+something painted over it.
+
+**The barrel button is not offered for this**, and the reason is in
+`PenChoice`: the barrel already means *erase*, that is the behaviour of the pen
+the user has in their hand, and a second meaning for the same button would make
+the first unreliable.
+
+### Lr2 · The reference pane
+
+**What it is.** A panel, in the sense the layers panel and the brush shelf are
+panels: it opens from a toolbar button, it can be dragged to an edge and
+fixated there, and it can be resized. Side by side is therefore not a special
+layout — it is the panel fixated to the right edge, which the workspace system
+does today.
+
+**What is in it.** One picture, as large as the panel allows. Under it, a strip
+of small thumbnails of the others in the set; tap one to bring it up, or swipe
+across the picture to go to the next. A row of small buttons along the bottom:
+**add**, **fit**, **flip**, **grey**, **grid**, **remove**.
+
+**What the hand does inside the pane.** The same vocabulary as the canvas,
+because a hand should not have to learn a second one: one finger drags the
+picture, two fingers pinch to zoom and twist to rotate. **Fit** puts it back.
+
+**And the pen over the pane is always the eyedropper** — no button, no mode.
+Nib down on the picture picks its colour, and the same split ring appears. This
+is the single thing users name when asked why they keep Clip Studio's Sub View
+open, and it costs nothing here once Lr1 exists.
+
+**The pane can also show your own drawing.** A *This drawing* entry at the front
+of the strip, which is the whole page at fit-to-pane while the canvas itself is
+zoomed into an eyelash. Procreate has this and nobody copies it; beginners use
+it more than they use the picture tab, because the commonest beginner mistake is
+losing the shape of the whole while working on a part.
+
+### Lr3 · The reference library
+
+**What it is.** A grid of thumbnails, opened from the pane's **add** button or
+its own toolbar button. Tap to put a picture in the pane; long press to select
+several.
+
+**How pictures get in.** Four ways, and the fourth is the one that matters:
+
+1. The system picture picker.
+2. The clipboard.
+3. The camera — a photograph of the thing on the desk, or of a page in a book.
+4. **Share to artiest.** Any picture, in any app, through Android's own share
+   sheet. This is the PureRef lesson: the program that wins at reference is the
+   one where collecting costs nothing. It is a manifest entry and a small
+   receiver; the app has no intent filter but the launcher one today.
+
+**How they are organised.** **Sets**, and nothing more clever. A set is a named
+group — *hands*, *this drawing*, *bikes* — a picture may be in several, and one
+set is *everything*. A drawing remembers the set that was open with it, so
+re-opening the drawing re-opens its references.
+
+**What is stored.** A copy, downscaled to the page's own size, not a link to
+the file on the tablet. Krita offers both and is right to for a desktop; here a
+photograph that was moved, renamed or cleaned up by the gallery app would break
+the link silently, months later. `PictureImporter` already downscales for an
+import, so this is the same code and a phone photograph costs a few hundred
+kilobytes rather than eight megabytes. The library screen shows the total at the
+bottom and deleting reclaims it.
+
+### Lr4 · The reference layer
+
+**What it is.** What `IMPORT` already does — the picture lands as a layer of its
+own — plus the four things that make it behave like a reference rather than like
+a drawing.
+
+- **A lock, on the layer row.** A locked layer takes no ink, no rubber and no
+  selection. It does not exist today, and the Painter wants it as much as the
+  learner does.
+- **Desaturate**, per layer. Krita puts a saturation slider on its reference
+  images for the reason its own manual gives: so you look at light and shadow
+  instead of being distracted by the colours.
+- **Fit to page**, for the photograph that came in at the wrong size.
+- **Marked as a reference**, which is what keeps it out of an export. And the
+  export **says so** — *"2 reference layers were left out"* — because a program
+  that silently drops half of what it was asked to save is
+  `docs/layer-effects-plan.md` trap 4 all over again.
+
+**The opacity is the ladder.** Trace at 80 %, ghost at 25 %, switch it off and
+draw it from the pane beside you. That is the same one control doing the whole
+of the beginner's journey, and it is why this is four small things and not a
+"tracing feature".
+
+### Lr5 · The mirror and the grey
+
+**Two buttons, in the Canvas category.** *Flip view* and *Grey view*.
+
+**They change what you see and nothing else.** No layer is touched, nothing
+enters the undo history, and **you can keep drawing while they are on** — the
+pen lands where the eye expects, because the input goes through the same flip
+the picture does. That is the part worth being careful about and the part that
+makes it useful rather than a novelty: the classic use is to flip, see that the
+jaw is crooked, and fix it *while flipped*.
+
+**A tell-tale, because a view mode you forget about is a bug.** The button stays
+lit and a thin band sits along the top edge of the canvas while either is on.
+
+### Lr6 · Replay
+
+**Where it opens.** From the drawing you are in, and from any drawing's card in
+the gallery.
+
+**What is on the glass.** The page, rebuilding itself. Along the bottom, a bar:
+play/pause, a scrubber for the whole drawing, step-back and step-forward by one
+stroke, and a speed — *as drawn*, *4x*, *16x*, *stroke by stroke*. The scrubber
+carries small marks where the layers were added, so *"take me to where the line
+art started"* is one tap rather than a hunt.
+
+**What the card beside it says**, and this is the part no video can do: for the
+stroke on screen, **the brush and its swatch, the colour, the ruler it was drawn
+against if any, and how long it took.** "What did they draw that with" is the
+beginner's actual question, and the record already knows the answer — brush
+index, colour, guide index, and milliseconds from pen-down, per sample.
+
+**Draw from here.** The button that makes this a learning tool instead of a
+curiosity. Press it at any stroke and the drawing *as it was at that stroke*
+opens as a **new** drawing, ready to continue by hand. Never over the original:
+the thing being learned from must survive being learned from.
+
+**What it says when it cannot.** A painted sheet, an imported picture and a
+layer that arrived from Krita have pixels and no strokes. They appear at the
+step where they arrived, whole, and the bar says *"this layer has no strokes to
+replay"* rather than skipping to the end and looking broken.
+
+**What it costs.** Forward is 3.6–3.8 ms a pen stroke, which is the cost of
+having drawn it. Backwards is a rebuild — Ik0 measured 1.09 s for 300 pen
+strokes and 6.41 s for pencil — so the player keeps a snapshot every N strokes
+and rebuilds from the nearest one. A snapshot is a `Layer` at 27.19 MiB, so N is
+a memory decision, not a speed one, and it lands on the cap that
+`docs/layer-effects-plan.md` trap 2 makes every structural item restate.
+
+### Lr7 · Cards and decks
+
+**A card is four things**: a title, one note in your own words, the drawing, and
+tags. No more, ever — trap 2.
+
+**Making one.** A **Keep this** button on the canvas. It takes the drawing you
+are in, asks for the title and the note, offers the tags you have used before,
+and the card is in your deck. That is the whole authoring flow, and it is the
+point: a beginner will never keep written notes, but they are already drawing.
+
+**The deck.** A panel of cards, each a thumbnail with its title; a row of tag
+chips across the top filters it. *Hands*, *faces*, *perspective*, *folds* —
+whatever words that person uses.
+
+**Opening a card.** The note at the top, the replay under it, and two buttons:
+
+- **Practice this** — a new blank page, with the card's drawing on a locked
+  reference layer at 30 %, so you draw it again over your own ghost.
+- **Draw from here** — Lr6's button, from wherever the replay is stopped.
+
+**A card is one file.** Share it with the tablet's own share sheet; opening one
+adds it to your deck. That is how a tutorial arrives, how a teacher hands out an
+exercise and how two people swap a lesson — with no account, no server and no
+moderation problem, which is Part 7's line held in the design rather than in a
+promise.
+
+### Lr8 · The Learner workspace and the starter deck
+
+**A fifth shipped workspace, and the only one defined by subtraction.** Two
+brushes and an eraser rather than the shelf of sixteen; undo, redo, colour,
+size; the reference pane fixated right; the deck, the replay and the two view
+buttons. No selection panel, no guides panel, no blend modes, no layer effects.
+`CatalogueFilter` already expresses all of that.
+
+**Five or six cards, drawn in the app**, on the things every beginner asks
+first — a box in perspective, a head from the side, a hand as a box and five
+sausages, a fold, a tree. Not a course. An example of the format, and a
+demonstration that the person who made them was not a teacher either.
+
+### Lr9 · Practice sessions
+
+**Starting one.** Pick a set, pick a length — 30 s, 1 m, 2 m, 5 m, or your own —
+and press start.
+
+**What happens.** The picture is in the pane, a thin ring drains beside it, and
+when it empties **the page turns**: a fresh blank page, the next picture. Pause,
+skip and back are the only controls, and a session can be stopped at any point.
+
+**What is at the end.** A contact sheet: everything you drew in the session, in
+order, each one beside the picture it was drawn from. That is the payoff and it
+is nearly free — the thumbnails already exist. It is also the only review this
+feature will ever offer.
+
+**No score, no streak, no badge.** Drawabox's 50 % rule exists because the
+finished result already gets in the way of the learning; a number to chase makes
+that worse. The practice log, if it ever exists, says what happened and stops.
+
+### Lr10 · The grid method
+
+**One button, two grids.** A grid over the page and the same grid over the
+picture in the pane, with a divisions control — 3, 4, 6, 8. Proportions are then
+copied square by square, which is the oldest teaching trick there is and still
+the one that gets a beginner their first accurate drawing.
+
+The page half is `docs/guides-plan.md` item 9, a 2D grid guide, unbuilt and
+cheap now that `GuideSet` and the overlay exist. The pane half is the same
+divisions drawn over the picture. Both go off together.
+
+## Part 6 — the Learner workspace has *fewer* buttons
 
 `docs/master-plan.md`: *"A workspace named Inker is a promise."* A workspace
 named **Learner** makes a harder promise than the others, because the person
@@ -243,7 +485,7 @@ This is also the honest test of the workspace system: if the system cannot
 express "the same program, with three quarters of it hidden", then P0 did not
 deliver what it promised.
 
-## Part 6 — the traps
+## Part 7 — the traps
 
 1. **Copyright, and the export that bakes a reference in.** A reference library
    invites people to import pictures they do not own. Two rules, both
@@ -274,7 +516,7 @@ deliver what it promised.
    learning*; adding a number to chase makes that worse. A practice log that
    only says what happened is the most this should ever do.
 
-## Part 7 — deliberately not in this plan
+## Part 8 — deliberately not in this plan
 
 - **Any account, feed, community or upload.** ibisPaint's community is genuinely
   the best learning feature in any drawing app and it is a server, a moderation
