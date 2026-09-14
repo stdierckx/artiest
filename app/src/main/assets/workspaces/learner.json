@@ -1,12 +1,12 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 10,
+  "catalogue": 11,
   "id": "learner",
   "name": "Learner",
   "description": "A picture to draw from, and somewhere to keep what you work out.",
   "author": "artiest",
   "revision": 1,
-  "filter": {"groups": ["edit", "draw", "learn"], "hide": [], "show": ["fit", "layers", "layers_panel"]},
+  "filter": {"groups": ["edit", "draw", "learn"], "hide": [], "show": ["fit", "flip_view", "grey_view", "layers", "layers_panel"]},
   "defaults": {"brush": "pen", "shelf": [], "stabilisation": 0.35},
   "surfaces": [
     {
@@ -48,11 +48,13 @@
     {
       "id": "s4",
       "anchor": "bottom",
-      "rects": [[0, 0, 5, 1]],
+      "rects": [[0, 0, 7, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "size", "at": [0, 0]},
-        {"id": "fit", "at": [4, 0]}
+        {"id": "flip_view", "at": [4, 0]},
+        {"id": "grey_view", "at": [5, 0]},
+        {"id": "fit", "at": [6, 0]}
       ]
     }
   ]

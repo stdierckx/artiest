@@ -578,6 +578,29 @@ enum class ToolItem(
         ToolKind.PANEL, cellsTall = 7,
     ),
 
+    /**
+     * Lr5. Show the drawing mirrored, and keep drawing on it.
+     *
+     * In **Canvas** and not in Learn, because it is not a beginner's tool — a
+     * professional flips constantly, and every guide to drawing there is says
+     * so. What is beginner-specific is that nobody has told them yet.
+     *
+     * It changes what you see and nothing else: no layer is touched, nothing
+     * enters the undo history, and the export is the drawing the right way
+     * round. **The pen still works** — the classic use is to flip, see that the
+     * jaw is crooked, and fix it while flipped, which a view that refused the
+     * pen could not do.
+     */
+    FLIP_VIEW("flip_view", "Flip the view", "Flip", 1, ToolGroup.CANVAS, ToolKind.TOGGLE),
+
+    /**
+     * Lr5. The squint, as a button: the drawing with its colour taken out.
+     *
+     * Not [ToolItem.LAYERS]'s sheet-level desaturate, which is about the
+     * drawing; this is about the eye and is forgotten the moment it is off.
+     */
+    GREY_VIEW("grey_view", "Grey view", "Grey", 1, ToolGroup.CANVAS, ToolKind.TOGGLE),
+
     ZOOM_IN("zoom_in", "Zoom in", "Zoom+", 1, ToolGroup.CANVAS),
     ZOOM_OUT("zoom_out", "Zoom out", "Zoom-", 1, ToolGroup.CANVAS),
     FIT("fit", "Fit to screen", "Fit", 1, ToolGroup.CANVAS),

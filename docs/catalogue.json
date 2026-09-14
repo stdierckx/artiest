@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 10,
+  "version": 11,
   "cell_dp": 44,
   "groups": [
     {
@@ -187,6 +187,16 @@
       "turns": false
     },
     {
+      "id": "flip_view",
+      "label": "Flip the view",
+      "short": "Flip",
+      "group": "canvas",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
       "id": "float_cancel",
       "label": "Cancel the move",
       "short": "Cancel",
@@ -255,6 +265,16 @@
       "cells_wide": 4,
       "cells_tall": 1,
       "turns": true
+    },
+    {
+      "id": "grey_view",
+      "label": "Grey view",
+      "short": "Grey",
+      "group": "canvas",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
     },
     {
       "id": "guides",

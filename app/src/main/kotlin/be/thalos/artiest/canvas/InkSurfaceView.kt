@@ -2045,6 +2045,66 @@ class InkSurfaceView(
     var onColourPicked: ((Int) -> Unit)? = null
 
     /**
+     * Flip [event] about the middle of this view, in place. Lr5.
+     *
+     * In place, and the event is flipped **back** after the router has had it:
+     * the framework owns this instance and may hand it on. That is exactly what
+     * a `ViewGroup` does when it dispatches into a transformed child, so it is
+     * the platform's own pattern rather than a liberty taken with a shared
+     * object.
+     *
+     * One preallocated `Matrix`, because this runs on every event at 321.75 Hz
+     * and a matrix per event is an allocation per event on the one path this
+     * project refuses them on. It is its own inverse, so the same matrix does
+     * both directions.
+     */
+    private fun mirrorEvent(event: MotionEvent) {
+        mirrorMatrix.setScale(-1f, 1f, width * 0.5f, 0f)
+        event.transform(mirrorMatrix)
+    }
+
+    /** See [mirrorEvent]. Written and read on the UI thread only. */
+    private val mirrorMatrix = Matrix()
+
+    /**
+     * Put the mirror on a document-to-view matrix, if it is on. Lr5.
+     *
+     * **Post**, not pre: the mirror is about the *view*, so it is applied after
+     * everything `CanvasTransform` describes. Pre-concatenating it would mirror
+     * the document about its own origin, which at the identity transform is the
+     * same picture and is wrong at every pan — the shape of mistake
+     * `Matrices.kt` has a page of prose about.
+     */
+    private fun mirror(m: Matrix) {
+        if (mirrored) m.postScale(-1f, 1f, width * 0.5f, 0f)
+    }
+
+    /**
+     * The document-to-view mapping the chrome should draw through. Lr5.
+     *
+     * The overlays — the ants, the guides, the transform boxes — each built
+     * their own from `transform`, and every one of them would have to know
+     * about the mirror. They ask for it here instead, which is the same
+     * argument `Matrices.kt` makes for there being one place a
+     * `CanvasTransform` becomes a `Matrix`.
+     */
+    /**
+     * The matrix a stroke is drawn through, mirror included. Lr5.
+     *
+     * A fresh instance per pen-down, which is `docToViewMatrix`'s whole point
+     * and its KDoc's warning: this one crosses to the render thread and nobody
+     * may write it again.
+     */
+    private fun strokeMatrix(t: CanvasTransform): Matrix =
+        docToViewMatrix(t).also { mirror(it) }
+
+    fun fillDocToView(out: Matrix) {
+        out.setDocToView(transform)
+        mirror(out)
+    }
+
+
+    /**
      * Reads what the eye sees. One per view; see `ColourProbe`.
      *
      * **Render thread only.** `Layer.read` refuses the main thread — the sheets
@@ -2093,6 +2153,74 @@ class InkSurfaceView(
         val argb = colourProbe.at(document, x, y, pickFromActiveOnly) ?: 0
         post { driver.deliverPick(argb) }
     }
+
+    /**
+     * Whether the canvas is shown mirrored left-to-right. Lr5.
+     *
+     * **Every beginner guide there is says the same thing**: flip the drawing
+     * and the crooked jaw, the lopsided eyes and the leaning pose jump out in
+     * under a second, because a mirrored picture is an unfamiliar one and the
+     * eye stops correcting for what it expected. Professionals flip constantly;
+     * for a beginner it is the difference between *something is wrong* and
+     * seeing what.
+     *
+     * ## It is a view mode and not a transform
+     *
+     * `CanvasTransform` is a scale, a rotation and a translation, and a mirror
+     * has a negative determinant that none of those three can express. Adding
+     * one there would change a type that is serialized positionally into every
+     * trace file, compared against `Matrices` by a test whose whole job is to
+     * catch exactly this sort of drift, and frozen at pen-down by two threads.
+     *
+     * So the mirror is applied **after** that mapping, in the one place each
+     * matrix is built, and **before** it on the way in — [mirrorEvent] flips
+     * the pointer at the door, so everything downstream works in a space where
+     * there is no mirror at all. One flip out, one flip back.
+     *
+     * ## You can draw while it is on
+     *
+     * That is the part worth being careful about and the part that makes it
+     * useful rather than a novelty: the classic use is to flip, see that the
+     * jaw is crooked, and fix it *while flipped*. A view that refused the pen
+     * could not do that.
+     */
+    @Volatile
+    var mirrored: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            // The dry matrix is cached against the transform it was built from
+            // and this is not part of that transform, so the cache has to be
+            // told separately or the first frame after a flip is the old one.
+            dryMatrixSource = null
+            onTransformChanged?.invoke()
+            redrawDry()
+        }
+
+    /**
+     * Whether the drawing is shown with its colour taken out. Lr5.
+     *
+     * The squint, as a button. Every beginner guide pairs it with the flip for
+     * the same reason: it tunes out the hue and leaves the values, which is
+     * where the mistake usually is.
+     *
+     * A **view** mode. No layer is touched, nothing enters the undo history,
+     * and what is exported is in colour — this is a way of looking, and the
+     * sheet's own [LayerStack.Entry.desaturate] is the other thing, which is
+     * about the drawing rather than about the eye.
+     */
+    @Volatile
+    var greyView: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            // The paints are **not** touched here. They stamp the committed
+            // stroke into the sheet as well as drawing the wet one, so a filter
+            // set on them for the length of the mode would make the mode
+            // permanent. `onDrawFrontBufferedLayer` sets and clears it around
+            // the one callback that is only ever the wet pass.
+            redrawDry()
+        }
 
     /** What a marquee gesture draws. UI thread. */
     var marqueeShape: MarqueeShape = MarqueeShape.RECTANGLE
@@ -2297,6 +2425,9 @@ class InkSurfaceView(
      */
     var deskColorArgb: Int = DEFAULT_DESK_COLOR
 
+    /** Lr5's grey view, as the paint its offscreen layer is composited with. */
+    private val greyPaint = Paint().apply { colorFilter = GREY }
+
     private val blitPaint = Paint().apply {
         isFilterBitmap = true
         isAntiAlias = false
@@ -2323,13 +2454,28 @@ class InkSurfaceView(
         ) {
             val m = frozenDocToView
             if (m == null) return
-            if (!indirectNeeded()) {
-                armRasterizer()
-                rasterizer.drawWet(canvas, m, param)
-                return
+            // Lr5, and **only here**. Both of these paints stamp the committed
+            // stroke into the sheet as well as drawing the wet one, so a filter
+            // left on them turns the grey *view* into a grey drawing -- which
+            // is exactly what it did on the tablet: a red stroke drawn while
+            // grey was on was still grey when grey was turned off. Set for this
+            // callback, cleared at the end of it, and never seen by the commit
+            // or by the dry frame, which has its own layer.
+            val grey = if (greyView) GREY else null
+            rasterizer.colorFilter = grey
+            scratch.colorFilter = grey
+            try {
+                if (!indirectNeeded()) {
+                    armRasterizer()
+                    rasterizer.drawWet(canvas, m, param)
+                    return
+                }
+                drawWetIndirect(canvas, m, param)
+                batches.markDrawn(param.sequence)
+            } finally {
+                rasterizer.colorFilter = null
+                scratch.colorFilter = null
             }
-            drawWetIndirect(canvas, m, param)
-            batches.markDrawn(param.sequence)
         }
 
         /**
@@ -2417,6 +2563,9 @@ class InkSurfaceView(
         val t = transform
         if (t !== dryMatrixSource) {
             dryMatrix.setDocToView(t)
+            // Lr5, after the mapping and not inside it. The cache above is keyed
+            // on the transform alone, so `mirrored`'s setter clears it.
+            mirror(dryMatrix)
             dryMatrixSource = t
         }
         val save = canvas.save()
@@ -2435,9 +2584,15 @@ class InkSurfaceView(
         // onto the desk. That is also why the layer blit is inside the
         // branch: it has to be the thing being subtracted from.
         val compositeStart = System.nanoTime()
+        // Lr5. The whole drawing through one filter, which is a full-page
+        // offscreen and is why it only happens while the mode is on. The wet
+        // stroke is filtered separately, on its own paints, because it is on
+        // the front buffer and never passes through here.
+        val grey = if (greyView) canvas.saveLayer(null, greyPaint) else -1
         compositeStack(
             canvas, 0f, 0f, document.widthPx.toFloat(), document.heightPx.toFloat(),
         )
+        if (grey >= 0) canvas.restoreToCount(grey)
         recordComposite(System.nanoTime() - compositeStart)
         canvas.restoreToCount(save)
         // After the commits, for the thumbnail's reason one paragraph down: a
@@ -2897,7 +3052,15 @@ class InkSurfaceView(
         // when it is on the readout should say what it costs rather than
         // reporting the cost of the path without it.
         if (predictionEnabled) predictor?.record(event)
+        // Lr5. The whole of the mirror's input half, and it is here rather than
+        // in six places downstream because every one of those -- the router,
+        // the gesture solver, the driver, the hover, the marquee -- would
+        // otherwise need to know about a mode none of them is about. Flipped
+        // in, flipped back out, which is exactly what a `ViewGroup` does when
+        // it dispatches into a scaled child.
+        if (mirrored) mirrorEvent(event)
         val handled = router.onTouchEvent(event, this)
+        if (mirrored) mirrorEvent(event)
         val elapsed = System.nanoTime() - t0
         driver.addDragBytes(heapUsed() - heapBefore)
         stats.recordEvent(
@@ -3101,7 +3264,7 @@ class InkSurfaceView(
             builder.snap = if (pen.erase) null else guides.snap
             strokeGuideText = if (pen.erase) null else guides.snapText
             builder.begin(inkColorArgb)
-            beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
+            beginStroke(strokeMatrix(frozen), inkColorArgb, pen.antiAlias)
         }
 
         private var seen = 0
@@ -3318,7 +3481,7 @@ class InkSurfaceView(
             // interns it, so twenty strokes with one nib hold one copy.
             strokeBrushText = BrushCodec.encode(pen)
             // A fresh Matrix per pen-down, never reused: see beginStroke.
-            beginStroke(docToViewMatrix(frozen), inkColorArgb, pen.antiAlias)
+            beginStroke(strokeMatrix(frozen), inkColorArgb, pen.antiAlias)
             // GC count first: reading it allocates a String, and taking it
             // before the heap watermark keeps that allocation out of the very
             // window it is there to validate.
@@ -4098,6 +4261,17 @@ class InkSurfaceView(
          * nothing a pen can land on.
          */
         private const val NO_PICK = Int.MIN_VALUE
+
+        /**
+         * Saturation zero, for Lr5's grey view.
+         *
+         * One instance for the process. A `ColorMatrixColorFilter` is immutable
+         * and this one is a constant, so unlike every `Paint` in this file it
+         * is safe to share between threads and between views.
+         */
+        private val GREY = android.graphics.ColorMatrixColorFilter(
+            android.graphics.ColorMatrix().apply { setSaturation(0f) },
+        )
 
         /**
          * How long pen-up waits for the render thread's last colour.

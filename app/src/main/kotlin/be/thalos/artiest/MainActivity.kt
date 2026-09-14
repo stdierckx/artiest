@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -76,7 +77,6 @@ import be.thalos.artiest.engine.brush.BrushPreset
 import be.thalos.artiest.ui.ArtiestTheme
 import be.thalos.artiest.ui.Axis
 import be.thalos.artiest.canvas.MarqueeShape
-import be.thalos.artiest.canvas.setDocToView
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
@@ -1544,6 +1544,19 @@ private fun CanvasScreen(
         }
     }
 
+    // Lr5. Two ways of looking, and neither touches the drawing. View state
+    // and not document state, so neither is saved and both are off when the
+    // app comes back -- a mode you cannot see is a mode you would never think
+    // to turn off, and the tell-tale below is the other half of that.
+    var flipView by remember { mutableStateOf(false) }
+    var greyView by remember { mutableStateOf(false) }
+
+    LaunchedEffect(surface, flipView, greyView) {
+        val v = surface ?: return@LaunchedEffect
+        v.mirrored = flipView
+        v.greyView = greyView
+    }
+
     // Lr9. A timed session. One piece of state and one clock; everything else
     // about it is the reference pane and the page, which already exist.
     var practice by remember { mutableStateOf(be.thalos.artiest.ui.PracticeState()) }
@@ -1922,7 +1935,7 @@ private fun CanvasScreen(
             },
             docToView = {
                 outlineTick.intValue
-                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                surface?.fillDocToView(outlineMatrix)
                 outlineMatrix
             },
             modifier = Modifier.fillMaxSize(),
@@ -1936,7 +1949,7 @@ private fun CanvasScreen(
                 guides = document.guides,
                 docToView = {
                     outlineTick.intValue
-                    surface?.let { outlineMatrix.setDocToView(it.transform) }
+                    surface?.fillDocToView(outlineMatrix)
                     outlineMatrix
                 },
                 onChanged = {
@@ -1973,7 +1986,7 @@ private fun CanvasScreen(
             },
             docToView = {
                 outlineTick.intValue
-                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                surface?.fillDocToView(outlineMatrix)
                 outlineMatrix
             },
             // Recomposes when the answer moves, which is once per selection
@@ -1982,6 +1995,26 @@ private fun CanvasScreen(
             showing = selectionShape.active || selecting || pickInfo.active,
             modifier = Modifier.fillMaxSize(),
         )
+
+        // Lr5's tell-tale. A view mode you forget about is a bug, and the lit
+        // button that says so may be on a bar at the other end of the glass --
+        // or on no bar at all, if the mode was turned on from a panel. A band
+        // along the top edge is on the screen wherever the eye is.
+        if (flipView || greyView) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    // The window is edge to edge, so the top of this Box is
+                    // *behind the status bar* -- a band without this is drawn,
+                    // correctly, where nobody can see it. Found by making it
+                    // twenty times too big and bright red and still not finding
+                    // it on the tablet.
+                    .systemBarsPadding()
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
 
         // Lr1's ring, over everything the canvas draws: it is the answer to a
         // question being asked right now, so nothing on the paper may cover it.
@@ -2029,7 +2062,7 @@ private fun CanvasScreen(
                 token = pickToken,
                 docToView = {
                     outlineTick.intValue
-                    surface?.let { outlineMatrix.setDocToView(it.transform) }
+                    surface?.fillDocToView(outlineMatrix)
                     outlineMatrix
                 },
                 // The preview, eight times a second: the highlight moves and
@@ -2077,7 +2110,7 @@ private fun CanvasScreen(
             sourceBounds = floatingBox,
             token = floatToken,
             docToView = {
-                surface?.let { outlineMatrix.setDocToView(it.transform) }
+                surface?.fillDocToView(outlineMatrix)
                 outlineMatrix
             },
             onMatrix = { m -> surface?.float(FloatOp.Move(m)) },
@@ -2542,6 +2575,16 @@ private fun CanvasScreen(
                         if (openCardId == card.id) openCardId = null
                         scope.launch { withContext(Dispatchers.IO) { cardFiles.delete(card.id) } }
                     },
+                    flipView = flipView,
+                    onFlipView = {
+                        flipView = it
+                        generation++
+                    },
+                    greyView = greyView,
+                    onGreyView = {
+                        greyView = it
+                        generation++
+                    },
                     practice = practice,
                     onPracticeStart = { ms ->
                         // The pictures in the pane, in the order they are in
@@ -2813,6 +2856,11 @@ private fun ToolSlot(
     onKeepNow: () -> Unit,
     onPractise: (be.thalos.artiest.card.Card) -> Unit,
     onCardDelete: (be.thalos.artiest.card.Card) -> Unit,
+    /** Lr5. Two ways of looking. */
+    flipView: Boolean,
+    onFlipView: (Boolean) -> Unit,
+    greyView: Boolean,
+    onGreyView: (Boolean) -> Unit,
     /** Lr9. The timed session. */
     practice: be.thalos.artiest.ui.PracticeState,
     onPracticeStart: (Long) -> Unit,
@@ -3062,6 +3110,20 @@ private fun ToolSlot(
             onSkip = onPracticeSkip,
             onStop = onPracticeStop,
             onDone = onPracticeDone,
+        )
+
+        ToolItem.FLIP_VIEW -> IconToolButton(
+            icon = ToolIcons.flipView,
+            label = item.label,
+            onClick = { onFlipView(!flipView) },
+            selected = flipView,
+        )
+
+        ToolItem.GREY_VIEW -> IconToolButton(
+            icon = ToolIcons.greyView,
+            label = item.label,
+            onClick = { onGreyView(!greyView) },
+            selected = greyView,
         )
 
         ToolItem.UNDO ->

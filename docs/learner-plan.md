@@ -864,6 +864,57 @@ pictures there were and a session that has not started has none. It asks the
 library now. Found on the tablet in the first ten seconds, which is what the
 device is for.
 
+## What Lr5 built
+
+`InkSurfaceView.mirrored` and `greyView`, `mirrorEvent`, `fillDocToView`, two
+catalogue entries in **Canvas** (`flip_view`, `grey_view`, catalogue version
+11), a band along the top edge, and a place on the *Learner* bar beside Fit.
+
+### The mirror is a view mode and not a transform
+
+`CanvasTransform` is a scale, a rotation and a translation; a mirror has a
+negative determinant and none of those three can express it. Putting one there
+would change a type that is serialized positionally into every trace file, held
+against `Matrices` by a test whose whole job is to catch this sort of drift, and
+frozen at pen-down by two threads.
+
+So the flip is applied **after** that mapping, in the one place each matrix is
+built, and **before** it on the way in: `mirrorEvent` flips the `MotionEvent` at
+the door and flips it back on the way out, which is exactly what a `ViewGroup`
+does when it dispatches into a transformed child. Everything downstream — the
+router, the gesture solver, the driver, the hover, the marquee — goes on working
+in a space where there is no mirror at all.
+
+The overlays stopped building their own matrices. `fillDocToView` is the one
+place the chrome asks for the mapping, which is `Matrices.kt`'s argument one
+level up.
+
+**Drawing while flipped works**, and that is the point rather than a bonus: the
+classic use is to flip, see that the jaw is crooked, and fix it *while flipped*.
+Checked on the tablet — a stroke drawn from (700, 900) to (1400, 1000) with the
+mirror on lands under the pen, not across the page from it.
+
+### The grey view that turned a drawing grey
+
+The first version set a colour filter on the two paints for as long as the mode
+was on. Those paints stamp the **committed** stroke into the sheet as well as
+drawing the wet one, so a red stroke drawn while grey was on was still grey
+when grey was turned off. The mode had edited the drawing.
+
+It is set and cleared around `onDrawFrontBufferedLayer` now — the one callback
+that is only ever the wet pass — and the dry frame gets its own `saveLayer`
+instead. Verified both ways on the tablet: the wet stroke reads `(89, 89, 89)`
+while the mode is on and `(201, 59, 39)` the moment it is off, which is the red
+it was drawn with.
+
+### The tell-tale nobody could see
+
+A band along the top edge, because a view mode you forget about is a bug and the
+lit button that says so may be on a bar at the other end of the glass. The first
+one was drawn correctly and was invisible: the window is edge to edge, so the
+top of the canvas is **behind the status bar**. Found by making it twenty times
+too big and bright red and still not finding it.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

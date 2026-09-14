@@ -347,9 +347,15 @@ object ShippedWorkspaces {
                     // One slider. Size is the only one a beginner has any use
                     // for on the first day, and the bar it is on is the one
                     // piece of chrome at the bottom of the glass.
-                    "s4", Side.BOTTOM, 5, 1,
+                    "s4", Side.BOTTOM, 7, 1,
                     ToolItem.SIZE to Cell(0, 0),
-                    ToolItem.FIT to Cell(4, 0),
+                    // The two ways of looking, beside Fit. All three are about
+                    // the eye rather than the drawing, and none of them can
+                    // lose you any work, which is what makes them the safe
+                    // three to put in front of somebody on their first day.
+                    ToolItem.FLIP_VIEW to Cell(4, 0),
+                    ToolItem.GREY_VIEW to Cell(5, 0),
+                    ToolItem.FIT to Cell(6, 0),
                 ),
             ),
         ),
@@ -362,7 +368,12 @@ object ShippedWorkspaces {
             .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.LEARN)
             .offering(ToolItem.LAYERS)
             .offering(ToolItem.LAYERS_PANEL)
-            .offering(ToolItem.FIT),
+            .offering(ToolItem.FIT)
+            // By name rather than by taking the whole Canvas group, which
+            // would bring the guides and the clear with them. These three are
+            // the ones that cannot cost a beginner any work.
+            .offering(ToolItem.FLIP_VIEW)
+            .offering(ToolItem.GREY_VIEW),
         defaults = WorkspaceDefaults(
             brush = "pen",
             stabilisation = 0.35f,

@@ -62,6 +62,8 @@ object ToolIcons {
         ToolItem.KEEP_CARD -> keepCard
         ToolItem.PRACTICE -> practice
         ToolItem.PRACTICE_PANEL -> practice
+        ToolItem.FLIP_VIEW -> flipView
+        ToolItem.GREY_VIEW -> greyView
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -472,6 +474,58 @@ object ToolIcons {
                 lineTo(16.2f, 12.6f)
                 moveTo(9.0f, 2.4f)
                 lineTo(15.0f, 2.4f)
+            }
+        }
+    }
+
+    /**
+     * A page with a mirror line down it. Lr5.
+     *
+     * Not [flipAcross], which is the same word about a different thing: that
+     * one turns the pixels you selected over, and this one turns the *view*
+     * over and touches nothing. Two buttons that did the same picture would be
+     * the pair a hand reaches for wrongly under pressure, which is exactly when
+     * both get used.
+     */
+    val flipView: ImageVector by lazy {
+        icon("flip_view") {
+            stroke {
+                moveTo(12f, 2.6f)
+                lineTo(12f, 21.4f)
+                moveTo(9.4f, 5.2f)
+                lineTo(3.2f, 5.2f)
+                lineTo(3.2f, 18.8f)
+                lineTo(9.4f, 18.8f)
+                moveTo(14.6f, 5.2f)
+                lineTo(20.8f, 5.2f)
+                lineTo(20.8f, 18.8f)
+                lineTo(14.6f, 18.8f)
+            }
+        }
+    }
+
+    /**
+     * A page, half of it solid: the squint. Lr5.
+     *
+     * A page rather than [greyscale]'s circle, because this is about the whole
+     * drawing and that one is about a sheet of it. The shapes are deliberately
+     * cousins — both are "half the colour" — and deliberately not twins.
+     */
+    val greyView: ImageVector by lazy {
+        icon("grey_view") {
+            stroke {
+                moveTo(3.4f, 4.2f)
+                lineTo(20.6f, 4.2f)
+                lineTo(20.6f, 19.8f)
+                lineTo(3.4f, 19.8f)
+                close()
+            }
+            fill {
+                moveTo(12f, 4.2f)
+                lineTo(20.6f, 4.2f)
+                lineTo(20.6f, 19.8f)
+                lineTo(12f, 19.8f)
+                close()
             }
         }
     }

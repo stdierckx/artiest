@@ -88,8 +88,13 @@ object ToolCatalogue {
      * `practice_panel`. Lr7 and Lr9. Additions to a group that already exists,
      * so a reader on 9 keeps everything and a saved workspace needs no repair:
      * whatever offered Learn already offers these.
+     *
+     * 11: `flip_view` and `grey_view`, both in **Canvas**. Lr5, and in Canvas
+     * rather than Learn because flipping the drawing to find your own mistakes
+     * is what every artist does all day — what is beginner-specific is that
+     * nobody has told them yet.
      */
-    const val VERSION = 10
+    const val VERSION = 11
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

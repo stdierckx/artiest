@@ -97,6 +97,22 @@ class DabRasterizer(
      */
     var solid: Boolean = false
 
+    /**
+     * A filter laid over every dab, or null. Lr5.
+     *
+     * The wet half of the grey view. Without it a stroke drawn while the canvas
+     * is shown in grey arrives in its own colour and turns grey when it lands,
+     * which reads as the app doing something wrong rather than as a way of
+     * looking.
+     *
+     * Set from the UI thread between strokes and read on the render thread. A
+     * `ColorMatrixColorFilter` is immutable, so what crosses is the reference;
+     * a mode changed mid-stroke lands on the next batch rather than the next
+     * dab, which is a frame and is invisible.
+     */
+    @Volatile
+    var colorFilter: android.graphics.ColorFilter? = null
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         // Subpixel dab placement. Dabs are spaced an eighth of a diameter
@@ -271,6 +287,11 @@ class DabRasterizer(
         val f = if (solid) 1f else strokeFlow * dabFlow
         paint.alpha =
             if (f >= 1f) baseAlpha else (baseAlpha * f.coerceIn(0f, 1f) + 0.5f).toInt()
+        // Lr5. Assigned per dab rather than when the mode changes, because this
+        // paint is shared and the alternative is a field that has to be kept in
+        // step with a `@Volatile` written from another thread. A reference
+        // compare is nothing beside the blit it is about to do.
+        paint.colorFilter = colorFilter
         val cache = stamps
         // An elliptical dab has no circle path. drawCircle cannot express it at
         // all, so a shaped brush forces the stamp regardless of [mode] rather

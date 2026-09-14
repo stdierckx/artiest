@@ -461,6 +461,10 @@ class ScratchLayer(
      * Paint the buffer onto [dst] without closing it. The wet pass, which has
      * to show the stroke so far on every frame and must not consume it.
      */
+    /** See `DabRasterizer.colorFilter`. The indirect path's half of Lr5. */
+    @Volatile
+    var colorFilter: android.graphics.ColorFilter? = null
+
     fun drawOnto(
         dst: Canvas,
         alpha: Float,
@@ -482,6 +486,9 @@ class ScratchLayer(
         // below, because a leftover xfermode would turn the next ordinary
         // stroke into an eraser -- a bug that looks like the undo being broken.
         compositePaint.xfermode = if (erase) eraseMode else null
+        // Lr5. See `DabRasterizer.colorFilter`: the wet half of the grey view,
+        // set here because this paint is shared and rewritten per composite.
+        compositePaint.colorFilter = colorFilter
         if (grain == null) {
             compositePaint.shader = null
             compositePaint.alpha = a
