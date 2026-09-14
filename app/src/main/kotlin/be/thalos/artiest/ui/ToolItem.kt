@@ -363,6 +363,24 @@ enum class ToolItem(
      */
     KEEP_CARD("keep_card", "Keep this drawing", "Keep", 1, ToolGroup.LEARN),
 
+    /**
+     * Lr9. A timed session: a picture, a clock, and then the page turns.
+     *
+     * Every gesture timer an artist uses is a website, which means every
+     * beginner practising on a tablet is running a browser beside their
+     * drawing app. On this tablet there is no other window.
+     */
+    PRACTICE("practice", "Practice", "Timer", 1, ToolGroup.LEARN),
+
+    /**
+     * The session, kept on a bar — which is how the clock stays visible while
+     * the pen is busy. [PRACTICE]'s pair.
+     */
+    PRACTICE_PANEL(
+        "practice_panel", "Practice panel", "Timer", 4, ToolGroup.LEARN,
+        ToolKind.PANEL, cellsTall = 3,
+    ),
+
     LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
 
     /**

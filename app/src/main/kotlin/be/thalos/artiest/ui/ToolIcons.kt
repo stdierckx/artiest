@@ -60,6 +60,8 @@ object ToolIcons {
         ToolItem.DECK -> deck
         ToolItem.DECK_PANEL -> deck
         ToolItem.KEEP_CARD -> keepCard
+        ToolItem.PRACTICE -> practice
+        ToolItem.PRACTICE_PANEL -> practice
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -450,6 +452,26 @@ object ToolIcons {
                 lineTo(18.4f, 20.0f)
                 moveTo(14.7f, 16.3f)
                 lineTo(22.1f, 16.3f)
+            }
+        }
+    }
+
+    /**
+     * A clock with a quarter gone. Lr9.
+     *
+     * A clock and not a stopwatch or an hourglass, because what this is about
+     * is *how long you get*, not how long you took. The missing quarter is the
+     * whole idea: time running out is the feature.
+     */
+    val practice: ImageVector by lazy {
+        icon("practice") {
+            stroke {
+                circle(12f, 12.6f, 8.4f)
+                moveTo(12f, 7.4f)
+                lineTo(12f, 12.6f)
+                lineTo(16.2f, 12.6f)
+                moveTo(9.0f, 2.4f)
+                lineTo(15.0f, 2.4f)
             }
         }
     }

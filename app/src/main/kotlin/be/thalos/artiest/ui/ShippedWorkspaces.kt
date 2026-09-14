@@ -327,11 +327,12 @@ object ShippedWorkspaces {
                     // undo on purpose: both are things you reach for the moment
                     // after a stroke, one because it went wrong and one because
                     // it went right.
-                    "s2", Side.TOP, 4, 1,
+                    "s2", Side.TOP, 5, 1,
                     ToolItem.UNDO to Cell(0, 0),
                     ToolItem.REDO to Cell(1, 0),
                     ToolItem.KEEP_CARD to Cell(2, 0),
                     ToolItem.DECK to Cell(3, 0),
+                    ToolItem.PRACTICE to Cell(4, 0),
                 ),
                 Surface(
                     id = "s3",

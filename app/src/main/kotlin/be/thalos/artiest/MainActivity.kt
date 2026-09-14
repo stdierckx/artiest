@@ -114,6 +114,8 @@ import be.thalos.artiest.ui.Workspace
 import be.thalos.artiest.ui.WorkspaceDefaults
 import be.thalos.artiest.ui.PickRing
 import be.thalos.artiest.ui.DeckButtonAndPanel
+import be.thalos.artiest.ui.PracticeButtonAndPanel
+import be.thalos.artiest.ui.PracticePanelCard
 import be.thalos.artiest.ui.DeckPanelCard
 import be.thalos.artiest.ui.ReferenceButton
 import be.thalos.artiest.ui.ReferencePanelCard
@@ -1542,6 +1544,71 @@ private fun CanvasScreen(
         }
     }
 
+    // Lr9. A timed session. One piece of state and one clock; everything else
+    // about it is the reference pane and the page, which already exist.
+    var practice by remember { mutableStateOf(be.thalos.artiest.ui.PracticeState()) }
+    var practiceLengthMs by remember { mutableStateOf(60_000L) }
+    var practiceOrder by remember { mutableStateOf(emptyList<String>()) }
+    var practiceStartedAt by remember { mutableStateOf(0L) }
+
+    /**
+     * A page of the session, kept small, and then the page turns. Lr9.
+     *
+     * The snapshot is what the contact sheet at the end is made of, and it is
+     * taken at [PRACTICE_SHOT_PX] rather than a card's 1024: twenty pages at
+     * card size is eighty megabytes held in a composition, which is not a
+     * review, it is an out-of-memory.
+     *
+     * `requestClear` and not a new project. A session of twenty poses would
+     * otherwise leave twenty directories on the tablet, most of them holding a
+     * thirty-second sketch nobody asked to keep. What the user *does* want to
+     * keep, they keep: the deck is one button away and the clear is one undo.
+     */
+    suspend fun turnPage(from: String?) {
+        val shot = be.thalos.artiest.card.CardSnapshot.of(document, PRACTICE_SHOT_PX)
+        if (from != null) {
+            practice = practice.copy(drawn = practice.drawn + (from to shot?.bitmap))
+        } else {
+            shot?.bitmap?.recycle()
+        }
+        document.requestClear()
+        surface?.redrawDry()
+    }
+
+    /** Move to the next picture, or finish. Lr9. */
+    fun nextPose(skip: Boolean) {
+        scope.launch {
+            val order = practiceOrder
+            val at = practice.index
+            turnPage(order.getOrNull(at))
+            val next = at + 1
+            if (next >= order.size) {
+                practice = practice.copy(running = false, finished = true, left = 0f)
+                return@launch
+            }
+            refSelected = order[next]
+            practiceStartedAt = System.currentTimeMillis()
+            practice = practice.copy(index = next, left = 1f)
+            if (skip) generation++
+        }
+    }
+
+    // The clock. A tenth of a second while a session is running and nothing at
+    // all otherwise, which is the same bargain the layers poll makes.
+    LaunchedEffect(practice.running, practice.index) {
+        if (!practice.running) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(100)
+            val gone = System.currentTimeMillis() - practiceStartedAt
+            val left = 1f - gone.toFloat() / practiceLengthMs
+            if (left <= 0f) {
+                nextPose(skip = false)
+                return@LaunchedEffect
+            }
+            practice = practice.copy(left = left)
+        }
+    }
+
     val refPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -2475,6 +2542,41 @@ private fun CanvasScreen(
                         if (openCardId == card.id) openCardId = null
                         scope.launch { withContext(Dispatchers.IO) { cardFiles.delete(card.id) } }
                     },
+                    practice = practice,
+                    onPracticeStart = { ms ->
+                        // The pictures in the pane, in the order they are in
+                        // it. Shuffling is the obvious idea and the wrong one
+                        // here: a beginner who has put four hands in the
+                        // library has put them there in an order, and a random
+                        // one is a library they cannot work through.
+                        val order = refPictures.map { it.id }
+                        if (order.isNotEmpty()) {
+                            practiceLengthMs = ms
+                            practiceOrder = order
+                            practiceStartedAt = System.currentTimeMillis()
+                            refSelected = order.first()
+                            practice = be.thalos.artiest.ui.PracticeState(
+                                running = true, index = 0, total = order.size, left = 1f,
+                            )
+                            generation++
+                        }
+                    },
+                    onPracticeSkip = { nextPose(skip = true) },
+                    onPracticeStop = {
+                        practice = practice.copy(
+                            running = false,
+                            finished = practice.drawn.isNotEmpty(),
+                        )
+                        generation++
+                    },
+                    onPracticeDone = {
+                        // The pictures are released here rather than left to
+                        // the collector: twenty pages is tens of megabytes and
+                        // nothing else is holding them.
+                        for ((_, bmp) in practice.drawn) bmp?.recycle()
+                        practice = be.thalos.artiest.ui.PracticeState()
+                        generation++
+                    },
                     onRefRemove = { id ->
                         // The list first, so the panel never draws a row whose
                         // file has gone. The delete is the slow half and it
@@ -2711,6 +2813,12 @@ private fun ToolSlot(
     onKeepNow: () -> Unit,
     onPractise: (be.thalos.artiest.card.Card) -> Unit,
     onCardDelete: (be.thalos.artiest.card.Card) -> Unit,
+    /** Lr9. The timed session. */
+    practice: be.thalos.artiest.ui.PracticeState,
+    onPracticeStart: (Long) -> Unit,
+    onPracticeSkip: () -> Unit,
+    onPracticeStop: () -> Unit,
+    onPracticeDone: () -> Unit,
     barrel: Boolean,
     exporting: Boolean,
     importing: Boolean,
@@ -2932,6 +3040,28 @@ private fun ToolSlot(
             icon = ToolIcons.keepCard,
             label = item.label,
             onClick = onKeepNow,
+        )
+
+        // Lr9. The clock, and the contact sheet at the end of it.
+        ToolItem.PRACTICE -> PracticeButtonAndPanel(
+            state = practice,
+            available = refPictures.size,
+            thumbnails = refThumbs,
+            onStart = onPracticeStart,
+            onSkip = onPracticeSkip,
+            onStop = onPracticeStop,
+            onDone = onPracticeDone,
+            onFixate = { onFixate(ToolItem.PRACTICE_PANEL, it) },
+        )
+
+        ToolItem.PRACTICE_PANEL -> PracticePanelCard(
+            state = practice,
+            available = refPictures.size,
+            thumbnails = refThumbs,
+            onStart = onPracticeStart,
+            onSkip = onPracticeSkip,
+            onStop = onPracticeStop,
+            onDone = onPracticeDone,
         )
 
         ToolItem.UNDO ->
@@ -3948,6 +4078,15 @@ private const val REF_THUMB_PX = 256
 
 /** Lr7. See [REF_THUMB_PX]; a card's row draws it at 54dp. */
 private const val CARD_THUMB_PX = 192
+
+/**
+ * How big a page of a practice session is kept, for the contact sheet. Lr9.
+ *
+ * Small on purpose. Twenty pages at a card's 1024 is eighty megabytes held in
+ * a composition, and what is wanted at the end is a *review*, which is a thing
+ * you look at rather than a thing you zoom into.
+ */
+private const val PRACTICE_SHOT_PX = 384
 
 /**
  * How faint a card's drawing is under a practice page. Lr7.

@@ -815,6 +815,55 @@ Five or six cards drawn in the app, on a box in perspective, a head from the
 side, a hand. They are drawings and they have to be *drawn*, by somebody with a
 pen, which is the one part of this plan that is not a software task.
 
+## What Lr9 built
+
+`ui/PracticePanel.kt`, `PracticeState`, two catalogue entries (`practice`,
+`practice_panel`, catalogue version 10), a clock in the screen, and a place on
+the *Learner* bar.
+
+### The timer is the feature
+
+One of the gesture sites says it out loud: *"the single biggest gain isn't the
+reference library — it's the timer, as the pressure forces you to commit to
+lines, prioritize the largest shapes first, and stop fussing with details."*
+Everything here is a clock, a page turn, and getting out of the way.
+
+A **bar draining**, not a number counting down. A number asks to be read; a bar
+is seen without looking away from the paper, which is where the eyes are meant
+to be.
+
+### No score, ever
+
+No streak, no badge, nothing to beat. Drawabox's 50 % rule exists because *the
+finished result already gets in the way of the learning*, and a number to chase
+makes that worse. What the end offers is **what you drew beside what you drew it
+from** — a review, not a mark — and it is nearly free, because both pictures
+already exist.
+
+### A page turn is a clear, not a new project
+
+Twenty poses would otherwise leave twenty directories on the tablet, most of
+them holding a thirty-second sketch nobody asked to keep. What a person *does*
+want to keep, they keep: the deck is one button away and the clear is one undo.
+
+**It clears the sheet the pen is on**, which is right for the one-sheet page a
+beginner is drawing on and is worth knowing for any other: a ghost on a locked
+sheet underneath stays, which is what you want when practising from a card and
+is the only case where the two differ.
+
+The contact sheet's pages are kept at 384 px rather than a card's 1024. Twenty
+at card size is eighty megabytes held in a composition, and what is wanted at
+the end is something you look at rather than something you zoom into. They are
+released on **Done** rather than left to the collector.
+
+### The count that was zero
+
+The panel first read *"add some pictures to the reference pane first"* over a
+panel with a picture in it, because it was asking the **session** how many
+pictures there were and a session that has not started has none. It asks the
+library now. Found on the tablet in the first ten seconds, which is what the
+device is for.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

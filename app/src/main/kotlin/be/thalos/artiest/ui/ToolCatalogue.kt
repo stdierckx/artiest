@@ -83,8 +83,13 @@ object ToolCatalogue {
      * listing it had. What an old **saved workspace** does not have is the new
      * group in its filter, which is why `WorkspaceJson` adds it on the way in —
      * see `decodeFilter`.
+     *
+     * 10: the rest of Learn — `deck`, `deck_panel`, `keep_card`, `practice` and
+     * `practice_panel`. Lr7 and Lr9. Additions to a group that already exists,
+     * so a reader on 9 keeps everything and a saved workspace needs no repair:
+     * whatever offered Learn already offers these.
      */
-    const val VERSION = 9
+    const val VERSION = 10
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

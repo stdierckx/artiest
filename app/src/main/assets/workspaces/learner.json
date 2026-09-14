@@ -1,6 +1,6 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 9,
+  "catalogue": 10,
   "id": "learner",
   "name": "Learner",
   "description": "A picture to draw from, and somewhere to keep what you work out.",
@@ -26,13 +26,14 @@
     {
       "id": "s2",
       "anchor": "top",
-      "rects": [[0, 0, 4, 1]],
+      "rects": [[0, 0, 5, 1]],
       "flow": "right_down",
       "tools": [
         {"id": "undo", "at": [0, 0]},
         {"id": "redo", "at": [1, 0]},
         {"id": "keep_card", "at": [2, 0]},
-        {"id": "deck", "at": [3, 0]}
+        {"id": "deck", "at": [3, 0]},
+        {"id": "practice", "at": [4, 0]}
       ]
     },
     {

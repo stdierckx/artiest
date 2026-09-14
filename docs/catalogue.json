@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 9,
+  "version": 10,
   "cell_dp": 44,
   "groups": [
     {
@@ -434,6 +434,26 @@
       "kind": "toggle",
       "cells_wide": 1,
       "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "practice",
+      "label": "Practice",
+      "short": "Timer",
+      "group": "learn",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "practice_panel",
+      "label": "Practice panel",
+      "short": "Timer",
+      "group": "learn",
+      "kind": "panel",
+      "cells_wide": 4,
+      "cells_tall": 3,
       "turns": false
     },
     {
