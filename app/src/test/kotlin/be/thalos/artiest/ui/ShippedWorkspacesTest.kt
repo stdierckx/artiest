@@ -132,6 +132,27 @@ class ShippedWorkspacesTest {
     }
 
     @Test
+    fun `Learner is defined by what it leaves out`() {
+        val ws = assertNotNull(ShippedWorkspaces.byId(ShippedWorkspaces.LEARNER))
+        // The promise this workspace makes is subtraction, so the test is about
+        // what is *not* offered. A beginner who cannot yet tell a good
+        // interface from a bad one will assume anything confusing is their own
+        // fault, which is why this one is checked rather than eyeballed.
+        assertFalse(ToolItem.MARQUEE in ws.filter, "Learner offers the marquee")
+        assertFalse(ToolItem.SELECTION_PANEL in ws.filter, "Learner offers the selection panel")
+        assertFalse(ToolItem.GUIDES in ws.filter, "Learner offers the guides")
+        // And the two things it adds, which are the reason it exists.
+        assertTrue(ToolItem.REFERENCE_PANEL in ws.filter)
+        assertTrue(ToolItem.DECK in ws.filter)
+        // The pane is on the glass rather than behind a button: a feature a
+        // beginner has to discover is a feature they do not have.
+        val placed = ws.layout.surfaces.flatMap { it.slots.placements }.map { it.item }
+        assertTrue(ToolItem.REFERENCE_PANEL in placed, "the pane is not on screen")
+        assertTrue(ToolItem.KEEP_CARD in placed, "there is no way to keep a drawing")
+        assertTrue(ToolItem.PICK_COLOUR in placed, "there is no picker on the bar")
+    }
+
+    @Test
     fun `Inker leans the pen before the line is drawn`() {
         // The one shipped workspace with anything in its defaults, and the one
         // number that separates inking from sketching. WorkspaceDefaults' KDoc
@@ -145,9 +166,10 @@ class ShippedWorkspacesTest {
         assertTrue(steady > 0.3f, "an inker's hand is steadier than that: $steady")
         assertTrue(steady < 0.7f, "past here the wet tail trails the nib: $steady")
 
-        // And nothing else ships with defaults, so switching away from Inker
-        // does not quietly put a pencil in your hand.
-        for (other in ShippedWorkspaces.all().filter { it.id != ShippedWorkspaces.INKER }) {
+        // And only *Learner* does the same, so switching to Sketcher or Clean
+        // does not quietly put a different pen in your hand.
+        val speaks = setOf(ShippedWorkspaces.INKER, ShippedWorkspaces.LEARNER)
+        for (other in ShippedWorkspaces.all().filter { it.id !in speaks }) {
             assertTrue(other.defaults.isEmpty, "${other.id} moves a tool on arrival")
         }
     }

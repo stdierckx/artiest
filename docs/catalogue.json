@@ -97,6 +97,26 @@
       "turns": false
     },
     {
+      "id": "deck",
+      "label": "Deck",
+      "short": "Deck",
+      "group": "learn",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "deck_panel",
+      "label": "Deck panel",
+      "short": "Deck",
+      "group": "learn",
+      "kind": "panel",
+      "cells_wide": 4,
+      "cells_tall": 6,
+      "turns": false
+    },
+    {
       "id": "erase_junction",
       "label": "Erase to the junction",
       "short": "Junct",
@@ -271,6 +291,16 @@
       "label": "Import picture",
       "short": "Import",
       "group": "file",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "keep_card",
+      "label": "Keep this drawing",
+      "short": "Keep",
+      "group": "learn",
       "kind": "button",
       "cells_wide": 1,
       "cells_tall": 1,

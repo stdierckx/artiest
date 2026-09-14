@@ -341,6 +341,28 @@ enum class ToolItem(
         ToolKind.PANEL, cellsTall = 5,
     ),
 
+    /**
+     * Lr7. Your deck of cards: the drawings you kept and what you said about
+     * them, and the tutorials somebody sent you, which are the same thing.
+     */
+    DECK("deck", "Deck", "Deck", 1, ToolGroup.LEARN),
+
+    /** The deck, kept on a bar. [DECK]'s pair, as [COLOUR_PANEL] is [COLOUR]'s. */
+    DECK_PANEL(
+        "deck_panel", "Deck panel", "Deck", 4, ToolGroup.LEARN, ToolKind.PANEL, cellsTall = 6,
+    ),
+
+    /**
+     * Keep the drawing that is on the paper, as a card.
+     *
+     * A button of its own as well as a line in the deck panel, because it is
+     * the one act in this feature that happens *while you are drawing* — you
+     * have just done a thing well and you want it before you forget how. A
+     * feature you have to open a panel to reach at that moment is a feature
+     * that does not get used.
+     */
+    KEEP_CARD("keep_card", "Keep this drawing", "Keep", 1, ToolGroup.LEARN),
+
     LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
 
     /**

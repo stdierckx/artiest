@@ -753,6 +753,68 @@ zoomed into an eyelash. It needs a composited page thumbnail, which is a render
 thread request like `ColourProbe`'s, and it is a separable piece of work rather
 than a corner cut: everything above stands without it.
 
+## What Lr7 and Lr8 built
+
+`card/Card.kt`, `card/CardFiles.kt`, `card/CardSnapshot.kt`, `ui/DeckPanel.kt`,
+three catalogue entries (`deck`, `deck_panel`, `keep_card`), a fifth shipped
+workspace, and flags on `LayerOp.Add`.
+
+### You author it by drawing
+
+A card is four things and the type says so: a title, one note, tags, a drawing.
+`MAX_NOTE` is 240 characters and that is the rule rather than a buffer size — a
+box that grows invites an essay, and an essay is the thing this must not
+become.
+
+The **Keep** button on the bar takes the drawing with nothing written on it. A
+form in the way of the one act that happens mid-drawing is a form that stops the
+act happening; the card is named later, from the deck, when the hand is free.
+
+### Practice this opens a new drawing, never the one you are in
+
+A thing being learned from has to survive being learned from, and practising
+into the drawing the card was made from is the one way this feature could cost
+somebody work.
+
+Two sheets go on the new page: the card's drawing at 30 %, locked and marked as
+a reference, and a clean one over it. Both had to be right **from birth**, which
+is why `LayerOp.Add` now carries opacity, locked and reference — a caller that
+added a plain sheet and corrected it afterwards would have to wait for an id the
+render thread has not allocated yet, and the ghost would be solid, editable and
+exportable for however long that took.
+
+### The deck has two states and no more
+
+The shelf, or one card open. Not a browser, not a folder tree, not a search.
+Trap 2 says what this must never become and the shortest way to hold that line
+is a panel that cannot be in a third state.
+
+### Lr8: the workspace defined by subtraction
+
+*Learner* ships fifth. Two brushes and an eraser rather than the shelf of
+sixteen; no selection panel, no guides, no blend modes. The filter is Draw, Edit
+and Learn, and that is the whole of it.
+
+What is *added* is the two things a beginner needs that nothing else on this
+tablet gives them, and both are **on the glass rather than behind a button**:
+the reference pane docked right, and Keep beside undo on the top bar — one
+because the stroke went wrong and one because it went right.
+
+Stabilisation is 0.35: above the app's 0.15 because an unsteady hand is the
+first thing that makes a beginner think they cannot draw, below *Inker*'s 0.55
+because a line that lags is its own kind of discouraging. It is the second
+shipped workspace with anything in its defaults.
+
+**Verified on the DTH-A116**, the whole loop: draw, Keep, open the deck, open
+the card, Practice this, and a black stroke lands on a clean sheet over a faint
+ghost of what was kept.
+
+### The starter deck is not built
+
+Five or six cards drawn in the app, on a box in perspective, a head from the
+side, a hand. They are drawings and they have to be *drawn*, by somebody with a
+pen, which is the one part of this plan that is not a software task.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

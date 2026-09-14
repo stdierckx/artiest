@@ -113,6 +113,8 @@ import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
 import be.thalos.artiest.ui.WorkspaceDefaults
 import be.thalos.artiest.ui.PickRing
+import be.thalos.artiest.ui.DeckButtonAndPanel
+import be.thalos.artiest.ui.DeckPanelCard
 import be.thalos.artiest.ui.ReferenceButton
 import be.thalos.artiest.ui.ReferencePanelCard
 import be.thalos.artiest.ui.ProjectGallery
@@ -1426,6 +1428,120 @@ private fun CanvasScreen(
         addReference(uri, "")
     }
 
+    // Lr7. The deck: drawings you kept, with a sentence each. Same shape as the
+    // reference library one directory along, and for the same reasons.
+    val cardFiles = remember(context) {
+        be.thalos.artiest.card.CardFiles(java.io.File(context.filesDir, "cards"))
+    }
+    var cards by remember { mutableStateOf(emptyList<be.thalos.artiest.card.Card>()) }
+    var cardThumbs by remember { mutableStateOf(emptyMap<String, android.graphics.Bitmap>()) }
+    var cardTags by remember { mutableStateOf(emptyList<String>()) }
+    var cardTag by remember { mutableStateOf<String?>(null) }
+    var openCardId by remember { mutableStateOf<String?>(null) }
+    var openCardBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    LaunchedEffect(cardFiles) {
+        val list = withContext(Dispatchers.IO) { cardFiles.list() }
+        cards = list
+        cardTags = list.flatMap { it.tags }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+
+    LaunchedEffect(cards) {
+        cardThumbs = withContext(Dispatchers.IO) {
+            cards.mapNotNull { c -> cardFiles.loadSmall(c.id, CARD_THUMB_PX)?.let { c.id to it } }
+                .toMap()
+        }
+    }
+
+    LaunchedEffect(openCardId) {
+        val id = openCardId
+        openCardBitmap = if (id == null) null else withContext(Dispatchers.IO) {
+            cardFiles.load(id)
+        }
+    }
+
+    /**
+     * Keep the drawing that is on the paper, as a card. Lr7.
+     *
+     * The snapshot is taken on a background dispatcher because `Layer.read`
+     * refuses the main thread, which is the rule `ColourProbe` learned the hard
+     * way. The compositor leaves reference sheets out, for the PNG export's
+     * reason: a card is a thing you keep and hand on, and a photograph you were
+     * drawing *from* does not belong in it.
+     */
+    fun keepCard(title: String, note: String, tags: List<String>) {
+        scope.launch {
+            val taken = be.thalos.artiest.card.CardSnapshot.of(document)
+            if (taken == null) {
+                importNote = "nothing to keep: the drawing was closed"
+                return@launch
+            }
+            val made = withContext(Dispatchers.IO) {
+                cardFiles.add(taken.bitmap, title, note, tags, project.name)
+            }
+            taken.bitmap.recycle()
+            if (made == null) {
+                importNote = "that card could not be written"
+                return@launch
+            }
+            cards = listOf(made) + cards
+            cardTags = cards.flatMap { it.tags }.distinct()
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+            importNote = "kept" + when (taken.referencesSkipped) {
+                0 -> ""
+                1 -> " (1 reference layer left out)"
+                else -> " (${taken.referencesSkipped} reference layers left out)"
+            }
+        }
+    }
+
+    /**
+     * A new page with the card's drawing under it as a ghost. Lr7.
+     *
+     * **A new drawing and never the one you are in.** A card is a thing being
+     * learned from, and a thing being learned from has to survive being learned
+     * from: practising into the drawing the card was made from would be the one
+     * way this feature could cost somebody work.
+     *
+     * Two sheets go on: the ghost, faint and locked and left out of exports
+     * from birth — see `LayerOp.Add` — and a clean one over it, which is where
+     * the pen lands.
+     */
+    fun practiseCard(card: be.thalos.artiest.card.Card) {
+        scope.launch {
+            val ghost = withContext(Dispatchers.IO) { cardFiles.load(card.id) }
+            if (ghost == null) {
+                importNote = "that card's picture could not be read"
+                return@launch
+            }
+            leave()
+            val name = card.title.ifEmpty { "Practice" }
+            val made = projects.make(name, document.widthPx, document.heightPx)
+            project = made
+            saver.forget()
+            attach(made)
+            projectEntries = projects.list()
+            gallery = false
+            openCardId = null
+
+            val sheet = document.newLayer()
+            val painted = withContext(Dispatchers.IO) {
+                PictureImporter.paint(sheet, ghost, document.widthPx, document.heightPx)
+            }
+            ghost.recycle()
+            if (!painted) {
+                sheet.close()
+                return@launch
+            }
+            document.requestLayers(
+                LayerOp.Add(sheet, name, opacity = GHOST_OPACITY, locked = true, reference = true),
+            )
+            document.requestLayers(LayerOp.Add(document.newLayer(), "Drawing"))
+            surface?.redrawDry()
+            generation++
+        }
+    }
+
     val refPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -2339,6 +2455,26 @@ private fun CanvasScreen(
                             ),
                         )
                     },
+                    cards = cards,
+                    cardThumbs = cardThumbs,
+                    cardTags = cardTags,
+                    cardTag = cardTag,
+                    onCardTag = { cardTag = it },
+                    openCard = cards.firstOrNull { it.id == openCardId },
+                    openCardBitmap = openCardBitmap,
+                    onCardOpen = { openCardId = it },
+                    onKeepCard = { title, note, tags -> keepCard(title, note, tags) },
+                    // The bar button keeps it with nothing written on it. A
+                    // form in the way of the one act that happens mid-drawing
+                    // is a form that stops the act happening; the card can be
+                    // named later, from the deck, when the hand is free.
+                    onKeepNow = { keepCard("", "", emptyList()) },
+                    onPractise = { practiseCard(it) },
+                    onCardDelete = { card ->
+                        cards = cards.filterNot { it.id == card.id }
+                        if (openCardId == card.id) openCardId = null
+                        scope.launch { withContext(Dispatchers.IO) { cardFiles.delete(card.id) } }
+                    },
                     onRefRemove = { id ->
                         // The list first, so the panel never draws a row whose
                         // file has gone. The delete is the slow half and it
@@ -2561,6 +2697,20 @@ private fun ToolSlot(
     onRefSelect: (String) -> Unit,
     onRefAdd: () -> Unit,
     onRefRemove: (String) -> Unit,
+    /** Lr7. The deck. */
+    cards: List<be.thalos.artiest.card.Card>,
+    cardThumbs: Map<String, android.graphics.Bitmap>,
+    cardTags: List<String>,
+    cardTag: String?,
+    onCardTag: (String?) -> Unit,
+    openCard: be.thalos.artiest.card.Card?,
+    openCardBitmap: android.graphics.Bitmap?,
+    onCardOpen: (String?) -> Unit,
+    onKeepCard: (String, String, List<String>) -> Unit,
+    /** Keep it with no title and no note: the button on the bar. */
+    onKeepNow: () -> Unit,
+    onPractise: (be.thalos.artiest.card.Card) -> Unit,
+    onCardDelete: (be.thalos.artiest.card.Card) -> Unit,
     barrel: Boolean,
     exporting: Boolean,
     importing: Boolean,
@@ -2746,6 +2896,42 @@ private fun ToolSlot(
             onAdd = onRefAdd,
             onRemove = onRefRemove,
             onInk = onInk,
+        )
+
+        // Lr7. The deck, and the one act that happens while you are drawing.
+        ToolItem.DECK -> DeckButtonAndPanel(
+            cards = cards,
+            thumbnails = cardThumbs,
+            tags = cardTags,
+            tag = cardTag,
+            onTag = onCardTag,
+            open = openCard,
+            openBitmap = openCardBitmap,
+            onOpen = onCardOpen,
+            onKeep = onKeepCard,
+            onPractise = onPractise,
+            onDelete = onCardDelete,
+            onFixate = { onFixate(ToolItem.DECK_PANEL, it) },
+        )
+
+        ToolItem.DECK_PANEL -> DeckPanelCard(
+            cards = cards,
+            thumbnails = cardThumbs,
+            tags = cardTags,
+            tag = cardTag,
+            onTag = onCardTag,
+            open = openCard,
+            openBitmap = openCardBitmap,
+            onOpen = onCardOpen,
+            onKeep = onKeepCard,
+            onPractise = onPractise,
+            onDelete = onCardDelete,
+        )
+
+        ToolItem.KEEP_CARD -> IconToolButton(
+            icon = ToolIcons.keepCard,
+            label = item.label,
+            onClick = onKeepNow,
         )
 
         ToolItem.UNDO ->
@@ -3759,6 +3945,19 @@ private const val WET_TEST_ALPHA = 0.3f
  * on a 230 dpi panel.
  */
 private const val REF_THUMB_PX = 256
+
+/** Lr7. See [REF_THUMB_PX]; a card's row draws it at 54dp. */
+private const val CARD_THUMB_PX = 192
+
+/**
+ * How faint a card's drawing is under a practice page. Lr7.
+ *
+ * Faint enough that what you draw over it is clearly yours and not a trace,
+ * strong enough to steer by. It is a starting point and not a setting: the
+ * layer's own opacity slider is right there, and that slider is the whole of
+ * the trace-to-freehand ladder `docs/learner-plan.md` describes.
+ */
+private const val GHOST_OPACITY = 0.3f
 
 private const val ZOOM_STEP = 1.25f
 

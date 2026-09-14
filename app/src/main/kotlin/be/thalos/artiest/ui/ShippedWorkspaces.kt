@@ -47,6 +47,7 @@ import be.thalos.artiest.engine.brush.BrushPreset
 object ShippedWorkspaces {
 
     const val SKETCHER = "sketcher"
+    const val LEARNER = "learner"
     const val INKER = "inker"
     const val CLEAN = "clean"
     const val EVERYTHING = "everything"
@@ -55,9 +56,10 @@ object ShippedWorkspaces {
     const val DIRECTORY = "workspaces"
 
     /** In the order the chooser lists them: the one you want most, first. */
-    val ids: List<String> = listOf(SKETCHER, INKER, CLEAN, EVERYTHING)
+    val ids: List<String> = listOf(SKETCHER, INKER, LEARNER, CLEAN, EVERYTHING)
 
-    fun all(): List<Workspace> = listOf(sketcher(), inker(), clean(), everything())
+    fun all(): List<Workspace> =
+        listOf(sketcher(), inker(), learner(), clean(), everything())
 
     fun byId(id: String): Workspace? = all().firstOrNull { it.id == id }
 
@@ -275,6 +277,97 @@ object ShippedWorkspaces {
      * for: an L whose corner does not point into the corner it is sitting in is
      * not what anybody means by an L there.
      */
+    /**
+     * The beginner's workspace, and **the only one defined by subtraction**.
+     *
+     * Lr8. `docs/master-plan.md`: *"a workspace named Inker is a promise."* A
+     * workspace named *Learner* makes a harder promise than the others, because
+     * the person opening it cannot yet tell a good interface from a bad one and
+     * will assume anything confusing is their own fault.
+     *
+     * So: two brushes and an eraser rather than the shelf of sixteen; no
+     * selection panel, no guides, no blend modes, no layer effects. What is
+     * *added* is the two things a beginner needs that nothing else on this
+     * tablet gives them — a picture to draw from, and somewhere to keep what
+     * they worked out.
+     *
+     * **The reference pane is on the glass by default**, docked right, rather
+     * than behind a button. A feature a beginner has to discover is a feature
+     * they do not have, and this is the one that has to be visible for the rest
+     * to make sense.
+     *
+     * Stabilisation is 0.35: above the app's own 0.15 because an unsteady hand
+     * is the first thing that makes a beginner think they cannot draw, and
+     * below *Inker*'s 0.55 because a line that lags is its own kind of
+     * discouraging.
+     */
+    private fun learner(): Workspace = Workspace(
+        id = LEARNER,
+        name = "Learner",
+        description = "A picture to draw from, and somewhere to keep what you work out.",
+        author = "artiest",
+        layout = DockLayout.of(
+            listOf(
+                DockLayout.anchored(
+                    // Six, and every one of them a thing you hold. The picker
+                    // is here rather than in the colour panel's corner because
+                    // taking a colour off the reference is half of what this
+                    // workspace is for, and a beginner will not find a button
+                    // inside a panel they have not opened.
+                    "s1", Side.LEFT, 1, 6,
+                    ToolItem.PEN to Cell(0, 0),
+                    ToolItem.PENCIL to Cell(0, 1),
+                    ToolItem.HARD_ERASER to Cell(0, 2),
+                    ToolItem.COLOUR to Cell(0, 3),
+                    ToolItem.PICK_COLOUR to Cell(0, 4),
+                    ToolItem.LAYERS to Cell(0, 5),
+                ),
+                DockLayout.anchored(
+                    // What you did, and somewhere to keep it. Keep is beside
+                    // undo on purpose: both are things you reach for the moment
+                    // after a stroke, one because it went wrong and one because
+                    // it went right.
+                    "s2", Side.TOP, 4, 1,
+                    ToolItem.UNDO to Cell(0, 0),
+                    ToolItem.REDO to Cell(1, 0),
+                    ToolItem.KEEP_CARD to Cell(2, 0),
+                    ToolItem.DECK to Cell(3, 0),
+                ),
+                Surface(
+                    id = "s3",
+                    flow = FlowOrder.DOWN_THEN_RIGHT,
+                    slots = SurfaceLayout.of(
+                        CellRegion.block(4, 5),
+                        listOf(CellPlacement(ToolItem.REFERENCE_PANEL, 0, 0, 4, 5)),
+                    ),
+                    anchor = Anchor.Edge(Side.RIGHT),
+                ),
+                DockLayout.anchored(
+                    // One slider. Size is the only one a beginner has any use
+                    // for on the first day, and the bar it is on is the one
+                    // piece of chrome at the bottom of the glass.
+                    "s4", Side.BOTTOM, 5, 1,
+                    ToolItem.SIZE to Cell(0, 0),
+                    ToolItem.FIT to Cell(4, 0),
+                ),
+            ),
+        ),
+        // Draw, Edit and Learn, and nothing else. Selection is deliberately
+        // absent: a beginner does not need twenty-one buttons about choosing
+        // pixels, and `docs/ui-space-plan.md` has already been through the
+        // argument that a panel of that size is overwhelming to somebody who
+        // does know what it is for.
+        filter = CatalogueFilter
+            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.LEARN)
+            .offering(ToolItem.LAYERS)
+            .offering(ToolItem.LAYERS_PANEL)
+            .offering(ToolItem.FIT),
+        defaults = WorkspaceDefaults(
+            brush = "pen",
+            stabilisation = 0.35f,
+        ),
+    )
+
     private fun clean(): Workspace = Workspace(
         id = CLEAN,
         name = "Clean",

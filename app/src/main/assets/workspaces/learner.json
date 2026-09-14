@@ -1,0 +1,58 @@
+{
+  "artiest_workspace": 2,
+  "catalogue": 9,
+  "id": "learner",
+  "name": "Learner",
+  "description": "A picture to draw from, and somewhere to keep what you work out.",
+  "author": "artiest",
+  "revision": 1,
+  "filter": {"groups": ["edit", "draw", "learn"], "hide": [], "show": ["fit", "layers", "layers_panel"]},
+  "defaults": {"brush": "pen", "shelf": [], "stabilisation": 0.35},
+  "surfaces": [
+    {
+      "id": "s1",
+      "anchor": "left",
+      "rects": [[0, 0, 1, 6]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "pen", "at": [0, 0]},
+        {"id": "pencil", "at": [0, 1]},
+        {"id": "hard_eraser", "at": [0, 2]},
+        {"id": "colour", "at": [0, 3]},
+        {"id": "pick_colour", "at": [0, 4]},
+        {"id": "layers", "at": [0, 5]}
+      ]
+    },
+    {
+      "id": "s2",
+      "anchor": "top",
+      "rects": [[0, 0, 4, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "undo", "at": [0, 0]},
+        {"id": "redo", "at": [1, 0]},
+        {"id": "keep_card", "at": [2, 0]},
+        {"id": "deck", "at": [3, 0]}
+      ]
+    },
+    {
+      "id": "s3",
+      "anchor": "right",
+      "rects": [[0, 0, 4, 5]],
+      "flow": "down_right",
+      "tools": [
+        {"id": "reference_panel", "at": [0, 0], "size": [4, 5]}
+      ]
+    },
+    {
+      "id": "s4",
+      "anchor": "bottom",
+      "rects": [[0, 0, 5, 1]],
+      "flow": "right_down",
+      "tools": [
+        {"id": "size", "at": [0, 0]},
+        {"id": "fit", "at": [4, 0]}
+      ]
+    }
+  ]
+}

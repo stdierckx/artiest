@@ -277,7 +277,14 @@ class LayerStack(
                 // at the top would put it over work the user had deliberately
                 // left above.
                 val at = activePosition + 1
-                entries.add(at, Entry(nextId++, op.layer, op.name, 1f, true))
+                entries.add(
+                    at,
+                    Entry(
+                        nextId++, op.layer, op.name, op.opacity.coerceIn(0f, 1f), true,
+                        locked = op.locked,
+                        reference = op.reference,
+                    ),
+                )
                 activeIndex = at
                 true
             }
@@ -695,8 +702,23 @@ sealed interface LayerOp {
         val carried: List<Layer>
     }
 
-    /** A new empty sheet above the active one. */
-    class Add(val layer: Layer, val name: String) : Carrying {
+    /**
+     * A new empty sheet above the active one.
+     *
+     * [opacity], [locked] and [reference] arrive with it rather than in three
+     * operations after it, and the reason is Lr7's *Practice this*: a ghost
+     * sheet has to be faint, untouchable and left out of exports **from birth**.
+     * A caller that added it plain and then corrected it would have to wait for
+     * an id this thread has not allocated yet, and the sheet would be solid,
+     * editable and exportable for however long that took.
+     */
+    class Add(
+        val layer: Layer,
+        val name: String,
+        val opacity: Float = 1f,
+        val locked: Boolean = false,
+        val reference: Boolean = false,
+    ) : Carrying {
         override val carried: List<Layer> get() = listOf(layer)
     }
 

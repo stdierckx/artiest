@@ -57,6 +57,9 @@ object ToolIcons {
         ToolItem.PICK_LAYER_ONLY -> pickLayerOnly
         ToolItem.REFERENCES -> references
         ToolItem.REFERENCE_PANEL -> references
+        ToolItem.DECK -> deck
+        ToolItem.DECK_PANEL -> deck
+        ToolItem.KEEP_CARD -> keepCard
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -398,6 +401,56 @@ object ToolIcons {
                 lineTo(21.2f, 11.0f)
             }
             fill { circle(16.0f, 8.2f, 1.4f) }
+        }
+    }
+
+    /**
+     * Three cards, fanned. Lr7.
+     *
+     * A deck and not a book, and the difference is the feature: a book is read
+     * in order and a deck is something you pull one thing out of. Nothing in it
+     * is a page number.
+     */
+    val deck: ImageVector by lazy {
+        icon("deck") {
+            stroke {
+                moveTo(6.6f, 7.6f)
+                lineTo(3.0f, 9.0f)
+                lineTo(7.4f, 20.2f)
+                lineTo(11.0f, 18.8f)
+                moveTo(17.4f, 7.6f)
+                lineTo(21.0f, 9.0f)
+                lineTo(16.6f, 20.2f)
+                lineTo(13.0f, 18.8f)
+                moveTo(8.6f, 3.4f)
+                lineTo(15.4f, 3.4f)
+                lineTo(15.4f, 20.6f)
+                lineTo(8.6f, 20.6f)
+                close()
+            }
+        }
+    }
+
+    /**
+     * A card being kept: the deck's outline with a plus on it. Lr7.
+     *
+     * The one button in this set whose glyph is deliberately the *other* one
+     * plus a mark, because the act is "put this in there" and the thing it goes
+     * into has to be recognisable in it.
+     */
+    val keepCard: ImageVector by lazy {
+        icon("keep_card") {
+            stroke {
+                moveTo(4.6f, 3.4f)
+                lineTo(14.0f, 3.4f)
+                lineTo(14.0f, 20.6f)
+                lineTo(4.6f, 20.6f)
+                close()
+                moveTo(18.4f, 12.6f)
+                lineTo(18.4f, 20.0f)
+                moveTo(14.7f, 16.3f)
+                lineTo(22.1f, 16.3f)
+            }
         }
     }
 
