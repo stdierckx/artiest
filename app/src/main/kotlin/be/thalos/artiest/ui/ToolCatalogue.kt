@@ -72,8 +72,12 @@ object ToolCatalogue {
      * `selection` and `selection_panel` moved out of Draw and Canvas into the
      * new group, which changes which *tab* they are listed under and nothing
      * else. A reader that has cached version 6 keeps every id it believes in.
+     *
+     * 8: `pick_colour` and `pick_layer_only`, both in Draw. Lr1, and the first
+     * entries this program has had for taking a colour off the page rather than
+     * mixing one. Nothing removed; a reader on 7 keeps every id it has.
      */
-    const val VERSION = 7
+    const val VERSION = 8
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

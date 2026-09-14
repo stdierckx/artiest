@@ -566,6 +566,69 @@ question**, because it is not a fourth identity competing for the same 150 days:
 - And it is the only one of the three that makes the program worth opening on
   the first day rather than the hundredth.
 
+## What Lr1 built
+
+`doc/ColourProbe.kt`, `ui/PickRing.kt`, the pick fork inside
+`InkSurfaceView.StrokeDriver`, two catalogue entries (`pick_colour`,
+`pick_layer_only`, catalogue version 8), a dropper in the colour panel and in
+the docked colour card, and `tools/pen.sh`.
+
+### The picker composes; it does not read a sheet
+
+The obvious implementation reads the active layer's pixel. It is wrong in the
+way that is only found with a pen in hand: what the eye picked is what it could
+*see*, which is the whole stack over the paper at the opacities and blend modes
+the sheets are set to. On a blank sheet over a finished drawing that answer is
+transparent black, and the user has no way to tell that from a bug.
+
+So `ColourProbe` composes through `StackCompositor` — *the one place that knows
+what a drawing looks like* — into a one-pixel bitmap and reads that. Every rule
+the screen obeys is obeyed here for free, including the ones not written yet.
+Seven tests, one per rule that differs from the naive read: the paper on an
+empty page, a blank sheet over a drawing, a half-opacity sheet, a hidden sheet,
+off the page, *this layer only*, and that a pick is always opaque.
+
+### It runs on the render thread, and the tablet is what said so
+
+The first version probed on the UI thread and the app died on the first pick:
+
+```
+java.lang.IllegalStateException: Layer.read on the main thread;
+the layer is the render thread's
+```
+
+That check has been in `Layer` since Phase 1 and it earned its keep here. The
+pick is now a request: the UI thread writes a document pixel and asks for a dry
+frame, `servicePick` reads it inside `drawDryFrame` after the commits have
+landed, and the answer is posted back. One frame of lag on a colour, and the
+ring's *position* is not part of it — that is known on the UI thread and moves
+with the nib, so the marker never trails the pen even while the colour it shows
+is a frame old.
+
+**Pen-up waits for that answer**, because a tap has had no frame at all, and it
+waits with a 250 ms deadline. Without the deadline a pick whose frame never
+arrives leaves the picker on with its ring stuck to the glass and no gesture
+that clears it — which happened once on the tablet, and once is enough.
+
+### `tools/pen.sh`
+
+`adb shell input stylus swipe` takes a duration and this tablet ignores it: a
+swipe asked for 2500 ms is delivered in about 125. Nothing that has to be
+*looked at* while the nib is down can be photographed, which is why the ring
+could not be checked at all. `tools/pen.sh` sends the pointer stream itself —
+`Pinch`'s trick, one stylus pointer, real sleeps between MOVEs, a pressure, and
+a **hold** at the far end. The ring was photographed during a two-second hold.
+
+It is the tool the rest of this plan needs: a reference pane, a drag and a
+timer are all things that have to be seen mid-gesture.
+
+### Where it is offered
+
+Two places, deliberately. It is a catalogue entry, so it goes on a toolbar like
+anything else — and it is in the colour panel's top row, because that is where
+a hand goes when it is thinking about colour and a tool that only exists in the
+`+` chooser is a tool a beginner does not know the program has.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

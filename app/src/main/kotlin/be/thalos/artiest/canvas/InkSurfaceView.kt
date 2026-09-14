@@ -15,6 +15,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.graphics.surface.SurfaceControlCompat
+import be.thalos.artiest.doc.ColourProbe
 import be.thalos.artiest.doc.CommitQueue
 import be.thalos.artiest.doc.Document
 import be.thalos.artiest.doc.FloatOp
@@ -58,6 +59,7 @@ import be.thalos.artiest.input.InkInputSink
 import be.thalos.artiest.input.InputRouter
 import be.thalos.artiest.input.eventAgeNanos
 import be.thalos.artiest.input.Predictor
+import kotlin.math.floor
 import kotlin.math.sqrt
 
 /**
@@ -1966,6 +1968,113 @@ class InkSurfaceView(
     @Volatile
     var selecting: Boolean = false
 
+    /**
+     * Whether the pen picks a colour instead of drawing one.
+     *
+     * Lr1, and it is [selecting]'s third case rather than a third mechanism:
+     * the fork is inside [StrokeDriver], decided at pen-down and held for the
+     * gesture, so palm rejection, the two-finger gesture and cancel-on-focus
+     * apply to a pick word for word without any of them being restated.
+     *
+     * **It wins over [selecting]** when both are somehow on. A picker is a
+     * momentary tool the user has just reached for and a marquee is a mode they
+     * have been in for a while, and the one the hand meant is the one it
+     * touched last.
+     */
+    @Volatile
+    var picking: Boolean = false
+
+    /**
+     * Answer with the active sheet's own pixel rather than with what is on the
+     * screen. UI thread. See `ColourProbe.at`.
+     */
+    var pickFromActiveOnly: Boolean = false
+
+    /**
+     * The colour under the pen while a pick is in the hand, or 0 when none is.
+     *
+     * Read by the chrome inside a draw lambda, like [liveMarquee], and for its
+     * reason: this changes at pointer rate and must not recompose anything.
+     * Zero rather than null because it is read on every frame of the ring and a
+     * boxed Int per frame is a boxed Int per frame.
+     */
+    var pickPreview: Int = 0
+        private set
+
+    /** Where the pick is, in **view** pixels. Meaningless unless [pickPreview] is set. */
+    var pickAtX: Float = 0f
+        private set
+
+    /** See [pickAtX]. */
+    var pickAtY: Float = 0f
+        private set
+
+    /** The colour that was in the hand when this pick began. See the split ring. */
+    var pickWas: Int = 0
+        private set
+
+    /** Bumped whenever the four fields above move, so the ring can redraw. */
+    var onPickPreview: (() -> Unit)? = null
+
+    /**
+     * A colour was picked and the pen has left the glass.
+     *
+     * Fires **on lift and not on touch**, which is the whole of why the nib can
+     * be slid to the right pixel while the ring updates. Not called at all if
+     * the pick found nothing — off the page, or a document closed underneath.
+     */
+    var onColourPicked: ((Int) -> Unit)? = null
+
+    /**
+     * Reads what the eye sees. One per view; see `ColourProbe`.
+     *
+     * **Render thread only.** `Layer.read` refuses the main thread — the sheets
+     * belong to the renderer and the check is there rather than the comment —
+     * so the pick is a request the UI thread posts and the next dry frame
+     * answers. Found by picking a colour on the tablet, which is where a
+     * threading contract that is only written down gets tested.
+     */
+    private val colourProbe = ColourProbe()
+
+    /** The document pixel a pick wants read, or [NO_PICK] when none does. */
+    @Volatile
+    private var pickWantX = NO_PICK
+
+    /** See [pickWantX]. */
+    @Volatile
+    private var pickWantY = 0
+
+    /**
+     * Ask the next dry frame for the colour at a document pixel. UI thread.
+     *
+     * Coalescing by overwriting: a drag asks two hundred times a second and
+     * only the newest point has an answer anybody wants. The frame is asked for
+     * here rather than waited on, so a pick costs one repaint and no lock on
+     * the thread the pen is on.
+     */
+    private fun requestPick(xDoc: Int, yDoc: Int) {
+        pickWantX = xDoc
+        pickWantY = yDoc
+        redrawDry()
+    }
+
+    /**
+     * Answer a waiting pick, if there is one. **Render thread.**
+     *
+     * Posts even when the probe found nothing, and that is not tidiness: pen-up
+     * arms the last read and waits for it, so a request that answered only on
+     * success would leave the picker on with the ring stuck on the glass the
+     * first time somebody lifted off the edge of the paper.
+     */
+    private fun servicePick() {
+        val x = pickWantX
+        if (x == NO_PICK) return
+        val y = pickWantY
+        pickWantX = NO_PICK
+        val argb = colourProbe.at(document, x, y, pickFromActiveOnly) ?: 0
+        post { driver.deliverPick(argb) }
+    }
+
     /** What a marquee gesture draws. UI thread. */
     var marqueeShape: MarqueeShape = MarqueeShape.RECTANGLE
 
@@ -2312,6 +2421,12 @@ class InkSurfaceView(
         )
         recordComposite(System.nanoTime() - compositeStart)
         canvas.restoreToCount(save)
+        // After the commits, for the thumbnail's reason one paragraph down: a
+        // colour read before the stroke was stamped is the colour of the
+        // drawing as it was a moment ago, and here that would be the colour the
+        // user is about to be handed.
+        servicePick()
+
         // One stale thumbnail per frame, and only while the panel is open.
         // Here rather than in the sink because it has to happen after the
         // commits have landed -- a thumbnail built before the stroke was
@@ -3095,12 +3210,27 @@ class InkSurfaceView(
          */
         private var marquee: Marquee? = null
 
+        /**
+         * Whether this gesture is a colour pick, fixed at pen-down.
+         *
+         * [marquee]'s rule and for [marquee]'s reason: reaching for the picker
+         * with the pen already on the glass must not turn half a stroke into a
+         * pick, and putting the picker away mid-gesture must not turn half a
+         * pick into a stroke laid down from wherever the nib happens to be.
+         */
+        private var pickingThis = false
+
         private val marqueeBuilder = Marquee()
 
         private var marqueeMode = SelectMode.NEW
         private var marqueeModeDecided = false
 
         override fun onStrokeBegin(pointerId: Int) {
+            if (picking) {
+                beginPick(pointerId)
+                return
+            }
+            pickingThis = false
             if (selecting) {
                 beginMarquee(pointerId)
                 return
@@ -3177,6 +3307,10 @@ class InkSurfaceView(
          * it was found on the tablet rather than in a test.
          */
         override fun onStrokeSamples(samples: ArrayList<PenSample>) {
+            if (pickingThis) {
+                extendPick(samples)
+                return
+            }
             val marquee = this.marquee
             if (marquee != null) {
                 extendMarquee(marquee, samples)
@@ -3363,6 +3497,10 @@ class InkSurfaceView(
          * reads as the stroke snapping forward at pen-up.
          */
         override fun onStrokeEnd() {
+            if (pickingThis) {
+                endPick()
+                return
+            }
             val marquee = this.marquee
             if (marquee != null) {
                 endMarquee(marquee)
@@ -3466,6 +3604,10 @@ class InkSurfaceView(
         }
 
         override fun onStrokeCancel() {
+            if (pickingThis) {
+                cancelPick()
+                return
+            }
             val marquee = this.marquee
             if (marquee != null) {
                 // A palm arriving, a second finger taking the gesture away, the
@@ -3486,6 +3628,135 @@ class InkSurfaceView(
             strokeOpen = false
             cancelStroke()
             releaseTransform()
+        }
+
+        // --- the colour picker ----------------------------------------------
+
+        /**
+         * A pick, rather than a stroke.
+         *
+         * The transform is frozen for the marquee's reason: every sample is
+         * turned into document coordinates through it, and a pinch landing
+         * mid-gesture would read the colour of a pixel the nib is not over.
+         *
+         * Nothing is queued, nothing is snapshotted and no ink is begun — a
+         * pick is not an edit, so there is no undo step for it and no history
+         * to protect. That is also why it holds the transform: the gesture has
+         * to survive to pen-up, and `releaseTransform` is what lets go.
+         */
+        private fun beginPick(pointerId: Int) {
+            pickingThis = true
+            pickClosing = false
+            marquee = null
+            strokePointerId = pointerId
+            frozen = transform
+            pickWas = inkColorArgb
+            pickPreview = 0
+            strokeOpen = true
+            this@InkSurfaceView.strokeOpen = true
+        }
+
+        /**
+         * Whether the pen has lifted and the last read is still on its way.
+         *
+         * The pick cannot be finished at pen-up, because the colour comes from
+         * the render thread and the newest request may not have been answered
+         * — for a **tap** there has been no frame at all. So pen-up arms this,
+         * asks for one more read, and the answer is what ends the gesture.
+         */
+        private var pickClosing = false
+
+        /**
+         * Read the colour under the newest sample and publish it.
+         *
+         * **The last sample of the batch, not all of them.** A pick has one
+         * answer and it is wherever the nib is now; probing every sample of a
+         * 321.75 Hz event would compose the stack five times to throw four of
+         * the results away.
+         *
+         * A probe that comes back null — off the page — leaves the previous
+         * answer standing rather than blanking the ring, so dragging off the
+         * edge of the paper and back does not flicker.
+         */
+        private fun extendPick(samples: ArrayList<PenSample>) {
+            val n = samples.size
+            if (n == 0) return
+            val s = samples[n - 1]
+            // The ring's *position* is known here and now, and it moves with
+            // the nib even while the colour it is showing is one frame old.
+            // Splitting the two is what keeps the marker under the pen.
+            pickAtX = s.x
+            pickAtY = s.y
+            onPickPreview?.invoke()
+            frozen.viewToDoc(s.x, s.y, docPoint)
+            requestPick(floor(docPoint[0]).toInt(), floor(docPoint[1]).toInt())
+        }
+
+        /**
+         * The render thread's answer. **UI thread**, through `post`.
+         *
+         * A zero means the probe found nothing — off the page, or a document
+         * closed underneath — and it leaves the previous answer standing rather
+         * than blanking the ring, so dragging off the edge of the paper and
+         * back does not flicker.
+         */
+        fun deliverPick(argb: Int) {
+            if (!pickingThis) return
+            if (argb != 0) {
+                pickPreview = argb
+                onPickPreview?.invoke()
+            }
+            if (pickClosing) finishPick()
+        }
+
+        /**
+         * The pen has left the glass: the colour under it is now in the hand.
+         *
+         * On **lift** and not on touch, which is what lets the nib be slid onto
+         * the right pixel while the ring updates. A pick that never found a
+         * colour — one tap off the page — ends silently and changes nothing.
+         */
+        private fun endPick() {
+            // Nothing will answer if there is no surface to render into, and a
+            // picker left on with a ring stuck to the glass is worse than a
+            // pick that did not happen.
+            if (!surfaceAlive) {
+                clearPick()
+                return
+            }
+            pickClosing = true
+            frozen.viewToDoc(pickAtX, pickAtY, docPoint)
+            requestPick(floor(docPoint[0]).toInt(), floor(docPoint[1]).toInt())
+            // And a deadline, because the last read is the one thing in this
+            // gesture that another thread has to do. A frame that never comes
+            // would otherwise leave the picker on with its ring stuck to the
+            // glass and no gesture that clears it — which is what a held pick
+            // did on the tablet once, and once is enough to design against.
+            // Finishing early costs the freshest reading and nothing else: the
+            // colour under the nib a frame ago is the colour under the nib.
+            postDelayed({ if (pickClosing) finishPick() }, PICK_DEADLINE_MS)
+        }
+
+        /** The last read has landed: the colour under the pen is now in the hand. */
+        private fun finishPick() {
+            val argb = pickPreview
+            clearPick()
+            if (argb != 0) onColourPicked?.invoke(argb)
+        }
+
+        /** A palm, a second finger, a lost window. The colour stays as it was. */
+        private fun cancelPick() {
+            clearPick()
+        }
+
+        private fun clearPick() {
+            pickingThis = false
+            pickClosing = false
+            pickPreview = 0
+            strokeOpen = false
+            this@InkSurfaceView.strokeOpen = false
+            releaseTransform()
+            onPickPreview?.invoke()
         }
 
         // --- the marquee ----------------------------------------------------
@@ -3778,6 +4049,21 @@ class InkSurfaceView(
         Debug.getRuntimeStat("art.gc.gc-count")?.toLongOrNull() ?: 0L
 
     companion object {
+
+        /**
+         * No pick is waiting to be read. Not a coordinate, so it matches
+         * nothing a pen can land on.
+         */
+        private const val NO_PICK = Int.MIN_VALUE
+
+        /**
+         * How long pen-up waits for the render thread's last colour.
+         *
+         * Long enough that a dry frame lands inside it even on a page with
+         * eight sheets — Ik0 measured the round trip at 3–4 ms — and short
+         * enough that a hand does not notice the wait when it does not.
+         */
+        private const val PICK_DEADLINE_MS = 250L
 
         /**
          * The damage square Ik0 prices an edit against, in document pixels.

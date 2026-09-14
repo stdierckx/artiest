@@ -2,6 +2,8 @@ package be.thalos.artiest.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.sp
  * a coloured glyph on the same ground as an uncoloured one fails that at arm's
  * length. Filling the slot does not.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun IconToolButton(
     icon: ImageVector,
@@ -49,6 +52,16 @@ fun IconToolButton(
     onClick: () -> Unit,
     selected: Boolean = false,
     enabled: Boolean = true,
+    /**
+     * A press and hold, or null for a button that has only one meaning.
+     *
+     * Added for Lr1's picker, which turns itself off after one pick and is held
+     * on for a run of them. Optional and null everywhere else on purpose: a
+     * long press that does something on a button whose short press does the
+     * obvious thing is a feature nobody finds, so it is only worth having where
+     * the short press has *already* taught what the button is.
+     */
+    onLongPress: (() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Box(
@@ -57,7 +70,17 @@ fun IconToolButton(
             .fillMaxSize()
             .clip(RoundedCornerShape(13.dp))
             .background(if (selected) scheme.primary else scheme.surfaceContainer)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(
+                if (onLongPress == null) {
+                    Modifier.clickable(enabled = enabled, onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(
+                        enabled = enabled,
+                        onClick = onClick,
+                        onLongClick = onLongPress,
+                    )
+                },
+            ),
     ) {
         Icon(
             imageVector = icon,

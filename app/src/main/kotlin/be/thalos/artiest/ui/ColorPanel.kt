@@ -76,6 +76,15 @@ fun ColourButton(
     recent: List<Int>,
     onCommit: (Int) -> Unit,
     onFixate: (Cell) -> Unit,
+    /**
+     * Lr1. Hand the pen the picker and get out of the way.
+     *
+     * The picker is a catalogue entry and can live on a bar, and it is *also*
+     * here, because this is where a hand goes when it is thinking about colour.
+     * A tool that only exists in the `+` chooser is a tool a beginner does not
+     * know this program has.
+     */
+    onPick: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var here by remember { mutableStateOf(Offset.Zero) }
@@ -111,6 +120,15 @@ fun ColourButton(
                 onInk = onInk,
                 recent = recent,
                 onDismiss = { open = false; onCommit(ink) },
+                onPick = {
+                    // The panel has to go: it is focusable, it is over the
+                    // drawing, and the very next thing this hand does is touch
+                    // the page. Committing on the way out is the same thing
+                    // dismissing does.
+                    open = false
+                    onCommit(ink)
+                    onPick()
+                },
                 onFixate = {
                     open = false
                     onCommit(ink)
@@ -164,6 +182,7 @@ private fun ColourPanel(
     recent: List<Int>,
     onDismiss: () -> Unit,
     onFixate: () -> Unit,
+    onPick: () -> Unit,
 ) {
     val gap = with(LocalDensity.current) { 10.dp.roundToPx() }
     Popup(
@@ -187,25 +206,13 @@ private fun ColourPanel(
                 ) {
                     HexField(ink, onInk, Modifier.weight(1f))
                     Spacer(Modifier.width(10.dp))
+                    RoundPanelButton(ToolIcons.pickColour, "Pick a colour off the page", onPick)
+                    Spacer(Modifier.width(6.dp))
                     // The whole of "fixate", and it is one tap: the panel
                     // becomes a control on a toolbar of its own. See
                     // docs/panels-plan.md for why that is placing something
                     // rather than a new kind of thing.
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .clickable(onClick = onFixate),
-                    ) {
-                        Icon(
-                            ToolIcons.pin,
-                            "Keep this panel on screen",
-                            Modifier.size(15.dp),
-                            MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                    RoundPanelButton(ToolIcons.pin, "Keep this panel on screen", onFixate)
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -373,7 +380,14 @@ internal fun parseHex(text: String): Int? {
  * behind one of them.
  */
 @Composable
-fun ColourPanelCard(ink: Int, onInk: (Int) -> Unit, recent: List<Int>) {
+fun ColourPanelCard(
+    ink: Int,
+    onInk: (Int) -> Unit,
+    recent: List<Int>,
+    /** Lr1. Lit while the pen is picking, because a docked card does not close. */
+    picking: Boolean,
+    onPick: () -> Unit,
+) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // The disc is square, so it is the *smaller* of the two budgets that
         // decides how big it can be. It used to be told only the width, which
@@ -394,10 +408,55 @@ fun ColourPanelCard(ink: Int, onInk: (Int) -> Unit, recent: List<Int>) {
             // wheel is not one anybody has to be told the subject of, and a
             // heading in a panel whose own bar can be labelled is a line spent
             // twice.
-            HexField(ink, onInk, Modifier.fillMaxWidth())
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                HexField(ink, onInk, Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                // Lit, unlike the popup's, because this card stays on the glass
+                // while the pick happens and a button that showed nothing would
+                // leave the only sign of the mode on a bar somewhere else.
+                RoundPanelButton(
+                    ToolIcons.pickColour, "Pick a colour off the page", onPick, lit = picking,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             ColourBody(ink, onInk, recent, Modifier.fillMaxWidth(), discSize = side)
         }
+    }
+}
+
+/**
+ * A 26dp round button for the corner of a panel.
+ *
+ * Two of these sit in the colour panel's top row — pick, and pin — and they
+ * were one inline `Box` before there were two. Shared rather than copied for
+ * `ColourBody`'s reason: the popup and the card both draw this row, and two
+ * copies of a button are two buttons that drift apart.
+ */
+@Composable
+private fun RoundPanelButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    lit: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .background(if (lit) scheme.primary else scheme.surfaceContainerHigh)
+            .clickable(onClick = onClick),
+    ) {
+        Icon(
+            icon,
+            label,
+            Modifier.size(15.dp),
+            if (lit) scheme.onPrimary else scheme.primary,
+        )
     }
 }
 

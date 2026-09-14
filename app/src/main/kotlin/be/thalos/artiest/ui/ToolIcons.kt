@@ -53,6 +53,8 @@ object ToolIcons {
         ToolItem.MARKER -> marker
         ToolItem.HARD_ERASER -> eraser
         ToolItem.SOFT_ERASER -> softEraser
+        ToolItem.PICK_COLOUR -> pickColour
+        ToolItem.PICK_LAYER_ONLY -> pickLayerOnly
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -245,6 +247,55 @@ object ToolIcons {
                 lineTo(17.0f, 21.4f)
                 moveTo(19.2f, 21.4f)
                 lineTo(20.8f, 21.4f)
+            }
+        }
+    }
+
+    /**
+     * A pipette: pointed barrel, collar, bulb.
+     *
+     * The one glyph in this set that is a real object nobody has held. A
+     * dropper is what every program in this trade has drawn for forty years, it
+     * is what a search for "colour picker" returns, and a cleverer symbol here
+     * would be a private joke — this is the one place to be conventional.
+     */
+    val pickColour: ImageVector by lazy {
+        icon("pick_colour") {
+            stroke {
+                moveTo(3.2f, 20.8f)
+                lineTo(4.8f, 15.8f)
+                lineTo(14.2f, 6.4f)
+                lineTo(17.6f, 9.8f)
+                lineTo(8.2f, 19.2f)
+                close()
+                moveTo(12.4f, 8.2f)
+                lineTo(15.8f, 11.6f)
+            }
+            fill { circle(18.6f, 5.4f, 2.8f) }
+        }
+    }
+
+    /**
+     * Two sheets with the top one solid: *this one, not the picture*.
+     *
+     * Deliberately the stack glyph's shape rather than a second pipette. The
+     * switch is not another picker, it is which sheet the one picker reads, and
+     * a pair of near-identical droppers on a bar would be two buttons nobody
+     * could tell apart at 20dp.
+     */
+    val pickLayerOnly: ImageVector by lazy {
+        icon("pick_layer_only") {
+            stroke {
+                moveTo(3.6f, 15.4f)
+                lineTo(12.0f, 19.8f)
+                lineTo(20.4f, 15.4f)
+            }
+            fill {
+                moveTo(12.0f, 4.2f)
+                lineTo(20.4f, 8.8f)
+                lineTo(12.0f, 13.4f)
+                lineTo(3.6f, 8.8f)
+                close()
             }
         }
     }

@@ -112,6 +112,7 @@ import be.thalos.artiest.ui.ChromeCounters
 import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
 import be.thalos.artiest.ui.WorkspaceDefaults
+import be.thalos.artiest.ui.PickRing
 import be.thalos.artiest.ui.ProjectGallery
 import be.thalos.artiest.ui.WorkspaceMenu
 import be.thalos.artiest.ui.WorkspaceStore
@@ -648,6 +649,22 @@ private fun CanvasScreen(
     var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
     val outlineTick = remember { mutableIntStateOf(0) }
 
+    // Lr1, the colour picker. Three pieces of state and they are deliberately
+    // three: whether the pen is picking, whether it stays picking after one
+    // pick, and which sheet it reads.
+    //
+    // `pickHeld` is what a long press on the button sets. Without it the picker
+    // would either be a mode to escape from or a one-shot that cannot do a run
+    // of twenty colours, and it is one boolean rather than a second button.
+    var pickingColour by remember { mutableStateOf(false) }
+    var pickHeld by remember { mutableStateOf(false) }
+    var pickLayerOnly by remember { mutableStateOf(false) }
+
+    // The ring under the pen. Its own counter and not `outlineTick`, which is
+    // read by three other draw lambdas: a pick moves at pointer rate and there
+    // is no reason for it to re-cut the guides against the viewport.
+    val pickRingTick = remember { mutableIntStateOf(0) }
+
     // The floating pixels, as the chrome sees them: the rectangle they were
     // lifted from, and a token that changes when a different float is lifted so
     // the transform box starts over rather than inheriting the last one's
@@ -1099,6 +1116,14 @@ private fun CanvasScreen(
         v.rubber = eraserBrush?.create()
     }
 
+    // Lr1. Both are plain fields on the view and neither is read while a
+    // gesture is open — the driver copies `picking` at pen-down and holds it.
+    LaunchedEffect(surface, pickingColour, pickLayerOnly) {
+        val v = surface ?: return@LaunchedEffect
+        v.picking = pickingColour
+        v.pickFromActiveOnly = pickLayerOnly
+    }
+
     LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
@@ -1498,6 +1523,21 @@ private fun CanvasScreen(
                     // vector/pixel answer for the active layer are recomputed
                     // whichever hand did it.
                     it.onCanvasUndo = { generation++ }
+                    // Lr1. The ring is a draw-phase read like the ants, so the
+                    // tick is what redraws it and nothing recomposes while the
+                    // nib is being slid onto the right pixel.
+                    it.onPickPreview = { pickRingTick.intValue++ }
+                    it.onColourPicked = { argb ->
+                        ink = argb
+                        // Straight into the recents, because a colour taken off
+                        // the page is exactly the kind the hand comes back for
+                        // and the wheel has no memory of it otherwise.
+                        recentInks = store.pushRecentColour(argb)
+                        // And the tool puts itself away. See ToolItem.PICK_COLOUR:
+                        // the pen goes back to the brush that was in it, unless
+                        // the button was held.
+                        if (!pickHeld) pickingColour = false
+                    }
                     onView(it)
                 }
             },
@@ -1605,6 +1645,32 @@ private fun CanvasScreen(
             // rather than once per frame -- and it is what stops the ants
             // ticking over a page with nothing on it.
             showing = selectionShape.active || selecting || pickInfo.active,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Lr1's ring, over everything the canvas draws: it is the answer to a
+        // question being asked right now, so nothing on the paper may cover it.
+        // Absent unless a pick is in the hand — `PickRing` returns on the first
+        // line when there is none — so an ordinary stroke costs one comparison
+        // a frame.
+        PickRing(
+            at = {
+                pickRingTick.intValue
+                val v = surface
+                if (v == null || v.pickPreview == 0) {
+                    Offset.Unspecified
+                } else {
+                    Offset(v.pickAtX, v.pickAtY)
+                }
+            },
+            colour = {
+                pickRingTick.intValue
+                surface?.pickPreview ?: 0
+            },
+            was = {
+                pickRingTick.intValue
+                surface?.pickWas ?: 0
+            },
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -2090,6 +2156,25 @@ private fun CanvasScreen(
                     grain = grain,
                     onGrain = { grain = it },
                     erasing = erasing,
+                    pickingColour = pickingColour,
+                    onPickColourHeld = {
+                        pickHeld = true
+                        pickingColour = true
+                        generation++
+                    },
+                    onPickColour = { on ->
+                        pickingColour = on
+                        // A plain tap always means one pick. Holding is the
+                        // only thing that makes it stay, and turning it off
+                        // forgets that it was held.
+                        if (!on) pickHeld = false
+                        generation++
+                    },
+                    pickLayerOnly = pickLayerOnly,
+                    onPickLayerOnly = {
+                        pickLayerOnly = it
+                        generation++
+                    },
                     barrel = barrel,
                     library = library,
                     brushId = brushId,
@@ -2283,6 +2368,19 @@ private fun ToolSlot(
     onBrush: (BrushEntry) -> Unit,
     /** Whether the brush in the hand takes ink out. Only the size slider reads it. */
     erasing: Boolean,
+    /**
+     * Lr1. Whether the pen is picking a colour rather than laying one down.
+     *
+     * Not [picking], which is one word away and means the other thing on this
+     * canvas that is called picking — whether the marquee takes strokes or
+     * pixels. Both are old enough to keep their names; this one is qualified.
+     */
+    pickingColour: Boolean,
+    onPickColour: (Boolean) -> Unit,
+    /** Press and hold: the picker stays on for a run of colours. */
+    onPickColourHeld: () -> Unit,
+    pickLayerOnly: Boolean,
+    onPickLayerOnly: (Boolean) -> Unit,
     barrel: Boolean,
     exporting: Boolean,
     importing: Boolean,
@@ -2322,6 +2420,7 @@ private fun ToolSlot(
             recent = recentInks,
             onCommit = onInkCommitted,
             onFixate = { onFixate(ToolItem.COLOUR_PANEL, it) },
+            onPick = { onPickColour(true) },
         )
 
         /**
@@ -2334,6 +2433,8 @@ private fun ToolSlot(
             ink = ink,
             onInk = onInk,
             recent = recentInks,
+            picking = pickingColour,
+            onPick = { onPickColour(!pickingColour) },
         )
 
         // Two ranges on one slider, chosen by what is in the hand. A rubber and
@@ -2423,6 +2524,23 @@ private fun ToolSlot(
             label = item.label,
             onClick = { onBrush(library.entryFor(BrushPreset.SOFT_ERASER.id)) },
             selected = brushId == BrushPreset.SOFT_ERASER.id && !selecting && !barrel,
+        )
+
+        // Lr1. Off again after one pick -- the click here only turns it *on*,
+        // and `onColourPicked` is what turns it back off. Held, it stays.
+        ToolItem.PICK_COLOUR -> IconToolButton(
+            icon = ToolIcons.pickColour,
+            label = item.label,
+            onClick = { onPickColour(!pickingColour) },
+            selected = pickingColour,
+            onLongPress = onPickColourHeld,
+        )
+
+        ToolItem.PICK_LAYER_ONLY -> IconToolButton(
+            icon = ToolIcons.pickLayerOnly,
+            label = item.label,
+            onClick = { onPickLayerOnly(!pickLayerOnly) },
+            selected = pickLayerOnly,
         )
 
         ToolItem.UNDO ->

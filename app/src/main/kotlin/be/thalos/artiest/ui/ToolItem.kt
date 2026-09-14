@@ -214,6 +214,49 @@ enum class ToolItem(
     SOFT_ERASER("soft_eraser", "Soft eraser", "Soft", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
 
     /**
+     * Lr1. Take the colour that is already on the page.
+     *
+     * ## Why it is a tool and not a mode
+     *
+     * A toggle, and one that **turns itself off after one pick**. The pen goes
+     * back to the brush that was in it, because that is what the hand was doing
+     * a second ago and the pick was an interruption. Holding the button keeps
+     * it on for the rare run of twenty colours; that is the exception and the
+     * single pick is the rule.
+     *
+     * A picker that stayed on until it was pressed again would be the fourth
+     * way to be in a mode you did not mean to be in — after the marquee, the
+     * eraser and arrange — and it is the one where the failure is silent: you
+     * would draw a stroke that instead changed your colour.
+     *
+     * ## Not the barrel button
+     *
+     * The obvious place for a picker on a tablet with no keyboard is the pen's
+     * barrel, and it is taken: `PenChoice` gives it to the rubber, that is what
+     * the pen in this user's hand does today, and a second meaning for the same
+     * button would make the first unreliable.
+     *
+     * ## What it picks
+     *
+     * What the eye can see — the whole stack over the paper, at the opacities
+     * and blend modes the sheets are set to. `ColourProbe` says why, and
+     * [PICK_LAYER_ONLY] is the switch for the other answer.
+     */
+    PICK_COLOUR("pick_colour", "Pick a colour", "Pick", 1, ToolGroup.DRAW, ToolKind.TOGGLE),
+
+    /**
+     * Whether [PICK_COLOUR] reads the sheet in hand rather than the picture.
+     *
+     * Off, and it should stay off for almost everybody: *what you see* is what
+     * the eye meant. It is here for one case and it is the learner's case — a
+     * photograph on a reference layer with a drawing over the top of it, where
+     * the colour wanted is the photograph's and the thing on top is in the way.
+     */
+    PICK_LAYER_ONLY(
+        "pick_layer_only", "Pick from this layer", "Layer", 1, ToolGroup.DRAW, ToolKind.TOGGLE,
+    ),
+
+    /**
      * One brush of your own, as a button.
      *
      * **The only entry in this catalogue that carries an argument**, and the

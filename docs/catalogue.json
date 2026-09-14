@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 7,
+  "version": 8,
   "cell_dp": 44,
   "groups": [
     {
@@ -366,6 +366,26 @@
       "id": "pencil",
       "label": "Pencil",
       "short": "Pencil",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "pick_colour",
+      "label": "Pick a colour",
+      "short": "Pick",
+      "group": "draw",
+      "kind": "toggle",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "pick_layer_only",
+      "label": "Pick from this layer",
+      "short": "Layer",
       "group": "draw",
       "kind": "toggle",
       "cells_wide": 1,
