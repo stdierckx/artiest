@@ -159,6 +159,9 @@ object ProjectLoader {
                 opacity = described.opacity,
                 visible = described.visible,
                 blend = described.blend,
+                locked = described.locked,
+                reference = described.reference,
+                desaturate = described.desaturate,
                 vector = vectorOf(files, project, described, document, notes),
             )
             peak = maxOf(peak, android.os.Debug.getNativeHeapAllocatedSize())

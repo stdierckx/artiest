@@ -338,6 +338,38 @@ private fun LayersBody(
                 // properties of the *active* sheet, which is what the
                 // highlighted row means.
                 BlendPicker(active.blend) { onOp(LayerOp.SetBlend(active.id, it)) }
+
+                Spacer(Modifier.height(6.dp))
+
+                // Lr4's three, and they are here for the blend picker's reason:
+                // all three are properties of the *active* sheet, which is what
+                // the highlighted row means, and a row that already carries a
+                // picture, a name and three targets cannot take three more.
+                //
+                // Lit rather than labelled. Each is a state the sheet is in,
+                // and a lit button beside a name is readable at arm's length
+                // where three words would not fit at all.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PanelToggle(
+                        ToolIcons.lock,
+                        if (active.locked) "Let the pen draw here" else "Lock this layer",
+                        on = active.locked,
+                    ) { onOp(LayerOp.SetLocked(active.id, !active.locked)) }
+                    PanelToggle(
+                        ToolIcons.referenceLayer,
+                        if (active.reference) {
+                            "Make this part of the drawing"
+                        } else {
+                            "Keep this out of exports"
+                        },
+                        on = active.reference,
+                    ) { onOp(LayerOp.SetReference(active.id, !active.reference)) }
+                    PanelToggle(
+                        ToolIcons.greyscale,
+                        if (active.desaturate) "Show its colours" else "Take the colour out",
+                        on = active.desaturate,
+                    ) { onOp(LayerOp.SetDesaturate(active.id, !active.desaturate)) }
+                }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -684,6 +716,39 @@ private fun PanelAction(
             label,
             Modifier.size(19.dp),
             tint = if (enabled) scheme.onSurface else scheme.onSurface.copy(alpha = 0.25f),
+        )
+    }
+}
+
+/**
+ * [PanelAction]'s shape, as a toggle: lit when the thing is on.
+ *
+ * A background and not a tint, for `IconToolButton`'s reason: a lit control has
+ * to be readable as lit from the corner of the eye without comparing it to its
+ * neighbour, and a coloured glyph on the same ground as an uncoloured one fails
+ * that at arm's length.
+ */
+@Composable
+private fun PanelToggle(
+    icon: ImageVector,
+    label: String,
+    on: Boolean,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(width = 44.dp, height = 36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (on) scheme.primary else scheme.surfaceContainerHigh)
+            .clickable(onClick = onClick),
+    ) {
+        Icon(
+            icon,
+            label,
+            Modifier.size(19.dp),
+            tint = if (on) scheme.onPrimary else scheme.onSurface,
         )
     }
 }

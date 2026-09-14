@@ -87,6 +87,49 @@ class LayerStack(
         var visible: Boolean,
         /** How this sheet mixes with what is under it. See [LayerBlend]. */
         var blend: LayerBlend = LayerBlend.NORMAL,
+        /**
+         * Whether the pen may put anything on this sheet.
+         *
+         * Lr4, and it is not only the learner's. A photograph you are drawing
+         * over is the case that made it obvious — one stray stroke lands in the
+         * reference instead of the drawing and the undo that fixes it is not
+         * obvious either — but a finished line-art sheet under a colouring pass
+         * wants exactly the same thing, and so does every painter alive.
+         *
+         * Checked where the stroke *begins* rather than where it lands, which
+         * is the difference between a pen that does nothing and a stroke that
+         * is drawn, shown, and then silently discarded.
+         */
+        var locked: Boolean = false,
+        /**
+         * Whether this sheet is something to look at rather than part of the
+         * drawing.
+         *
+         * A reference sheet is on the glass and **not in the export**. That is
+         * the whole of what the flag means and it is the reason it exists: an
+         * imported photograph is a thing you draw *from*, and a PNG with
+         * somebody else's photograph baked into it is the one export nobody
+         * wants and the one that is hardest to notice.
+         *
+         * The export **says so** rather than dropping it quietly — see
+         * `ExportResult`. `docs/layer-effects-plan.md` trap 4: a file that
+         * silently drops half of what it was is worse than one that was honest
+         * about what it carried.
+         */
+        var reference: Boolean = false,
+        /**
+         * Whether this sheet is drawn with its colour taken out.
+         *
+         * Krita puts a saturation slider on its reference images and its manual
+         * gives the reason: so you look at light and shadow instead of being
+         * distracted by the colours. A toggle rather than a slider, because the
+         * useful positions are "as it is" and "grey" and nothing between them
+         * is a thing anybody asks for twice.
+         *
+         * It changes what is *drawn*, never the pixels. Turning it off is free
+         * and the sheet was never edited.
+         */
+        var desaturate: Boolean = false,
     ) {
         /**
          * The last thumbnail built for this entry, or null if none has been.
@@ -324,6 +367,9 @@ class LayerStack(
                                 opacity = sheet.opacity.coerceIn(0f, 1f),
                                 visible = sheet.visible,
                                 blend = sheet.blend,
+                                locked = sheet.locked,
+                                reference = sheet.reference,
+                                desaturate = sheet.desaturate,
                             ).also { it.vector = sheet.vector }
                         )
                     }
@@ -390,6 +436,21 @@ class LayerStack(
 
         is LayerOp.SetBlend -> byId(op.id)?.let {
             it.blend = op.blend
+            true
+        } ?: false
+
+        is LayerOp.SetLocked -> byId(op.id)?.let {
+            it.locked = op.locked
+            true
+        } ?: false
+
+        is LayerOp.SetReference -> byId(op.id)?.let {
+            it.reference = op.reference
+            true
+        } ?: false
+
+        is LayerOp.SetDesaturate -> byId(op.id)?.let {
+            it.desaturate = op.desaturate
             true
         } ?: false
 
@@ -489,6 +550,9 @@ class LayerStack(
                 LayerInfo(
                     e.id, e.name, e.opacity, e.visible, e.blend, e.thumbnail,
                     vector = e.vector != null,
+                    locked = e.locked,
+                    reference = e.reference,
+                    desaturate = e.desaturate,
                 )
             )
         }
@@ -592,6 +656,12 @@ data class LayerInfo(
      * object the render thread is editing.
      */
     val vector: Boolean = false,
+    /** Lr4. See `LayerStack.Entry.locked`. */
+    val locked: Boolean = false,
+    /** Lr4. See `LayerStack.Entry.reference`. */
+    val reference: Boolean = false,
+    /** Lr4. See `LayerStack.Entry.desaturate`. */
+    val desaturate: Boolean = false,
 )
 
 /**
@@ -673,6 +743,10 @@ sealed interface LayerOp {
             val opacity: Float = 1f,
             val visible: Boolean = true,
             val blend: LayerBlend = LayerBlend.NORMAL,
+            /** Lr4. See [Entry.locked], [Entry.reference], [Entry.desaturate]. */
+            val locked: Boolean = false,
+            val reference: Boolean = false,
+            val desaturate: Boolean = false,
             /**
              * The strokes that made these pixels, already built from the file,
              * or null for an ordinary sheet.
@@ -699,6 +773,15 @@ sealed interface LayerOp {
     class SetVisible(val id: Int, val visible: Boolean) : LayerOp
 
     class SetBlend(val id: Int, val blend: LayerBlend) : LayerOp
+
+    /** Lr4. See [Entry.locked]. */
+    class SetLocked(val id: Int, val locked: Boolean) : LayerOp
+
+    /** Lr4. See [Entry.reference]. */
+    class SetReference(val id: Int, val reference: Boolean) : LayerOp
+
+    /** Lr4. See [Entry.desaturate]. */
+    class SetDesaturate(val id: Int, val desaturate: Boolean) : LayerOp
 
     /** Put the pen on [id]. */
     class SetActive(val id: Int) : LayerOp

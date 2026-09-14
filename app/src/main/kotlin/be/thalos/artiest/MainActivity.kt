@@ -624,13 +624,33 @@ private fun CanvasScreen(
         document.layers.active.vector != null
     }
 
+    /**
+     * Lr4. Whether the sheet the pen is on refuses ink.
+     *
+     * Off `layerRows` and **not** off `generation` like the line above, and the
+     * difference was found on the tablet: the lock is toggled from the layers
+     * panel, which goes through `onLayerOp` — and `onLayerOp` deliberately does
+     * not bump `generation`, because the opacity slider sends one op per sample
+     * and a recomposition per sample is exactly what that arrangement avoids.
+     * So a `generation`-keyed read stayed stale, the button lit, and the pen
+     * went on drawing.
+     *
+     * `layerRows` is the snapshot the panel itself reads, republished by the
+     * render thread and polled three to ten times a second, so this follows the
+     * same answer the button is showing.
+     */
+    val activeIsLocked = remember(layerRows, activeLayer) {
+        layerRows.firstOrNull { it.id == activeLayer }?.locked ?: false
+    }
+
     // The view is told once, here, rather than at each of the places that could
     // change the answer. A select gesture on a sheet with no strokes must not
     // pick, whatever the panel last said.
-    LaunchedEffect(activeKeepsStrokes, pickStrokes, eraseMode, surface) {
+    LaunchedEffect(activeKeepsStrokes, activeIsLocked, pickStrokes, eraseMode, surface) {
         surface?.pickingStrokes = activeKeepsStrokes && pickStrokes
         surface?.vectorSheetActive = activeKeepsStrokes
         surface?.eraseMode = eraseMode
+        surface?.activeLocked = activeIsLocked
     }
     var layersOpen by remember { mutableStateOf(false) }
 
@@ -2836,6 +2856,14 @@ private fun ExportStatus(export: ExportResult?, exporting: Boolean) {
     val text = when {
         exporting -> "saving…"
         export is ExportResult.Written -> "saved ${export.bytes} B to Pictures/Artiest" +
+            // Lr4. Said out loud, always. A file that quietly dropped a sheet
+            // is worse than one that was honest about what it carried, and a
+            // reference sheet is deliberately dropped.
+            when (export.referencesSkipped) {
+                0 -> ""
+                1 -> "  (1 reference layer left out)"
+                else -> "  (${export.referencesSkipped} reference layers left out)"
+            } +
             if (export.notYetStamped > 0) "  (${export.notYetStamped} strokes not yet drawn)" else ""
         export is ExportResult.Failed -> "export failed at ${export.stage.name.lowercase()}: ${export.detail}"
         else -> null

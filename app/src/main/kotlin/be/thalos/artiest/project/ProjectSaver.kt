@@ -196,6 +196,9 @@ class ProjectSaver(private val files: ProjectFiles) {
             opacity = entry.opacity,
             visible = entry.visible,
             blend = entry.blend,
+            locked = entry.locked,
+            reference = entry.reference,
+            desaturate = entry.desaturate,
             strokes = if (vector != null) Project.strokesFor(index) else null,
             brushes = vector?.brushes.orEmpty(),
             // The tables are the sheet's and go in the manifest; the samples go

@@ -629,6 +629,61 @@ anything else — and it is in the colour panel's top row, because that is where
 a hand goes when it is thinking about colour and a tool that only exists in the
 `+` chooser is a tool a beginner does not know the program has.
 
+## What Lr4 built
+
+Three flags on a sheet — `locked`, `reference`, `desaturate` — as
+`LayerStack.Entry` fields, `LayerInfo` fields, three `LayerOp`s, three toggles
+under the layers panel's blend picker, three optional booleans in the project
+file (format 4), and a rule in `StackCompositor`.
+
+**Fit to page is not among them and is not owed.** `PictureImporter` already
+scales an import down to the page, so the button would have had nothing to do.
+
+### Locked is checked where the stroke begins
+
+Not where it lands. A lock enforced at the commit would draw the stroke, show
+it, and then throw it away, which reads as the app losing work. `InkSurfaceView`
+drops the gesture at pen-down instead — no wet ink, no queued commit, no undo
+step — and holds that decision for the gesture, so unlocking with the pen down
+does not start a stroke from wherever the nib happens to be.
+
+A pick and a marquee still work on a locked sheet. Neither puts anything on it,
+and taking a colour off a locked photograph is the main thing anybody wants to
+do with one.
+
+### The flag that reached the button and not the pen
+
+The first version keyed the view's copy of "is this sheet locked" off
+`generation`, which is what `activeKeepsStrokes` beside it uses. On the tablet
+the padlock lit and the pen went on drawing.
+
+`onLayerOp` deliberately does not bump `generation`: the opacity slider sends
+one op per sample and a recomposition per sample is exactly what that
+arrangement exists to avoid. So the read stayed stale. It is keyed off
+`layerRows` now — the same snapshot the panel itself is showing — which is the
+only source that cannot disagree with the lit button.
+
+### Reference is a rule in the compositor, not a filter at the call site
+
+`compose` takes `skipReference`: false for the screen, true for anything
+writing a file. A filter at the export's call site would be the export
+disagreeing with the screen about which sheets exist, which is the exact class
+of defect `StackCompositor` was extracted to prevent.
+
+And the export **says so** — *"saved 25930 B to Pictures/Artiest (1 reference
+layer left out)"*, verified on the tablet. `docs/layer-effects-plan.md` trap 4:
+a file that silently drops half of what it was is worse than one that was
+honest about what it carried.
+
+**An `.ora` keeps its reference sheets.** The PNG is a finished picture and a
+photograph does not belong in one; an `.ora` is the drawing's own file, and a
+sheet dropped from that is work lost.
+
+### Desaturate is a draw-time filter
+
+Never the pixels. Turning it off is free and the sheet was never edited —
+asserted by reading the sheet's own pixel back after composing it grey.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

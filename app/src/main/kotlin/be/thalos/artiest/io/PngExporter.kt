@@ -185,7 +185,8 @@ object PngExporter {
             // Each sheet is read under its own lock and never two at once. See
             // `Layer`: the lock is a leaf, and a nested pair would be a lock
             // ordering nobody has designed.
-            val read = StackCompositor().compose(
+            val compositor = StackCompositor()
+            val read = compositor.compose(
                 canvas,
                 document.layers,
                 document.paperColor,
@@ -196,7 +197,11 @@ object PngExporter {
                 top = 0f,
                 right = document.widthPx.toFloat(),
                 bottom = document.heightPx.toFloat(),
+                // Lr4. A photograph you were drawing from does not go in the
+                // file, and the count comes back so the toast can say so.
+                skipReference = true,
             )
+            val skippedReferences = compositor.referencesSkipped
             val copyNs = System.nanoTime() - copyStartNs
             // A document whose sheets are all hidden still exports: the paper
             // is down and a blank page is a legitimate thing to save. What must
@@ -221,7 +226,10 @@ object PngExporter {
             // they were straight.
             if (Color.alpha(document.paperColor) == 255) out.setHasAlpha(false)
 
-            write(context, out, displayName, document, notYetStamped, waitNs, copyNs, startNs, open)
+            write(
+                context, out, displayName, document, notYetStamped, waitNs, copyNs, startNs, open,
+                skippedReferences,
+            )
         } finally {
             // Always, including on every failure path above: 27.2 MiB held by a
             // failed export until the next GC is the kind of thing that only
@@ -257,6 +265,8 @@ object PngExporter {
         copyNs: Long,
         startNs: Long,
         open: (ContentResolver, Uri) -> OutputStream?,
+        /** Lr4. Reference sheets the composite left out. See `ExportResult.Written`. */
+        skippedReferences: Int,
     ): ExportResult {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
@@ -315,6 +325,7 @@ object PngExporter {
             uri = uri,
             bytes = bytes,
             strokes = document.strokeCount,
+            referencesSkipped = skippedReferences,
             notYetStamped = notYetStamped,
             waitMs = waitNs / 1_000_000L,
             copyMs = copyNs / 1_000_000L,

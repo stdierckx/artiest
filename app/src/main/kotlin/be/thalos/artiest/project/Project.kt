@@ -129,6 +129,19 @@ data class ProjectSheet(
     val visible: Boolean = true,
     val blend: LayerBlend = LayerBlend.NORMAL,
     /**
+     * Lr4. Whether the pen may touch this sheet, whether it is a thing to look
+     * at rather than part of the drawing, and whether its colour is taken out
+     * while it is drawn. See `LayerStack.Entry`.
+     *
+     * All three are properties of the *sheet* and not of the session, which is
+     * why they are saved: a reference photograph that came back unlocked, or
+     * back in colour, after closing the app would have to be set up again every
+     * morning — and the one that came back *exportable* would end up in a PNG.
+     */
+    val locked: Boolean = false,
+    val reference: Boolean = false,
+    val desaturate: Boolean = false,
+    /**
      * `strokes/<n>.ink` for a sheet that keeps the strokes that made it, null
      * for an ordinary one. See `VectorSheet`.
      *

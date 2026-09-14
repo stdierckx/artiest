@@ -45,6 +45,15 @@ object ProjectJson {
     /**
      * The version of the *format*. A file that claims another is still read.
      *
+     * **4 since Lr4**, which added three optional booleans per sheet —
+     * `locked`, `reference` and `desaturate` — each written only when true. A
+     * version 3 file has none of them and decodes as a drawing whose sheets are
+     * all editable, all exported and all in colour, which is what it is. A
+     * version 4 file read by a version 3 build loses the three and keeps every
+     * pixel; the one that matters is `reference`, and losing it means a
+     * photograph that used to be left out of an export is in one. That is the
+     * reason the field is written rather than inferred from anything.
+     *
      * **3 since Ik13**, which added the page's `guides` and the two numbers
      * that say how hard they pull, plus a fourth optional field per sheet —
      * the sheet's own guide table, which is what a stroke's `guide` index
@@ -58,7 +67,7 @@ object ProjectJson {
      * pixel, because the PNG is still there and is still what the drawing looks
      * like — see `ProjectSheet.strokes`.
      */
-    const val FORMAT = 3
+    const val FORMAT = 4
 
     /** What was read, and what could not be. */
     data class Decoded(
@@ -107,6 +116,11 @@ object ProjectJson {
         append(", \"opacity\": ").append(round(s.opacity))
         append(", \"visible\": ").append(s.visible)
         append(", \"blend\": ").append(Json.quote(s.blend.id))
+        // Lr4's three, written only when true, so a drawing with no reference
+        // sheet in it encodes to exactly the bytes version 3 wrote.
+        if (s.locked) append(", \"locked\": true")
+        if (s.reference) append(", \"reference\": true")
+        if (s.desaturate) append(", \"desaturate\": true")
         // Three fields written only when there is something to say, so a
         // drawing of ordinary sheets encodes to exactly the bytes version 1
         // wrote. That is what makes the version bump cheap to reason about:
@@ -238,6 +252,9 @@ object ProjectJson {
                 opacity = obj.float("opacity")?.coerceIn(0f, 1f) ?: 1f,
                 visible = (obj["visible"] as? JsonValue.Bool)?.value ?: true,
                 blend = LayerBlend.byId(obj.str("blend")),
+                locked = (obj["locked"] as? JsonValue.Bool)?.value ?: false,
+                reference = (obj["reference"] as? JsonValue.Bool)?.value ?: false,
+                desaturate = (obj["desaturate"] as? JsonValue.Bool)?.value ?: false,
                 strokes = strokes,
                 brushes = strings(obj["brushes"], MAX_TABLE),
                 clips = strings(obj["clips"], MAX_TABLE),

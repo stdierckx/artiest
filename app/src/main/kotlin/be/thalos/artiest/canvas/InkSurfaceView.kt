@@ -1991,6 +1991,25 @@ class InkSurfaceView(
     var pickFromActiveOnly: Boolean = false
 
     /**
+     * Whether the sheet the pen is on refuses ink. Lr4.
+     *
+     * Pushed by the chrome rather than read off the stack, because the stack
+     * belongs to the render thread and this is read at pen-down on the UI one.
+     * It is the same arrangement [pickingStrokes] has and for the same reason.
+     *
+     * **Checked where the stroke begins**, so a pen on a locked sheet does
+     * nothing at all — no wet ink, no queued commit, no undo step. Checking at
+     * the commit instead would draw the stroke, show it, and then throw it
+     * away, which reads as the app losing work.
+     *
+     * A pick and a marquee still work: neither puts anything on the sheet, and
+     * taking a colour off a locked photograph is the main thing anybody wants
+     * to do with one.
+     */
+    @Volatile
+    var activeLocked: Boolean = false
+
+    /**
      * The colour under the pen while a pick is in the hand, or 0 when none is.
      *
      * Read by the chrome inside a draw lambda, like [liveMarquee], and for its
@@ -3220,6 +3239,15 @@ class InkSurfaceView(
          */
         private var pickingThis = false
 
+        /**
+         * Whether this gesture is being ignored because the sheet is locked.
+         *
+         * [pickingThis]'s rule: fixed at pen-down and held for the gesture, so
+         * unlocking the sheet with the pen already down does not start a stroke
+         * from wherever the nib happens to be.
+         */
+        private var refusing = false
+
         private val marqueeBuilder = Marquee()
 
         private var marqueeMode = SelectMode.NEW
@@ -3231,6 +3259,12 @@ class InkSurfaceView(
                 return
             }
             pickingThis = false
+            // Lr4. A locked sheet takes nothing, and the gesture is dropped
+            // here rather than at the commit: see [activeLocked]. The marquee
+            // is above this line on purpose -- selecting is not putting
+            // anything on the sheet.
+            refusing = !selecting && activeLocked
+            if (refusing) return
             if (selecting) {
                 beginMarquee(pointerId)
                 return
@@ -3307,6 +3341,7 @@ class InkSurfaceView(
          * it was found on the tablet rather than in a test.
          */
         override fun onStrokeSamples(samples: ArrayList<PenSample>) {
+            if (refusing) return
             if (pickingThis) {
                 extendPick(samples)
                 return
@@ -3497,6 +3532,10 @@ class InkSurfaceView(
          * reads as the stroke snapping forward at pen-up.
          */
         override fun onStrokeEnd() {
+            if (refusing) {
+                refusing = false
+                return
+            }
             if (pickingThis) {
                 endPick()
                 return
@@ -3604,6 +3643,10 @@ class InkSurfaceView(
         }
 
         override fun onStrokeCancel() {
+            if (refusing) {
+                refusing = false
+                return
+            }
             if (pickingThis) {
                 cancelPick()
                 return

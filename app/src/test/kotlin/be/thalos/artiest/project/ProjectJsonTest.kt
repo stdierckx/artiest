@@ -46,6 +46,44 @@ class ProjectJsonTest {
     }
 
     @Test
+    fun `a reference sheet comes back a reference sheet`() {
+        // Lr4. The one of the three that must survive a save, because losing it
+        // means a photograph that used to be left out of an export is in one.
+        val p = project(
+            sheet(0),
+            ProjectSheet(
+                Project.fileFor(1), "Photo",
+                locked = true, reference = true, desaturate = true,
+            ),
+        )
+        val back = assertNotNull(ProjectJson.decode(ProjectJson.encode(p)).project)
+        assertEquals(p, back)
+    }
+
+    @Test
+    fun `a drawing with no reference sheet writes exactly what it used to`() {
+        // The three are written only when true, so nothing that existed before
+        // moves. That is what makes the format bump cheap to reason about.
+        val text = ProjectJson.encode(project(sheet(0)))
+        assertEquals(false, text.contains("locked"))
+        assertEquals(false, text.contains("reference"))
+        assertEquals(false, text.contains("desaturate"))
+    }
+
+    @Test
+    fun `a file from before the three decodes as a drawing that is all drawing`() {
+        val sheets = assertNotNull(
+            ProjectJson.decode(
+                """{"artiest_project": 3, "name": "P", "width": 10, "height": 10,
+                 "layers": [{"file": "layers/0.png", "name": "L"}]}""",
+            ).project,
+        ).sheets
+        assertEquals(false, sheets[0].locked)
+        assertEquals(false, sheets[0].reference)
+        assertEquals(false, sheets[0].desaturate)
+    }
+
+    @Test
     fun `the text is the text, twice`() {
         val p = project(sheet(0))
         val once = ProjectJson.encode(p)

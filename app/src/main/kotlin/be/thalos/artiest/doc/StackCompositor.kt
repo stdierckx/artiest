@@ -112,6 +112,21 @@ class StackCompositor {
          * The export passes null and drops the float first; see `PngExporter`.
          */
         floating: FloatingPixels? = null,
+        /**
+         * Leave out the sheets marked [LayerStack.Entry.reference]. Lr4.
+         *
+         * False for the screen and true for anything that writes a file. A
+         * reference sheet is a photograph you are drawing *from*, and a PNG
+         * with somebody else's photograph baked into it is the one export
+         * nobody wants and the hardest to notice.
+         *
+         * A parameter here rather than a filter at the call site, because this
+         * class is *the one place that knows what a drawing looks like* and the
+         * export disagreeing with the screen about which sheets exist is the
+         * exact class of defect this class was extracted to prevent. The
+         * caller's job is to say which of the two pictures it wants.
+         */
+        skipReference: Boolean = false,
     ): Boolean {
         // The paper is the bottom of the stack and not a backdrop slid under it
         // afterwards. See the class header: it is the same image today and a
@@ -122,9 +137,14 @@ class StackCompositor {
         val wetAt = if (wet != null && wet.isOpen) wet.position else NO_WET
         var read = true
         var painted = 0
+        var skipped = 0
         for (i in 0 until stack.size) {
             val entry = stack.entryAt(i)
             if (!entry.visible) continue
+            if (skipReference && entry.reference) {
+                skipped++
+                continue
+            }
             val alpha = (entry.opacity.coerceIn(0f, 1f) * 255f + 0.5f).toInt()
             // A sheet at zero opacity is not merely invisible, it is a full-page
             // blit that cannot change a pixel.
@@ -138,10 +158,17 @@ class StackCompositor {
                 null
             }
             val blend = entry.blend
+            // Lr4. Colour taken out at draw time, never out of the pixels, so
+            // turning it off costs nothing and the sheet was never edited.
+            // Set on both paints because a desaturated sheet can also be
+            // blended, at less than full opacity, with a float over it.
+            val grey = if (entry.desaturate) greyFilter else null
+            sheetPaint.colorFilter = grey
             if (i != wetAt && float == null) {
                 sheetPaint.alpha = alpha
                 sheetPaint.blendMode = blend.mode ?: BlendMode.SRC_OVER
                 if (!entry.layer.read { canvas.drawBitmap(it, 0f, 0f, sheetPaint) }) read = false
+                sheetPaint.colorFilter = null
                 continue
             }
             // Anything with something *on* it -- wet ink, floating pixels -- is
@@ -176,13 +203,24 @@ class StackCompositor {
             }
             if (i == wetAt) wet!!.draw(canvas)
             if (grouped) canvas.restoreToCount(save)
+            sheetPaint.colorFilter = null
         }
         sheetsPainted = painted
+        referencesSkipped = skipped
         return read
     }
 
     /** Visible sheets in the last [compose]. Diagnostic only. */
     var sheetsPainted: Int = 0
+        private set
+
+    /**
+     * Reference sheets the last [compose] left out. Lr4.
+     *
+     * Not diagnostic: the export reads it and **says** so. A file that silently
+     * dropped half of what it was is `docs/layer-effects-plan.md` trap 4.
+     */
+    var referencesSkipped: Int = 0
         private set
 
     /**
@@ -210,6 +248,19 @@ class StackCompositor {
     private val groupPaint = Paint()
 
     private val paperPaint = Paint()
+
+    /**
+     * Saturation zero, for a sheet marked [LayerStack.Entry.desaturate].
+     *
+     * One instance for the compositor's life. A `ColorMatrixColorFilter` is
+     * immutable and this one is a constant, so the per-user rule this class
+     * states about its `Paint`s does not apply to it — but it is held here
+     * rather than in a companion so that nothing outside can point a second
+     * filter at the same paint.
+     */
+    private val greyFilter = android.graphics.ColorMatrixColorFilter(
+        android.graphics.ColorMatrix().apply { setSaturation(0f) },
+    )
 
     private companion object {
         /** No sheet has wet ink on it. Not a position, so it matches nothing. */

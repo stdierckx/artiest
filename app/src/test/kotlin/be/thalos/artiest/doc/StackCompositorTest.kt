@@ -61,13 +61,65 @@ class StackCompositorTest {
         stack: LayerStack,
         wet: StackCompositor.Wet? = null,
         paper: Int = Color.WHITE,
+        skipReference: Boolean = false,
     ): Pair<Bitmap, Boolean> {
         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val read = StackCompositor().compose(
             Canvas(out), stack, paper, w, h, wet,
             0f, 0f, w.toFloat(), h.toFloat(),
+            skipReference = skipReference,
         )
         return out to read
+    }
+
+    // --- Lr4's three flags ---------------------------------------------------
+
+    @Test
+    fun `a reference sheet is on the screen and not in the file`() {
+        val stack = stackOf()
+        val ref = stack.addSheet(Color.RED)
+        stack.byId(ref)!!.reference = true
+        // The screen: the sheet is there, because it is a thing you are drawing
+        // from and you have to be able to see it.
+        assertEquals(Color.RED, compose(stack).first.getPixel(2, 2))
+        // The file: it is not, because a PNG with somebody else's photograph
+        // baked into it is the one export nobody wants.
+        assertEquals(Color.WHITE, compose(stack, skipReference = true).first.getPixel(2, 2))
+    }
+
+    @Test
+    fun `the export counts what it left out`() {
+        val stack = stackOf()
+        val a = stack.addSheet(Color.RED)
+        stack.byId(a)!!.reference = true
+        val b = stack.addSheet(Color.TRANSPARENT)
+        stack.byId(b)!!.reference = true
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val compositor = StackCompositor()
+        compositor.compose(
+            Canvas(out), stack, Color.WHITE, w, h, null,
+            0f, 0f, w.toFloat(), h.toFloat(), skipReference = true,
+        )
+        // Said out loud by the caller. A file that quietly dropped two sheets
+        // is worse than one that was honest about what it carried.
+        assertEquals(2, compositor.referencesSkipped)
+        // The one the stack starts with, which is not a reference.
+        assertEquals(1, compositor.sheetsPainted)
+    }
+
+    @Test
+    fun `a desaturated sheet is drawn grey and keeps its pixels`() {
+        val stack = stackOf()
+        val id = stack.addSheet(Color.rgb(200, 40, 40))
+        stack.byId(id)!!.desaturate = true
+        val argb = compose(stack).first.getPixel(2, 2)
+        assertEquals(Color.red(argb), Color.green(argb))
+        assertEquals(Color.green(argb), Color.blue(argb))
+        // The pixels are untouched: turning it off is free and nothing was
+        // edited. Read straight off the sheet rather than through the composite.
+        var own = 0
+        stack.byId(id)!!.layer.read { own = it.getPixel(2, 2) }
+        assertEquals(Color.rgb(200, 40, 40), own)
     }
 
     // --- the paper ----------------------------------------------------------

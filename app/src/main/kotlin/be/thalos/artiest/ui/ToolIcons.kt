@@ -300,6 +300,75 @@ object ToolIcons {
         }
     }
 
+    /**
+     * A padlock, shackle closed. Lr4.
+     *
+     * The one place in this set where the obvious symbol is the right one for
+     * the obvious reason: a locked sheet is a locked thing, and there is no
+     * second meaning anybody could read into it.
+     */
+    val lock: ImageVector by lazy {
+        icon("lock") {
+            stroke {
+                moveTo(7.6f, 10.4f)
+                lineTo(7.6f, 7.4f)
+                arcTo(4.4f, 4.4f, 0f, true, true, 16.4f, 7.4f)
+                lineTo(16.4f, 10.4f)
+            }
+            fill {
+                moveTo(4.6f, 10.4f)
+                lineTo(19.4f, 10.4f)
+                lineTo(19.4f, 21.0f)
+                lineTo(4.6f, 21.0f)
+                close()
+            }
+        }
+    }
+
+    /**
+     * A picture with a corner turned up: a sheet that is something to look at.
+     *
+     * Not a camera and not an eye. A camera says *where it came from*, which is
+     * not the point — a reference sheet may be a scan, a screenshot or a
+     * drawing of your own — and an eye already means visibility one button
+     * along.
+     */
+    val referenceLayer: ImageVector by lazy {
+        icon("reference_layer") {
+            stroke {
+                moveTo(3.4f, 5.0f)
+                lineTo(20.6f, 5.0f)
+                lineTo(20.6f, 19.0f)
+                lineTo(3.4f, 19.0f)
+                close()
+                moveTo(3.4f, 15.2f)
+                lineTo(9.0f, 10.0f)
+                lineTo(14.0f, 14.6f)
+                lineTo(16.6f, 12.4f)
+                lineTo(20.6f, 15.8f)
+            }
+            fill { circle(7.6f, 8.6f, 1.6f) }
+        }
+    }
+
+    /**
+     * A circle half filled: the colour taken out of one side. Lr4.
+     *
+     * The same shape [opacity] uses and deliberately so — both are "how much of
+     * something" — but split the other way round, vertically against that one's
+     * horizontal, so the pair cannot be confused at 20dp on a bar.
+     */
+    val greyscale: ImageVector by lazy {
+        icon("greyscale") {
+            stroke { circle(12f, 12f, 8.4f) }
+            fill {
+                moveTo(12f, 3.6f)
+                arcTo(8.4f, 8.4f, 0f, false, true, 12f, 20.4f)
+                close()
+            }
+        }
+    }
+
     /** The hue wheel with its puck — the same two shapes [ColorWheel] draws. */
     val palette: ImageVector by lazy {
         icon("palette") {

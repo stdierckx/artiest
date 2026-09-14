@@ -35,6 +35,15 @@ sealed interface ExportResult {
         val uri: Uri,
         val bytes: Long,
         val strokes: Int,
+        /**
+         * Reference sheets that were left out of the file. Lr4.
+         *
+         * On the result and not in a log, because the caller has to **say** it:
+         * a file that silently dropped half of what it was is
+         * `docs/layer-effects-plan.md` trap 4, and a photograph deliberately
+         * left out is still half of what was on the screen.
+         */
+        val referencesSkipped: Int,
         val notYetStamped: Int,
         val waitMs: Long,
         val copyMs: Long,
