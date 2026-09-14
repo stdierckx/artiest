@@ -1,6 +1,6 @@
 {
   "artiest_catalogue": 1,
-  "version": 8,
+  "version": 9,
   "cell_dp": 44,
   "groups": [
     {
@@ -18,6 +18,10 @@
     {
       "id": "canvas",
       "label": "Canvas"
+    },
+    {
+      "id": "learn",
+      "label": "Learn"
     },
     {
       "id": "file",
@@ -417,6 +421,26 @@
       "label": "Redo",
       "short": "Redo",
       "group": "edit",
+      "kind": "button",
+      "cells_wide": 1,
+      "cells_tall": 1,
+      "turns": false
+    },
+    {
+      "id": "reference_panel",
+      "label": "Reference pane",
+      "short": "Ref",
+      "group": "learn",
+      "kind": "panel",
+      "cells_wide": 4,
+      "cells_tall": 5,
+      "turns": false
+    },
+    {
+      "id": "references",
+      "label": "Reference",
+      "short": "Ref",
+      "group": "learn",
       "kind": "button",
       "cells_wide": 1,
       "cells_tall": 1,

@@ -55,6 +55,8 @@ object ToolIcons {
         ToolItem.SOFT_ERASER -> softEraser
         ToolItem.PICK_COLOUR -> pickColour
         ToolItem.PICK_LAYER_ONLY -> pickLayerOnly
+        ToolItem.REFERENCES -> references
+        ToolItem.REFERENCE_PANEL -> references
         ToolItem.LAYERS -> layers
         ToolItem.MARQUEE -> marquee
         ToolItem.SELECTION -> selectionPanel
@@ -366,6 +368,36 @@ object ToolIcons {
                 arcTo(8.4f, 8.4f, 0f, false, true, 12f, 20.4f)
                 close()
             }
+        }
+    }
+
+    /**
+     * A page and a picture beside it: the reference pane. Lr2.
+     *
+     * Side by side is what the feature *is* — the panel fixated to an edge — so
+     * the glyph is the arrangement rather than an object. A single framed
+     * picture would be [referenceLayer], which is a different thing one button
+     * away: a sheet of the drawing rather than a pane beside it.
+     */
+    val references: ImageVector by lazy {
+        icon("references") {
+            stroke {
+                moveTo(2.8f, 4.4f)
+                lineTo(11.0f, 4.4f)
+                lineTo(11.0f, 19.6f)
+                lineTo(2.8f, 19.6f)
+                close()
+                moveTo(13.0f, 4.4f)
+                lineTo(21.2f, 4.4f)
+                lineTo(21.2f, 19.6f)
+                lineTo(13.0f, 19.6f)
+                close()
+                moveTo(13.0f, 15.4f)
+                lineTo(16.2f, 11.6f)
+                lineTo(18.4f, 14.2f)
+                lineTo(21.2f, 11.0f)
+            }
+            fill { circle(16.0f, 8.2f, 1.4f) }
         }
     }
 

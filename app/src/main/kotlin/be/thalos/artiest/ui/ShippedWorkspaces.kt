@@ -115,7 +115,7 @@ object ShippedWorkspaces {
         // it out here would quietly remove the marquee from a workspace that
         // has always offered it.
         filter = CatalogueFilter
-            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT)
+            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT, ToolGroup.LEARN)
             .offering(ToolItem.LAYERS)
             .offering(ToolItem.LAYERS_PANEL)
             .offering(ToolItem.FIT),
@@ -228,7 +228,10 @@ object ShippedWorkspaces {
         // sheet the marquee picks *strokes*, and picking a line you are not
         // happy with is half of what inking is.
         filter = CatalogueFilter
-            .of(ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT, ToolGroup.CANVAS)
+            .of(
+                ToolGroup.DRAW, ToolGroup.EDIT, ToolGroup.SELECT,
+                ToolGroup.CANVAS, ToolGroup.LEARN,
+            )
             .offering(ToolItem.EXPORT),
         defaults = WorkspaceDefaults(
             brush = BrushPreset.PEN.id,

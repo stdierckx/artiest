@@ -76,8 +76,15 @@ object ToolCatalogue {
      * 8: `pick_colour` and `pick_layer_only`, both in Draw. Lr1, and the first
      * entries this program has had for taking a colour off the page rather than
      * mixing one. Nothing removed; a reader on 7 keeps every id it has.
+     *
+     * 9: the **Learn** group, with `references` and `reference_panel` in it.
+     * Lr2. A new group and no moves: unlike 7, nothing that existed changed
+     * which tab it is listed under, so a reader on 8 keeps every id *and* every
+     * listing it had. What an old **saved workspace** does not have is the new
+     * group in its filter, which is why `WorkspaceJson` adds it on the way in —
+     * see `decodeFilter`.
      */
-    const val VERSION = 8
+    const val VERSION = 9
 
     /** What a reader checks before believing any of the rest. */
     const val FORMAT = 1

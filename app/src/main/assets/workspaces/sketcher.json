@@ -1,12 +1,12 @@
 {
   "artiest_workspace": 2,
-  "catalogue": 8,
+  "catalogue": 9,
   "id": "sketcher",
   "name": "Sketcher",
   "description": "Pencil, paper, and nothing in the way.",
   "author": "artiest",
   "revision": 1,
-  "filter": {"groups": ["edit", "draw", "select"], "hide": [], "show": ["fit", "layers", "layers_panel"]},
+  "filter": {"groups": ["edit", "draw", "select", "learn"], "hide": [], "show": ["fit", "layers", "layers_panel"]},
   "defaults": {"brush": null, "shelf": [], "stabilisation": null},
   "surfaces": [
     {

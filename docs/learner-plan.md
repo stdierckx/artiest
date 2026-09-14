@@ -684,6 +684,75 @@ sheet dropped from that is work lost.
 Never the pixels. Turning it off is free and the sheet was never edited —
 asserted by reading the sheet's own pixel back after composing it grey.
 
+## What Lr2 and Lr3 built
+
+`ref/RefFiles.kt`, `ref/RefPicture.kt`, `ref/RefImport.kt`,
+`ui/ReferencePanel.kt`, a **Learn** group with `references` and
+`reference_panel` in it (catalogue version 9), a share filter in the manifest,
+and eleven tests over the directory.
+
+### Side by side is not a layout
+
+It is the panel fixated to an edge, which the workspace system has done since
+U6. Nothing new was needed for the arrangement the user asked for: the pane is
+a panel like the layers panel, it opens from a button, it fixates onto a bar of
+its own, and it resizes. That is the whole return on P0.
+
+### The pen picks, the fingers move
+
+Split by **pointer type** and by nothing else. A stylus down in the pane starts
+a pick; a finger down starts pan-pinch-twist. Nothing is switched, so nothing
+can be left switched on — which is the one thing every Clip Studio user names
+about its Sub View, and it costs no button here because `PointerType` is on the
+event.
+
+The inverse mapping is the risk and it is written down as such: the picture is
+drawn through `ContentScale.Fit` and then a `graphicsLayer`, and
+`paneToPicture` undoes both in the opposite order. **They are one mapping
+written twice**, which is the shape of defect `Matrices.kt` has a page of prose
+about — right at scale 1 with no rotation, wrong everywhere else. Checked on
+the tablet at a zoom: the picker took `(40, 110, 180)` off a rectangle painted
+`(40, 110, 180)`.
+
+### Copied in, not linked to
+
+Krita offers both and is right to on a desktop. Here a photograph moved,
+renamed or tidied away by the gallery app would break the link silently, months
+later, in a drawing that had been working. So the bytes are copied into the
+app's own files at 2048 on the long edge, JPEG 92 — a few hundred kilobytes
+rather than the three to eight megabytes it arrived as, which is trap 5.
+
+What that costs is exact colour: a JPEG's blocks move a pixel by a unit or two
+and the pen can pick off this picture. Written down rather than discovered.
+
+### Two files per picture, no index
+
+`<id>.jpg` and `<id>.txt`, which is `BrushFiles`' rule: a single index has to be
+rewritten whenever anything changes, and that is the shape of bug where adding
+your fortieth reference loses the other thirty-nine. Half a picture is
+recoverable — the meta can be typed again, the pixels cannot — and the tests
+cover both halves going missing on their own.
+
+### Share to artiest
+
+A picture from any app, through Android's own share sheet. `singleTask` is what
+makes it safe: without it a share opens a *second* copy of the activity over
+the first, which is a second document, a second render thread and an autosave
+race between them while the drawing sits behind it.
+
+**Verified as far as the tablet allows.** Driving a share from `adb` cannot
+hand over the URI grant that a real sharing app gives, so what was confirmed is
+that the intent arrives at the running activity, is recognised, and fails
+*legibly* — the user is told the app it came from did not allow this one to
+read it, rather than being shown a `SecurityException`.
+
+### Still owed on the pane
+
+**"This drawing"**, the entry that shows your own page whole while the canvas is
+zoomed into an eyelash. It needs a composited page thumbnail, which is a render
+thread request like `ColourProbe`'s, and it is a separable piece of work rather
+than a corner cut: everything above stands without it.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

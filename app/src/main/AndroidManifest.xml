@@ -12,10 +12,31 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!--
+              Lr3. A picture shared from anywhere on the tablet goes into the
+              reference library. This is the PureRef lesson stated as a manifest
+              entry: the program that wins at reference is the one where
+              collecting costs nothing, and four taps through a picker is not
+              nothing.
+
+              singleTask above is what makes it safe. Without it a share opens
+              a second copy of this activity over the first, which means a
+              second document, a second render thread and an autosave race
+              between them, while the drawing the user was in the middle of
+              sits behind it. With it the share arrives at the activity that is
+              already open, through onNewIntent, and the drawing is never
+              disturbed.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
     </application>

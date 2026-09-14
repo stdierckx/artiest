@@ -113,6 +113,8 @@ import be.thalos.artiest.ui.DockStore
 import be.thalos.artiest.ui.Workspace
 import be.thalos.artiest.ui.WorkspaceDefaults
 import be.thalos.artiest.ui.PickRing
+import be.thalos.artiest.ui.ReferenceButton
+import be.thalos.artiest.ui.ReferencePanelCard
 import be.thalos.artiest.ui.ProjectGallery
 import be.thalos.artiest.ui.WorkspaceMenu
 import be.thalos.artiest.ui.WorkspaceStore
@@ -138,8 +140,10 @@ import be.thalos.artiest.project.ProjectSaver
 import be.thalos.artiest.project.ProjectStore
 import be.thalos.artiest.project.SaveResult
 import be.thalos.artiest.ui.ToolItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The app's one screen: a canvas, a toolbar over it, and the instruments W16
@@ -177,6 +181,47 @@ class MainActivity : ComponentActivity() {
      */
     private var saveNow: (suspend () -> Unit)? = null
 
+    /**
+     * A picture shared to this app, waiting for the screen to take it. Lr3.
+     *
+     * A field rather than a callback, because a share can arrive *before* the
+     * composition exists — the app was not running and the share is what
+     * started it — and an intent that landed a moment too early would be an
+     * intent that did nothing, which is the kind of failure a user reports as
+     * "sharing works sometimes".
+     *
+     * `MutableState` so the screen sees it whichever order the two happen in.
+     */
+    private val sharedPicture = androidx.compose.runtime.mutableStateOf<android.net.Uri?>(null)
+
+    /**
+     * The share that arrived while the app was already open.
+     *
+     * `singleTask` in the manifest is what routes it here rather than opening a
+     * second copy of this activity over the drawing in progress. See the
+     * comment beside the intent filter.
+     */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedOf(intent)?.let { sharedPicture.value = it }
+    }
+
+    /**
+     * The image in a share, or null.
+     *
+     * `EXTRA_STREAM` and one picture: `ACTION_SEND` carries exactly one, and
+     * `ACTION_SEND_MULTIPLE` — which this app does not claim — carries a list.
+     * Claiming only the first is the honest thing to do, because a library that
+     * silently took one of five would be worse than one that took none.
+     */
+    private fun sharedOf(intent: android.content.Intent?): android.net.Uri? {
+        if (intent?.action != android.content.Intent.ACTION_SEND) return null
+        if (intent.type?.startsWith("image/") != true) return null
+        @Suppress("DEPRECATION")
+        return intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         keepNavGesturesOutOfTheWay()
@@ -189,6 +234,11 @@ class MainActivity : ComponentActivity() {
         document = doc
 
         applyRefreshPolicy(RefreshPolicy.HIGHEST)
+
+        // A share that *started* the app, as opposed to one that arrived while
+        // it was running. Read here rather than in the composition because the
+        // intent is consumed once and the composition may be rebuilt.
+        sharedOf(intent)?.let { sharedPicture.value = it }
 
         // A megabyte of atan2 that the colour panel would otherwise build
         // while the user is waiting for it to appear. Off the main thread and
@@ -213,6 +263,7 @@ class MainActivity : ComponentActivity() {
                         onForceNinety = { done -> holdAndCheck(90f, done) },
                         onView = { view = it },
                         onSaveHook = { saveNow = it },
+                        sharedPicture = sharedPicture,
                     )
                 }
             }
@@ -384,6 +435,16 @@ private fun CanvasScreen(
      * composition would be torn down with the window.
      */
     onSaveHook: ((suspend () -> Unit)?) -> Unit = {},
+    /**
+     * A picture shared to this app, or null. Lr3.
+     *
+     * The state itself and not its value, because the activity writes it and
+     * this reads it, and the two are not built in a fixed order — a share can
+     * start the app. Cleared here once it has been taken, so a configuration
+     * change does not add the same picture twice.
+     */
+    sharedPicture: androidx.compose.runtime.MutableState<android.net.Uri?> =
+        androidx.compose.runtime.mutableStateOf(null),
 ) {
     var generation by remember { mutableIntStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
@@ -1301,6 +1362,77 @@ private fun CanvasScreen(
         }
     }
 
+    // Lr3. The reference library: pictures on the tablet's own storage, kept by
+    // this app and never anywhere else. One instance for the composition's
+    // life; it holds a directory and nothing else.
+    val refFiles = remember(context) {
+        be.thalos.artiest.ref.RefFiles(java.io.File(context.filesDir, "references"))
+    }
+    var refPictures by remember { mutableStateOf(emptyList<be.thalos.artiest.ref.RefPicture>()) }
+    var refSelected by remember { mutableStateOf<String?>(null) }
+    // The one being looked at, full size, and a small one each for the strip.
+    // Both are read off the disk on a background dispatcher; a panel that
+    // decoded forty photographs on the main thread would be a panel that opens
+    // in its own time.
+    var refBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var refThumbs by remember { mutableStateOf(emptyMap<String, android.graphics.Bitmap>()) }
+    var refLoaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(refFiles) {
+        val list = withContext(Dispatchers.IO) { refFiles.list() }
+        refPictures = list
+        refSelected = list.firstOrNull()?.id
+        refLoaded = true
+    }
+
+    // The strip. Rebuilt when the list changes and not per picture, because a
+    // map rebuilt per picture is a recomposition per picture.
+    LaunchedEffect(refPictures) {
+        val small = withContext(Dispatchers.IO) {
+            refPictures.mapNotNull { p ->
+                refFiles.loadSmall(p.id, REF_THUMB_PX)?.let { p.id to it }
+            }.toMap()
+        }
+        refThumbs = small
+    }
+
+    LaunchedEffect(refSelected) {
+        val id = refSelected
+        refBitmap = if (id == null) null else withContext(Dispatchers.IO) { refFiles.load(id) }
+    }
+
+    /** Put a picture in the library and show it. Lr3. */
+    val addReference: (android.net.Uri, String) -> Unit = { uri, label ->
+        scope.launch {
+            when (val r = be.thalos.artiest.ref.RefImport.add(context, refFiles, uri, label)) {
+                is be.thalos.artiest.ref.RefImport.Result.Added -> {
+                    refPictures = listOf(r.picture) + refPictures
+                    refSelected = r.picture.id
+                }
+                is be.thalos.artiest.ref.RefImport.Result.Failed -> {
+                    importNote = "could not add that picture: ${r.reason}"
+                }
+            }
+        }
+    }
+
+    // A share, taken once. Waits for the library to have finished reading
+    // itself, or the new picture would be at the front of a list that is about
+    // to be replaced by what was on disk a moment ago.
+    LaunchedEffect(sharedPicture.value, refLoaded) {
+        val uri = sharedPicture.value ?: return@LaunchedEffect
+        if (!refLoaded) return@LaunchedEffect
+        sharedPicture.value = null
+        addReference(uri, "")
+    }
+
+    val refPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        // Backing out is not a failure and not worth a line of chrome.
+        if (uri != null) addReference(uri, "")
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -2195,6 +2327,26 @@ private fun CanvasScreen(
                         pickLayerOnly = it
                         generation++
                     },
+                    refPictures = refPictures,
+                    refSelected = refSelected,
+                    refBitmap = refBitmap,
+                    refThumbs = refThumbs,
+                    onRefSelect = { refSelected = it },
+                    onRefAdd = {
+                        refPicker.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
+                        )
+                    },
+                    onRefRemove = { id ->
+                        // The list first, so the panel never draws a row whose
+                        // file has gone. The delete is the slow half and it
+                        // cannot fail in a way the user could act on.
+                        refPictures = refPictures.filterNot { it.id == id }
+                        if (refSelected == id) refSelected = refPictures.firstOrNull()?.id
+                        scope.launch { withContext(Dispatchers.IO) { refFiles.delete(id) } }
+                    },
                     barrel = barrel,
                     library = library,
                     brushId = brushId,
@@ -2401,6 +2553,14 @@ private fun ToolSlot(
     onPickColourHeld: () -> Unit,
     pickLayerOnly: Boolean,
     onPickLayerOnly: (Boolean) -> Unit,
+    /** Lr2/Lr3. The reference library, and the one being looked at. */
+    refPictures: List<be.thalos.artiest.ref.RefPicture>,
+    refSelected: String?,
+    refBitmap: android.graphics.Bitmap?,
+    refThumbs: Map<String, android.graphics.Bitmap>,
+    onRefSelect: (String) -> Unit,
+    onRefAdd: () -> Unit,
+    onRefRemove: (String) -> Unit,
     barrel: Boolean,
     exporting: Boolean,
     importing: Boolean,
@@ -2561,6 +2721,31 @@ private fun ToolSlot(
             label = item.label,
             onClick = { onPickLayerOnly(!pickLayerOnly) },
             selected = pickLayerOnly,
+        )
+
+        // Lr2. The pane, as a button that opens it, and the pane kept on a bar.
+        // The pair is COLOUR/COLOUR_PANEL's and for its reason.
+        ToolItem.REFERENCES -> ReferenceButton(
+            pictures = refPictures,
+            selected = refSelected,
+            onSelect = onRefSelect,
+            bitmap = refBitmap,
+            thumbnails = refThumbs,
+            onAdd = onRefAdd,
+            onRemove = onRefRemove,
+            onInk = onInk,
+            onFixate = { onFixate(ToolItem.REFERENCE_PANEL, it) },
+        )
+
+        ToolItem.REFERENCE_PANEL -> ReferencePanelCard(
+            pictures = refPictures,
+            selected = refSelected,
+            onSelect = onRefSelect,
+            bitmap = refBitmap,
+            thumbnails = refThumbs,
+            onAdd = onRefAdd,
+            onRemove = onRefRemove,
+            onInk = onInk,
         )
 
         ToolItem.UNDO ->
@@ -3565,6 +3750,16 @@ private const val WET_TEST_ALPHA = 0.3f
  * visibly worth making and small enough that three of them land somewhere you
  * meant; `CanvasTransform.zoomedAbout` clamps the ends.
  */
+/**
+ * How big a strip thumbnail is decoded at, in pixels. Lr3.
+ *
+ * An upper bound handed to `inSampleSize`, which rounds down to a power of two,
+ * so what comes back is between this and half of it. Twice the 62dp the strip
+ * draws them at, because a thumbnail decoded at exactly its drawn size is soft
+ * on a 230 dpi panel.
+ */
+private const val REF_THUMB_PX = 256
+
 private const val ZOOM_STEP = 1.25f
 
 /**

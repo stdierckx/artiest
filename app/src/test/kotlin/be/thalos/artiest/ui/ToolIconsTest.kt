@@ -33,6 +33,10 @@ class ToolIconsTest {
         setOf("layers", "layers_panel"),
         setOf("selection", "selection_panel"),
         setOf("guides", "guides_panel"),
+        // Lr2, and the same pair as the four above: a button that opens a panel
+        // and the panel kept on a bar are one idea, and the kept card's face
+        // only ever appears in the chooser anyway.
+        setOf("references", "reference_panel"),
         // The two erasers do **not** share one, and that is the point: they
         // sit side by side on the starter bar, so a hand has to tell them apart
         // at 21dp without reading. See `ToolIcons.softEraser`.

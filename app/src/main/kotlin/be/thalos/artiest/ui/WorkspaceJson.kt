@@ -257,6 +257,14 @@ object WorkspaceJson {
             ) {
                 out += ToolGroup.SELECT
             }
+            // And the same repair for Lr2's group. A file written before it
+            // cannot mention Learn, so a workspace somebody arranged last month
+            // would offer no reference pane at all and there would be nothing
+            // on screen to say why. Offered, not placed: it appears in the `+`
+            // chooser and on no toolbar until somebody puts it on one.
+            if (catalogue < LEARN_GROUP && ToolGroup.DRAW in out) {
+                out += ToolGroup.LEARN
+            }
             out
         }
         return CatalogueFilter(
@@ -570,6 +578,14 @@ object WorkspaceJson {
      * and `selection` a Canvas one. See [decodeFilter].
      */
     private const val SELECT_SPLIT = 7
+
+    /**
+     * The catalogue version that added the Learn group.
+     *
+     * Files stamped lower than this were written before there was a reference
+     * pane to offer. See [decodeFilter].
+     */
+    private const val LEARN_GROUP = 9
 
     private val FILTER_KEYS = setOf("groups", "hide", "show")
     private val DEFAULTS_KEYS = setOf("brush", "shelf", "stabilisation")

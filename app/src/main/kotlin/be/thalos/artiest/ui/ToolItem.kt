@@ -317,6 +317,30 @@ enum class ToolItem(
      * and a slider, and none of that fits in a bar. What a toolbar can usefully
      * show about layers at a glance is nothing, so it shows a way in.
      */
+    /**
+     * Lr2. The reference pane, as a button that opens it.
+     *
+     * [REFERENCE_PANEL] is the same pane kept on a bar, and the pair is exactly
+     * [COLOUR]/[COLOUR_PANEL]'s: fixating leaves the button where it was, and
+     * two things on screen at once cannot be one item under the rule that an
+     * item lives in exactly one place.
+     */
+    REFERENCES("references", "Reference", "Ref", 1, ToolGroup.LEARN),
+
+    /**
+     * The pane, kept. **This is what "side by side" is** — a panel fixated to
+     * an edge — and it is why the feature needed no new kind of window.
+     *
+     * Four cells wide and five tall by default, which is a picture about 170dp
+     * across on this tablet: big enough to judge a colour and a shape from,
+     * small enough to leave the drawing most of the glass. It is resizable like
+     * every other card, so the number is a starting point and not a limit.
+     */
+    REFERENCE_PANEL(
+        "reference_panel", "Reference pane", "Ref", 4, ToolGroup.LEARN,
+        ToolKind.PANEL, cellsTall = 5,
+    ),
+
     LAYERS("layers", "Layers", "Layers", 1, ToolGroup.CANVAS),
 
     /**
@@ -641,6 +665,19 @@ enum class ToolGroup(val label: String) {
      */
     SELECT("Selection"),
     CANVAS("Canvas"),
+
+    /**
+     * Lr2. The things that are about **learning to draw** rather than about
+     * drawing: the reference pane, the library behind it, and what comes after
+     * them in `docs/learner-plan.md`.
+     *
+     * Its own group and not Canvas, for the reason the Selection split gives:
+     * a group is what a workspace offers, and a *Clean* workspace that wants
+     * nothing but paper should be able to say so in one word. It is also the
+     * one group a beginner's workspace is built *around*, which is a thing no
+     * other group is.
+     */
+    LEARN("Learn"),
     FILE("File"),
     DEBUG("Instruments"),
 }

@@ -27,7 +27,7 @@ class ChooserTabsTest {
         assertEquals(
             // Selection is the sixth, and it sits third because that is where
             // the hand reaches for it. See `ToolGroup.SELECT`.
-            listOf("Edit", "Draw", "Selection", "Canvas", "File", "Instruments", "Brushes"),
+            listOf("Edit", "Draw", "Selection", "Canvas", "Learn", "File", "Instruments", "Brushes"),
             labels(CatalogueFilter.EVERYTHING, hasBrushes = true),
         )
     }
