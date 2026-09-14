@@ -119,6 +119,19 @@ expensive item (vector strokes) is also the item that makes text sharp, makes
 SVG export possible and makes the logo/vector workspace conceivable later. It
 buys the most future.
 
+**Inker was chosen, and it shipped on 2026-09-13.** So this row is now the
+*third* artist, and a fourth candidate has appeared that does not belong in the
+list above because it is not the same size as the others:
+
+- **Learner** (35–54 days) — `docs/learner-plan.md`. The beginner: a reference
+  pane, a reference library, practice sessions, and a drawing that replays
+  itself stroke by stroke so a card in your own knowledge base *is* the drawing
+  that made it. A third of the Painter's cost, because almost every item is the
+  exposure of something already built — the stroke records the Inker paid for,
+  the workspace system, `PictureImporter`, `StackCompositor`. Three of its work
+  items are owed to every other identity anyway: there is no colour picker, no
+  layer lock and no canvas flip in this program today.
+
 ### P5 and beyond
 
 Text → balloons → panels → pages, in that order, because each genuinely needs
@@ -201,5 +214,6 @@ an arrangement.
 | `comics-plan.md` | 8–11 now / 250+ complete | text, groups, pages |
 | `animation-plan.md` | 23–36 (flipbook) / 60+ (with sound and camera) | the sequence subsystem |
 | `inker-plan.md` — the build for P4, over `vector-plan.md` and `guides-plan.md` | 77–115 | P3 |
+| `learner-plan.md` — the beginner, and the replay that makes a lesson | 35–54 | Inker's stroke records |
 | `big-nib-plan.md` — a defect against shipped work, not a phase. **Done 2026-09-13** | 7–11.5 | — |
 | `big-nib-plan.md` — a measured defect: a 600 px dab costs 24x what it should | 7–11.5 | none |
