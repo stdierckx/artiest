@@ -210,14 +210,25 @@ fun ReferenceBody(
                                             },
                                         )
                                     } else {
-                                        move(
-                                            down,
-                                            onChange = { pan, zoom, rotate ->
-                                                scale = (scale * zoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                                                turn += rotate
-                                                offset += pan
-                                            },
-                                        )
+                                        move(down) { centroid, pan, zoom, rotate ->
+                                            // Anchored on the fingers, not on
+                                            // the middle of the pane. See
+                                            // `anchored` for the arithmetic and
+                                            // for why the obvious version feels
+                                            // broken.
+                                            val next =
+                                                (scale * zoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                                            offset = anchored(
+                                                offset = offset,
+                                                centroid = centroid,
+                                                centre = Offset(boxW / 2f, boxH / 2f),
+                                                pan = pan,
+                                                zoom = next / scale,
+                                                turn = rotate,
+                                            )
+                                            scale = next
+                                            turn += rotate
+                                        }
                                     }
                                 }
                             },
@@ -610,7 +621,7 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.pic
  */
 private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.move(
     down: androidx.compose.ui.input.pointer.PointerInputChange,
-    onChange: (Offset, Float, Float) -> Unit,
+    onChange: (centroid: Offset, pan: Offset, zoom: Float, rotate: Float) -> Unit,
 ) {
     down.consume()
     while (true) {
@@ -619,9 +630,58 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.mov
         val zoom = event.calculateZoom()
         val rotate = event.calculateRotation()
         val pan = event.calculatePan()
-        if (zoom != 1f || rotate != 0f || pan != Offset.Zero) onChange(pan, zoom, rotate)
+        if (zoom != 1f || rotate != 0f || pan != Offset.Zero) {
+            onChange(event.calculateCentroid(), pan, zoom, rotate)
+        }
         for (change in event.changes) if (change.pressed) change.consume()
     }
+}
+
+/**
+ * Where the picture has to move to so that the point under the fingers stays
+ * under the fingers.
+ *
+ * **The obvious version is to multiply the scale and leave the offset alone**,
+ * and it is what this did first. It zooms about the middle of the pane, so the
+ * part of the photograph you were pinching slides away from your fingers while
+ * you pinch — which was reported from the tablet as *"when pinching to zoom,
+ * the movement is very janky"*. It is not a dropped-frame problem and the frame
+ * numbers said so: forty frames, none janky, ten milliseconds at every
+ * percentile. It is the picture not going where the hand put it.
+ *
+ * The layer draws content point `p` at
+ *
+ * ```
+ * screen = centre + offset + R(turn) · S(scale) · (p - centre)
+ * ```
+ *
+ * Write `v` for the vector from the transformed origin to the centroid —
+ * `centroid - centre - offset`. A gesture of `zoom` and `turn` about that
+ * centroid multiplies `v` by `zoom` and rotates it, so keeping the same content
+ * under the fingers means moving the offset by the difference:
+ *
+ * ```
+ * offset' = offset + pan + v - zoom · R(turn) · v
+ * ```
+ *
+ * Which is the line below. `zoom` is the *achieved* ratio rather than the
+ * gesture's, because the scale is clamped and an offset computed from a zoom
+ * that did not happen walks the picture sideways at the limits.
+ */
+private fun anchored(
+    offset: Offset,
+    centroid: Offset,
+    centre: Offset,
+    pan: Offset,
+    zoom: Float,
+    turn: Float,
+): Offset {
+    val v = centroid - centre - offset
+    val rad = turn * (Math.PI / 180.0)
+    val cos = kotlin.math.cos(rad).toFloat()
+    val sin = kotlin.math.sin(rad).toFloat()
+    val spun = Offset(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
+    return offset + pan + v - spun * zoom
 }
 
 private val PANEL_WIDTH = 320.dp

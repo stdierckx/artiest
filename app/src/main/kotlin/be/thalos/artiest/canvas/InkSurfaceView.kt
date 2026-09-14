@@ -2107,13 +2107,29 @@ class InkSurfaceView(
     /**
      * Reads what the eye sees. One per view; see `ColourProbe`.
      *
-     * **Render thread only.** `Layer.read` refuses the main thread — the sheets
-     * belong to the renderer and the check is there rather than the comment —
-     * so the pick is a request the UI thread posts and the next dry frame
-     * answers. Found by picking a colour on the tablet, which is where a
-     * threading contract that is only written down gets tested.
+     * **Off the main thread, on a thread of its own.** `Layer.read` refuses the
+     * main thread — the sheets belong to the renderer and the check is there
+     * rather than the comment — and the first version of this answered that by
+     * making the pick wait for the next dry frame. On the tablet that read as
+     * the picker not working at all: a tap asked for a frame, the frame came
+     * when it came, and the colour arrived a second or two later or not before
+     * the user had given up.
+     *
+     * A frame was never the point. `Layer`'s lock is a leaf and any thread but
+     * the main one may take it — which is how `PngExporter` and `CardSnapshot`
+     * have always worked — so the probe runs on one worker of its own and posts
+     * the answer back. A pick is then a millisecond rather than a frame.
+     *
+     * One thread, so requests serialise and the newest point wins; see
+     * [requestPick].
      */
     private val colourProbe = ColourProbe()
+
+    /**
+     * The one worker the probe runs on. Built on the first pick and shut down
+     * in [release], because most sessions never take one.
+     */
+    private var probeThread: java.util.concurrent.ExecutorService? = null
 
     /** The document pixel a pick wants read, or [NO_PICK] when none does. */
     @Volatile
@@ -2124,35 +2140,41 @@ class InkSurfaceView(
     private var pickWantY = 0
 
     /**
-     * Ask the next dry frame for the colour at a document pixel. UI thread.
+     * Read the colour at a document pixel, off this thread. UI thread.
      *
-     * Coalescing by overwriting: a drag asks two hundred times a second and
-     * only the newest point has an answer anybody wants. The frame is asked for
-     * here rather than waited on, so a pick costs one repaint and no lock on
-     * the thread the pen is on.
+     * **Coalescing by overwriting.** A drag asks two hundred times a second and
+     * only the newest point has an answer anybody wants, so the point is a
+     * field and the worker reads whatever is in it when it gets there. The
+     * queue never grows: one task is in flight at a time and the rest are
+     * folded into the field.
+     *
+     * Posts even when the probe found nothing — off the page, or a document
+     * closed underneath — because pen-up arms the last read and waits for it. A
+     * request that answered only on success would leave the picker on with the
+     * ring stuck to the glass the first time somebody lifted off the paper.
      */
     private fun requestPick(xDoc: Int, yDoc: Int) {
         pickWantX = xDoc
         pickWantY = yDoc
-        redrawDry()
+        if (probeInFlight) return
+        probeInFlight = true
+        val worker = probeThread ?: java.util.concurrent.Executors.newSingleThreadExecutor {
+            Thread(it, "artiest-probe")
+        }.also { probeThread = it }
+        worker.execute {
+            val x = pickWantX
+            val y = pickWantY
+            val argb =
+                if (x == NO_PICK) 0 else colourProbe.at(document, x, y, pickFromActiveOnly) ?: 0
+            post {
+                probeInFlight = false
+                driver.deliverPick(argb)
+            }
+        }
     }
 
-    /**
-     * Answer a waiting pick, if there is one. **Render thread.**
-     *
-     * Posts even when the probe found nothing, and that is not tidiness: pen-up
-     * arms the last read and waits for it, so a request that answered only on
-     * success would leave the picker on with the ring stuck on the glass the
-     * first time somebody lifted off the edge of the paper.
-     */
-    private fun servicePick() {
-        val x = pickWantX
-        if (x == NO_PICK) return
-        val y = pickWantY
-        pickWantX = NO_PICK
-        val argb = colourProbe.at(document, x, y, pickFromActiveOnly) ?: 0
-        post { driver.deliverPick(argb) }
-    }
+    /** Whether a probe task is on its way. UI thread; see [requestPick]. */
+    private var probeInFlight = false
 
     /**
      * Whether the canvas is shown mirrored left-to-right. Lr5.
@@ -2595,12 +2617,6 @@ class InkSurfaceView(
         if (grey >= 0) canvas.restoreToCount(grey)
         recordComposite(System.nanoTime() - compositeStart)
         canvas.restoreToCount(save)
-        // After the commits, for the thumbnail's reason one paragraph down: a
-        // colour read before the stroke was stamped is the colour of the
-        // drawing as it was a moment ago, and here that would be the colour the
-        // user is about to be handed.
-        servicePick()
-
         // One stale thumbnail per frame, and only while the panel is open.
         // Here rather than in the sink because it has to happen after the
         // commits have landed -- a thumbnail built before the stroke was
@@ -2895,6 +2911,8 @@ class InkSurfaceView(
      * ink. Through W8 that stroke was dropped, after `Document` had counted it.
      */
     override fun release() {
+        probeThread?.shutdownNow()
+        probeThread = null
         renderer?.release(true)
         renderer = null
         frozenDocToView = null
@@ -3923,23 +3941,15 @@ class InkSurfaceView(
          * colour — one tap off the page — ends silently and changes nothing.
          */
         private fun endPick() {
-            // Nothing will answer if there is no surface to render into, and a
-            // picker left on with a ring stuck to the glass is worse than a
-            // pick that did not happen.
-            if (!surfaceAlive) {
-                clearPick()
-                return
-            }
             pickClosing = true
             frozen.viewToDoc(pickAtX, pickAtY, docPoint)
             requestPick(floor(docPoint[0]).toInt(), floor(docPoint[1]).toInt())
             // And a deadline, because the last read is the one thing in this
-            // gesture that another thread has to do. A frame that never comes
-            // would otherwise leave the picker on with its ring stuck to the
-            // glass and no gesture that clears it — which is what a held pick
-            // did on the tablet once, and once is enough to design against.
-            // Finishing early costs the freshest reading and nothing else: the
-            // colour under the nib a frame ago is the colour under the nib.
+            // gesture that another thread has to do. A worker that never
+            // answered would otherwise leave the picker on with its ring stuck
+            // to the glass and no gesture that clears it. Finishing early costs
+            // the freshest reading and nothing else: the colour under the nib a
+            // moment ago is the colour under the nib.
             postDelayed({ if (pickClosing) finishPick() }, PICK_DEADLINE_MS)
         }
 

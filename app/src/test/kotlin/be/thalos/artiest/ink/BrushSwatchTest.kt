@@ -100,10 +100,16 @@ class BrushSwatchTest {
             assertEquals(w, swatch.width)
             assertEquals(h, swatch.height)
             val ink = inked(swatch)
-            // A twentieth of the row. The pen is the thinnest of the three and
-            // covers about a twelfth; a swatch whose stroke was lost in the
-            // reduction covers none at all, which is the failure being caught.
-            assertTrue(ink > w * h / 20, "${preset.label} covered $ink of ${w * h}")
+            // A fortieth of the row, and it was a twentieth. The pencil's
+            // default width went from 48 document pixels to 18 when the user
+            // asked for the point rather than the flat, and it is now the
+            // thinnest mark of the shipped set -- about a thirtieth of the
+            // swatch, where the pen is a twelfth.
+            //
+            // The threshold follows rather than pins: what this catches is a
+            // swatch whose stroke was **lost in the reduction**, which covers
+            // none at all. See `Thumbnails` for how that happens.
+            assertTrue(ink > w * h / 40, "${preset.label} covered $ink of ${w * h}")
         }
     }
 

@@ -125,8 +125,29 @@ class PencilResponseTest {
      */
     private data class Mark(val coverage: Float, val width: Int, val grain: Float)
 
+    /**
+     * The width these measurements are taken at, in document pixels.
+     *
+     * **Not the preset's default**, which is 18 and is the width of the
+     * pencil's *point* — the thing you draw with all day. Every claim in this
+     * file is about the width of the mark the lead makes **laid over**, which is
+     * the 4 mm flat of a sharpened cone and was the default until the user
+     * asked for the point instead: *"the default pencil is much too large."*
+     *
+     * Measuring the flat's behaviour at the point's width is measuring
+     * something else. A 7-pixel mark is four pixels of antialiased rim and
+     * three of graphite, so the ratios these tests assert are quantisation
+     * noise at that size and physics at this one. The number is fixed here so
+     * that changing what the pencil *arrives* as never again silently changes
+     * what these tests are about.
+     */
+    private val LAID_OVER = 48f
+
+    private fun pencil(): be.thalos.artiest.engine.brush.Brush =
+        BrushPreset.PENCIL.create().also { it.sizeMax = LAID_OVER }
+
     private fun measure(pressure: Float, tilt: Float = 0f): Mark {
-        val bmp = draw(BrushPreset.PENCIL.create(), pressure, tilt)
+        val bmp = draw(pencil(), pressure, tilt)
         var width = 0
         for (y in 0 until docH) {
             if (Color.alpha(bmp.getPixel(docW / 2, y)) > 6) width++

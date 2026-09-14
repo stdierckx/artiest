@@ -87,12 +87,18 @@ enum class BrushPreset(
         override fun applyTo(brush: Brush) {
             reset(brush)
             brush.sizeMin = 1.5f
-            // 48 document pixels, which is 3.5 mm across the flat on this
-            // tablet at a fitted page -- the width the side of a sharpened
-            // 4 mm cone actually leaves. The slider sets the *widest* mark the
-            // pencil can make, the one it makes laid over; the point is a fifth
-            // of that, which is where a pencil's point is.
-            brush.sizeMax = 48f
+            // 18 document pixels, and it was 48, and the user's words are the
+            // whole of the reason: *"the default pencil is much too large. It
+            // should be around 18 instead of 48. It bothers me to reset it each
+            // time."*
+            //
+            // What 48 was arguing was the width of the *flat* -- the mark the
+            // side of a sharpened 4 mm cone leaves when the pencil is laid
+            // over. That is a real width and it is the wrong default, because
+            // laying a pencil over is the thing you do occasionally and drawing
+            // with the point is the thing you do all day. 18 is the point, and
+            // the slider is right there for the flat.
+            brush.sizeMax = 18f
             // Soft, and it had never taken effect: `DabRasterizer.hardness`
             // was never assigned from the brush, so every pencil dab up to
             // here was stamped with a hard rim however low this was set.
@@ -464,8 +470,13 @@ enum class BrushPreset(
          *    size slider changed meaning with it — it is now the width of the
          *    mark laid *over*, not on the point — so this bump does not carry
          *    the old value across.
+         * 4. The pencil's default size went from 48 to 18. Reported from the
+         *    tablet as *"it bothers me to reset it each time"* — which is what
+         *    makes it a bump rather than an edit: a saved brush from before
+         *    carries the 48 and would go on doing so, and the one user this
+         *    matters to is the one who asked.
          */
-        const val TUNING: Int = 3
+        const val TUNING: Int = 4
     }
 
     protected fun reset(brush: Brush) {

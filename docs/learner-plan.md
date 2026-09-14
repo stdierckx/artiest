@@ -977,6 +977,71 @@ Measured after the fix: no `exceeds compiler instruction limit` line at all
 during a drawing session, 1.87 % janky frames, 9 ms at the 50th percentile and
 11 ms at the 90th.
 
+## What the tablet said next
+
+Four reports from the first hour of real use, and every one of them was a thing
+no test could have asked about.
+
+### "I click somewhere on my artwork, nothing happens"
+
+The colour picker, and it was working — two seconds later. The probe ran on the
+render thread and the answer therefore waited for a **frame**, which a tap does
+not produce: the pick asked for one with `redrawDry`, the frame came when it
+came, and by then the user had decided the feature was broken.
+
+A frame was never the point. `Layer`'s lock is a leaf and any thread but the
+main one may take it — which is how `PngExporter` and `CardSnapshot` have always
+worked — so the probe runs on one worker of its own and posts the answer back.
+A pick is a millisecond now instead of a frame, and the deadline that used to
+rescue it is a safety net rather than the mechanism.
+
+The lesson is the one Lr1 half-learned and did not finish: the check in
+`Layer.read` says **not the main thread**, and the first fix read it as *the
+render thread*, which is a stricter rule than the code asks for and a slower one
+than the feature can afford.
+
+### "When pinching to zoom, the movement is very janky"
+
+Not frames — forty of them, none janky, ten milliseconds at every percentile.
+The picture was zooming about the **middle of the pane** rather than about the
+fingers, so the part being pinched slid away while it was pinched. That reads as
+jank and is arithmetic.
+
+`anchored` is the fix and the derivation is in its KDoc. The zoom it is given is
+the *achieved* ratio rather than the gesture's, because the scale is clamped and
+an offset computed from a zoom that did not happen walks the picture sideways at
+the limits.
+
+### "The default pencil is much too large"
+
+48 document pixels down to 18, and `BrushPreset.TUNING` to 4 so a pencil saved
+under the old number does not carry it forward — *"it bothers me to reset it
+each time"* is a request about the **default**, and a saved brush would have
+gone on overriding it.
+
+What 48 was arguing was the width of the *flat*: the mark the side of a
+sharpened 4 mm cone leaves when the pencil is laid over. That is a real width
+and the wrong default, because laying a pencil over is occasional and drawing
+with the point is all day.
+
+`PencilResponseTest` now sets 48 for itself and says why. Every claim in that
+file is about the flat's behaviour, and measuring it at the point's width was
+measuring quantisation: a 7-pixel mark is four pixels of antialiased rim and
+three of graphite.
+
+### "The pen symbol is not a good one"
+
+*"Most pen symbols show the pen nib in large. This is what sets a pen apart."*
+
+Right about the object and right about the reason. A pen seen at an angle is a
+pen-shaped thing on a diagonal, which at 21dp is also what the pencil and the
+marker are. The nib is the part no other tool has, so the glyph is the nib —
+barrel stub, shoulders, slit, breather hole — and upright, because the diagonal
+is the axis every other drawing tool in the set is on.
+
+It is the rule the set already followed and this one glyph had not: draw the
+part that identifies the tool, not the whole tool.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

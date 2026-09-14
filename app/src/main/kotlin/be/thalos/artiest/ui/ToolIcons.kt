@@ -126,33 +126,48 @@ object ToolIcons {
     }
 
     /**
-     * A fountain pen: a broad barrel, a collar, and a **solid** nib.
+     * **The nib**, drawn big, with its slit and its breather hole.
      *
-     * The nib is filled and the barrel is half again as wide as the pencil's,
-     * and both of those are corrections rather than taste. Drawn as an outline
-     * of the same width as [pencil], the two were the same picture at 21dp on a
-     * toolbar — a long diagonal object with a point at the bottom left — and the
-     * one thing a tool button has to answer from the corner of the eye is which
-     * tool it is. A solid wedge against an outlined cone is a difference the eye
-     * makes without looking.
+     * It was a whole pen seen at an angle — a barrel, a collar and a small
+     * filled tip — and the user's words are the correction: *"the pen symbol of
+     * the pen button is not a good one. Most pen symbols show the pen nib in
+     * large. This is what sets a pen apart."*
+     *
+     * They are right about the object and right about the reason. A pen at an
+     * angle is a *pen-shaped thing on a diagonal*, which at 21dp on a toolbar is
+     * also what a pencil and a marker are; the nib is the part no other tool
+     * has. Drawing the part that identifies the tool rather than the whole tool
+     * is the rule the rest of this set already follows — [eraser] is a rubber's
+     * wedge, not a hand holding one.
+     *
+     * Upright rather than raked, for the same reason: the diagonal is the axis
+     * every other drawing tool in the set is on, so standing this one up is
+     * another difference the eye makes without looking.
      */
     val pen: ImageVector by lazy {
         icon("pen") {
-            stroke {
-                moveTo(15.6f, 2.4f)
-                lineTo(21.6f, 8.4f)
-                lineTo(10.8f, 19.2f)
-                lineTo(4.8f, 13.2f)
-                close()
-                moveTo(12.9f, 5.1f)
-                lineTo(18.9f, 11.1f)
-            }
+            // The barrel, filled and small: it is here to say which end is
+            // held, and any more of it takes room from the nib.
             fill {
-                moveTo(4.8f, 13.2f)
-                lineTo(10.8f, 19.2f)
-                lineTo(2.4f, 21.6f)
+                moveTo(9.5f, 2.2f)
+                lineTo(14.5f, 2.2f)
+                lineTo(15.8f, 7.4f)
+                lineTo(8.2f, 7.4f)
                 close()
             }
+            stroke {
+                // The nib: shoulders, two flanks that curve in, and a point.
+                moveTo(8.2f, 7.6f)
+                curveTo(7.4f, 12.4f, 9.4f, 17.6f, 12.0f, 21.6f)
+                curveTo(14.6f, 17.6f, 16.6f, 12.4f, 15.8f, 7.6f)
+                close()
+                // The slit, which runs from the hole to the point.
+                moveTo(12.0f, 14.2f)
+                lineTo(12.0f, 21.6f)
+            }
+            // The breather hole. Filled, because the nib is an outline and a
+            // filled dot inside an outline is what an eye reads as a hole.
+            fill { circle(12.0f, 12.2f, 1.6f) }
         }
     }
 
