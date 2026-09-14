@@ -123,7 +123,11 @@ buys the most future.
 *third* artist, and a fourth candidate has appeared that does not belong in the
 list above because it is not the same size as the others:
 
-- **Learner** (35–54 days) — `docs/learner-plan.md`. The beginner: a reference
+- **Learner** (35–54 days) — `docs/learner-plan.md`, and **most of it is
+  built**: the colour picker, the reference pane and its library, the locked
+  reference layer, flip and grey view, the deck of cards, timed practice
+  sessions and a *Learner* workspace all shipped on 2026-09-14. Replay is held
+  and the grid method is dropped, both on the user's call. The beginner: a reference
   pane, a reference library, practice sessions, and a drawing that replays
   itself stroke by stroke so a card in your own knowledge base *is* the drawing
   that made it. A third of the Painter's cost, because almost every item is the
@@ -214,6 +218,6 @@ an arrangement.
 | `comics-plan.md` | 8–11 now / 250+ complete | text, groups, pages |
 | `animation-plan.md` | 23–36 (flipbook) / 60+ (with sound and camera) | the sequence subsystem |
 | `inker-plan.md` — the build for P4, over `vector-plan.md` and `guides-plan.md` | 77–115 | P3 |
-| `learner-plan.md` — the beginner, and the replay that makes a lesson | 35–54 | Inker's stroke records |
+| `learner-plan.md` — the beginner. **Eight of eleven built 2026-09-14**; replay held, grid method dropped | 35–54 | Inker's stroke records |
 | `big-nib-plan.md` — a defect against shipped work, not a phase. **Done 2026-09-13** | 7–11.5 | — |
 | `big-nib-plan.md` — a measured defect: a 600 px dab costs 24x what it should | 7–11.5 | none |

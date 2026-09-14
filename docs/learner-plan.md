@@ -200,17 +200,24 @@ Days are focused working days in the sense the other plans use.
 
 | # | Work item | Module | Risk | Depends on | Days |
 |---|---|---|---|---|---|
-| **Lr1** | **The eyedropper.** Pick a colour with the pen — from the canvas, and later from the reference pane. There is no colour picker in this program at all today, which is a hole in the *drawing* program before it is a hole in the learning one. | `:app` | Low | — | 2–3 |
-| **Lr2** | **The reference pane.** A docked surface in the existing cell grid holding a set of pictures: flick between them, pinch to zoom, rotate, flip, and **pen-on-the-pane picks the colour**. Docks, fixates and resizes exactly like the layers panel, because it is the same kind of object. | `:app` | Med | Lr1 | 4–6 |
-| **Lr3** | **The reference library.** Pictures on disk under the app's own files, added from the system picker, the clipboard or the camera; thumbnails; a set attached to a drawing and a set that is always there. Krita's choice made explicitly: **copy into the library, do not link**, because a phone photo that moves breaks a link silently. | `:app` | Med | Lr2 | 4–6 |
-| **Lr4** | **The reference layer, finished.** `PictureImporter` already lands a picture as its own layer. It needs **lock** (the pen cannot paint it — this does not exist and the Painter wants it too), a **desaturate** toggle, *fit to page*, and one switch that hides every reference layer so an export never bakes one in. | `:app` | Low | — | 2–3 |
-| **Lr5** | **The mirror and the grey.** Two view-only buttons: flip the canvas horizontally, and show it in greyscale. Neither edits anything, neither is undoable, both are one pass in `StackCompositor` and both are the most-repeated advice in every beginner guide there is. | `:app` | Low | — | 2–3 |
+| **Lr1** | **DONE.** The eyedropper. Pick a colour with the pen — from the canvas, and later from the reference pane. There is no colour picker in this program at all today, which is a hole in the *drawing* program before it is a hole in the learning one. | `:app` | Low | — | 2–3 |
+| **Lr2** | **DONE**, less *This drawing*. The reference pane. A docked surface in the existing cell grid holding a set of pictures: flick between them, pinch to zoom, rotate, flip, and **pen-on-the-pane picks the colour**. Docks, fixates and resizes exactly like the layers panel, because it is the same kind of object. | `:app` | Med | Lr1 | 4–6 |
+| **Lr3** | **DONE.** The reference library. Pictures on disk under the app's own files, added from the system picker, the clipboard or the camera; thumbnails; a set attached to a drawing and a set that is always there. Krita's choice made explicitly: **copy into the library, do not link**, because a phone photo that moves breaks a link silently. | `:app` | Med | Lr2 | 4–6 |
+| **Lr4** | **DONE**, less fit-to-page, which turned out not to be owed. The reference layer, finished. `PictureImporter` already lands a picture as its own layer. It needs **lock** (the pen cannot paint it — this does not exist and the Painter wants it too), a **desaturate** toggle, *fit to page*, and one switch that hides every reference layer so an export never bakes one in. | `:app` | Low | — | 2–3 |
+| **Lr5** | **DONE.** The mirror and the grey. Two view-only buttons: flip the canvas horizontally, and show it in greyscale. Neither edits anything, neither is undoable, both are one pass in `StackCompositor` and both are the most-repeated advice in every beginner guide there is. | `:app` | Low | — | 2–3 |
 | **Lr6** | **HELD, on the user's call 2026-09-14 — "no, for now".** Replay. Scrub a drawing stroke by stroke; play it at the pace it was drawn; at each stroke show the brush, the colour and the ruler. Snapshots every N strokes so scrubbing backwards is not a full rebuild. **The one high-risk item, and the one everything else leans on.** | `:app` | **High** | Ik3, Ik5 | 5–8 |
-| **Lr7** | **The card, and the deck.** Title, note, a replayable drawing, tags. Decks on disk beside projects, one file per card, a card openable as a new drawing to practise on top of. *Keep this* from the canvas; the deck as a panel. | `:app` | Med | Lr3 | 5–7 |
-| **Lr8** | **A starter deck and the Learner workspace.** Five or six cards drawn in the app, and a fifth shipped workspace that is **smaller** than the others. | `:app`, docs | Low | Lr7 | 3–5 |
-| **Lr9** | **Practice sessions.** Choose a set from the library, choose 30 s / 1 m / 2 m / 5 m, the picture changes and the page turns. Auto-advance, pause, skip, and no score of any kind. | `:app` | Med | Lr3 | 4–6 |
+| **Lr7** | **DONE**, less the replay half. The card, and the deck. Title, note, a replayable drawing, tags. Decks on disk beside projects, one file per card, a card openable as a new drawing to practise on top of. *Keep this* from the canvas; the deck as a panel. | `:app` | Med | Lr3 | 5–7 |
+| **Lr8** | **The workspace is DONE; the starter deck is not.** A starter deck and the Learner workspace. Five or six cards drawn in the app, and a fifth shipped workspace that is **smaller** than the others. | `:app`, docs | Low | Lr7 | 3–5 |
+| **Lr9** | **DONE.** Practice sessions. Choose a set from the library, choose 30 s / 1 m / 2 m / 5 m, the picture changes and the page turns. Auto-advance, pause, skip, and no score of any kind. | `:app` | Med | Lr3 | 4–6 |
 | **Lr10** | **DROPPED, on the user's call 2026-09-14 — "no".** The grid method. `docs/guides-plan.md` item 9 — a 2D grid guide — plus the same grid drawn over the reference pane. Two grids of the same divisions is the whole trick. | `:engine`, `:app` | Low | Lr2 | 2–3 |
 | **Lr11** | **Measure it, and the feel pass.** Replay cost on a real 500-stroke drawing; library size on disk; and an hour of somebody actually learning with it. | device, docs | Low | all | 1–2 |
+
+### What was built, 2026-09-14
+
+All eight, in one sitting, each verified on the DTH-A116 before the next was
+started. Two things are owed and are named where they belong: **"This drawing"**
+in the pane (Lr2) and the **starter deck** (Lr8). Lr11's measurement is the
+user's hour with a pen.
 
 ### What the user chose, 2026-09-14
 
