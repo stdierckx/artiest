@@ -115,6 +115,7 @@ import be.thalos.artiest.ui.WorkspaceDefaults
 import be.thalos.artiest.ui.PickRing
 import be.thalos.artiest.ui.DeckButtonAndPanel
 import be.thalos.artiest.ui.PracticeButtonAndPanel
+import be.thalos.artiest.ui.rememberLearner
 import be.thalos.artiest.ui.PracticePanelCard
 import be.thalos.artiest.ui.DeckPanelCard
 import be.thalos.artiest.ui.ReferenceButton
@@ -452,9 +453,6 @@ private fun CanvasScreen(
 ) {
     var generation by remember { mutableIntStateOf(0) }
     var surface by remember { mutableStateOf<InkSurfaceView?>(null) }
-    var stress by remember { mutableStateOf<StrokeStress?>(null) }
-    var pinch by remember { mutableStateOf<GestureStress?>(null) }
-    var reject by remember { mutableStateOf<RejectionStress?>(null) }
 
     /**
      * Ik0's readout, held until the next run replaces it.
@@ -465,9 +463,7 @@ private fun CanvasScreen(
      * reporting layer for a measurement that happens four times in the life of
      * the project.
      */
-    var vectorReport by remember { mutableStateOf<String?>(null) }
-    var vectorRunning by remember { mutableStateOf(false) }
-    var polling by remember { mutableStateOf(true) }
+    val polling = remember { mutableStateOf(true) }
     var export by remember { mutableStateOf<ExportResult?>(null) }
     var exporting by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
@@ -475,8 +471,6 @@ private fun CanvasScreen(
     /** The last import's outcome, as one line, or empty when there has been none. */
     var importNote by remember { mutableStateOf("") }
     var stats by remember { mutableStateOf(false) }
-    var policy by remember { mutableStateOf(RefreshPolicy.HIGHEST) }
-    var panelStatus by remember { mutableStateOf("") }
 
     // The brush settings live here as Compose state and are pushed into the
     // pen, not read back out of it. `Brush`'s fields are plain vars on the
@@ -639,7 +633,7 @@ private fun CanvasScreen(
      * the overlay reads the set itself inside its draw lambda -- which is the
      * `outlineTick` arrangement one line down, for the same reason.
      */
-    var guideTick by remember { mutableIntStateOf(0) }
+    val guideTick = remember { mutableIntStateOf(0) }
 
     /**
      * What the guides panel is looking at, rebuilt when they change.
@@ -647,7 +641,7 @@ private fun CanvasScreen(
      * A snapshot rather than the set, because a composable that read the set
      * directly would never recompose: nothing in it is Compose state.
      */
-    val guideInfo = remember(guideTick, pickInfo) {
+    val guideInfo = remember(guideTick.intValue, pickInfo) {
         val set = document.guides
         GuideInfo(
             rows = set.all().mapIndexed { at, line ->
@@ -902,7 +896,7 @@ private fun CanvasScreen(
             is GuideAct.SetStrength -> set.strength = act.value
             is GuideAct.SetReach -> set.reachDoc = if (act.value < 1f) 0f else act.value
         }
-        guideTick++
+        guideTick.intValue++
     }
 
     /** Save the arrangement to both stores. The fast one always, the file too. */
@@ -1013,7 +1007,7 @@ private fun CanvasScreen(
         // the panel both hang off this counter. Without it a drawing opens with
         // its guides live -- the pen really is snapping -- and nothing on
         // screen drawn to say why.
-        guideTick++
+        guideTick.intValue++
         outlineTick.intValue++
         surface?.redrawDry()
     }
@@ -1240,7 +1234,7 @@ private fun CanvasScreen(
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(500)
-            if (polling && stats) generation++
+            if (polling.value && stats) generation++
         }
     }
 
@@ -1366,100 +1360,18 @@ private fun CanvasScreen(
         }
     }
 
-    // Lr3. The reference library: pictures on the tablet's own storage, kept by
-    // this app and never anywhere else. One instance for the composition's
-    // life; it holds a directory and nothing else.
-    val refFiles = remember(context) {
-        be.thalos.artiest.ref.RefFiles(java.io.File(context.filesDir, "references"))
-    }
-    var refPictures by remember { mutableStateOf(emptyList<be.thalos.artiest.ref.RefPicture>()) }
-    var refSelected by remember { mutableStateOf<String?>(null) }
-    // The one being looked at, full size, and a small one each for the strip.
-    // Both are read off the disk on a background dispatcher; a panel that
-    // decoded forty photographs on the main thread would be a panel that opens
-    // in its own time.
-    var refBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    var refThumbs by remember { mutableStateOf(emptyMap<String, android.graphics.Bitmap>()) }
-    var refLoaded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(refFiles) {
-        val list = withContext(Dispatchers.IO) { refFiles.list() }
-        refPictures = list
-        refSelected = list.firstOrNull()?.id
-        refLoaded = true
-    }
-
-    // The strip. Rebuilt when the list changes and not per picture, because a
-    // map rebuilt per picture is a recomposition per picture.
-    LaunchedEffect(refPictures) {
-        val small = withContext(Dispatchers.IO) {
-            refPictures.mapNotNull { p ->
-                refFiles.loadSmall(p.id, REF_THUMB_PX)?.let { p.id to it }
-            }.toMap()
-        }
-        refThumbs = small
-    }
-
-    LaunchedEffect(refSelected) {
-        val id = refSelected
-        refBitmap = if (id == null) null else withContext(Dispatchers.IO) { refFiles.load(id) }
-    }
-
-    /** Put a picture in the library and show it. Lr3. */
-    val addReference: (android.net.Uri, String) -> Unit = { uri, label ->
-        scope.launch {
-            when (val r = be.thalos.artiest.ref.RefImport.add(context, refFiles, uri, label)) {
-                is be.thalos.artiest.ref.RefImport.Result.Added -> {
-                    refPictures = listOf(r.picture) + refPictures
-                    refSelected = r.picture.id
-                }
-                is be.thalos.artiest.ref.RefImport.Result.Failed -> {
-                    importNote = "could not add that picture: ${r.reason}"
-                }
-            }
-        }
-    }
+    // Lr1 to Lr9, in one object. It was twenty-five `remember` sites here, and
+    // ART refused to compile the method they were in -- see `LearnerState`.
+    val learner = rememberLearner(context)
 
     // A share, taken once. Waits for the library to have finished reading
     // itself, or the new picture would be at the front of a list that is about
     // to be replaced by what was on disk a moment ago.
-    LaunchedEffect(sharedPicture.value, refLoaded) {
+    LaunchedEffect(sharedPicture.value, learner.loaded) {
         val uri = sharedPicture.value ?: return@LaunchedEffect
-        if (!refLoaded) return@LaunchedEffect
+        if (!learner.loaded) return@LaunchedEffect
         sharedPicture.value = null
-        addReference(uri, "")
-    }
-
-    // Lr7. The deck: drawings you kept, with a sentence each. Same shape as the
-    // reference library one directory along, and for the same reasons.
-    val cardFiles = remember(context) {
-        be.thalos.artiest.card.CardFiles(java.io.File(context.filesDir, "cards"))
-    }
-    var cards by remember { mutableStateOf(emptyList<be.thalos.artiest.card.Card>()) }
-    var cardThumbs by remember { mutableStateOf(emptyMap<String, android.graphics.Bitmap>()) }
-    var cardTags by remember { mutableStateOf(emptyList<String>()) }
-    var cardTag by remember { mutableStateOf<String?>(null) }
-    var openCardId by remember { mutableStateOf<String?>(null) }
-    var openCardBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-
-    LaunchedEffect(cardFiles) {
-        val list = withContext(Dispatchers.IO) { cardFiles.list() }
-        cards = list
-        cardTags = list.flatMap { it.tags }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
-    }
-
-    LaunchedEffect(cards) {
-        cardThumbs = withContext(Dispatchers.IO) {
-            cards.mapNotNull { c -> cardFiles.loadSmall(c.id, CARD_THUMB_PX)?.let { c.id to it } }
-                .toMap()
-        }
-    }
-
-    LaunchedEffect(openCardId) {
-        val id = openCardId
-        openCardBitmap = if (id == null) null else withContext(Dispatchers.IO) {
-            cardFiles.load(id)
-        }
+        learner.addPicture(context, uri)?.let { importNote = "could not add that picture: $it" }
     }
 
     /**
@@ -1479,16 +1391,14 @@ private fun CanvasScreen(
                 return@launch
             }
             val made = withContext(Dispatchers.IO) {
-                cardFiles.add(taken.bitmap, title, note, tags, project.name)
+                learner.cardFiles.add(taken.bitmap, title, note, tags, project.name)
             }
             taken.bitmap.recycle()
             if (made == null) {
                 importNote = "that card could not be written"
                 return@launch
             }
-            cards = listOf(made) + cards
-            cardTags = cards.flatMap { it.tags }.distinct()
-                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+            learner.kept(made)
             importNote = "kept" + when (taken.referencesSkipped) {
                 0 -> ""
                 1 -> " (1 reference layer left out)"
@@ -1506,12 +1416,12 @@ private fun CanvasScreen(
      * way this feature could cost somebody work.
      *
      * Two sheets go on: the ghost, faint and locked and left out of exports
-     * from birth — see `LayerOp.Add` — and a clean one over it, which is where
+     * from birth -- see `LayerOp.Add` -- and a clean one over it, which is where
      * the pen lands.
      */
     fun practiseCard(card: be.thalos.artiest.card.Card) {
         scope.launch {
-            val ghost = withContext(Dispatchers.IO) { cardFiles.load(card.id) }
+            val ghost = withContext(Dispatchers.IO) { learner.cardFiles.load(card.id) }
             if (ghost == null) {
                 importNote = "that card's picture could not be read"
                 return@launch
@@ -1524,7 +1434,7 @@ private fun CanvasScreen(
             attach(made)
             projectEntries = projects.list()
             gallery = false
-            openCardId = null
+            learner.openCardId = null
 
             val sheet = document.newLayer()
             val painted = withContext(Dispatchers.IO) {
@@ -1544,25 +1454,17 @@ private fun CanvasScreen(
         }
     }
 
-    // Lr5. Two ways of looking, and neither touches the drawing. View state
-    // and not document state, so neither is saved and both are off when the
-    // app comes back -- a mode you cannot see is a mode you would never think
-    // to turn off, and the tell-tale below is the other half of that.
-    var flipView by remember { mutableStateOf(false) }
-    var greyView by remember { mutableStateOf(false) }
-
-    LaunchedEffect(surface, flipView, greyView) {
+    LaunchedEffect(surface, learner.pickingColour, learner.pickLayerOnly) {
         val v = surface ?: return@LaunchedEffect
-        v.mirrored = flipView
-        v.greyView = greyView
+        v.picking = learner.pickingColour
+        v.pickFromActiveOnly = learner.pickLayerOnly
     }
 
-    // Lr9. A timed session. One piece of state and one clock; everything else
-    // about it is the reference pane and the page, which already exist.
-    var practice by remember { mutableStateOf(be.thalos.artiest.ui.PracticeState()) }
-    var practiceLengthMs by remember { mutableStateOf(60_000L) }
-    var practiceOrder by remember { mutableStateOf(emptyList<String>()) }
-    var practiceStartedAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(surface, learner.flipView, learner.greyView) {
+        val v = surface ?: return@LaunchedEffect
+        v.mirrored = learner.flipView
+        v.greyView = learner.greyView
+    }
 
     /**
      * A page of the session, kept small, and then the page turns. Lr9.
@@ -1580,7 +1482,9 @@ private fun CanvasScreen(
     suspend fun turnPage(from: String?) {
         val shot = be.thalos.artiest.card.CardSnapshot.of(document, PRACTICE_SHOT_PX)
         if (from != null) {
-            practice = practice.copy(drawn = practice.drawn + (from to shot?.bitmap))
+            learner.practice = learner.practice.copy(
+                drawn = learner.practice.drawn + (from to shot?.bitmap),
+            )
         } else {
             shot?.bitmap?.recycle()
         }
@@ -1589,44 +1493,44 @@ private fun CanvasScreen(
     }
 
     /** Move to the next picture, or finish. Lr9. */
-    fun nextPose(skip: Boolean) {
+    fun nextPose() {
         scope.launch {
-            val order = practiceOrder
-            val at = practice.index
+            val order = learner.order
+            val at = learner.practice.index
             turnPage(order.getOrNull(at))
             val next = at + 1
             if (next >= order.size) {
-                practice = practice.copy(running = false, finished = true, left = 0f)
+                learner.practice =
+                    learner.practice.copy(running = false, finished = true)
                 return@launch
             }
-            refSelected = order[next]
-            practiceStartedAt = System.currentTimeMillis()
-            practice = practice.copy(index = next, left = 1f)
-            if (skip) generation++
+            learner.selected = order[next]
+            learner.startedAt = System.currentTimeMillis()
+            learner.practice = learner.practice.copy(index = next, startedAt = learner.startedAt)
         }
     }
 
-    // The clock. A tenth of a second while a session is running and nothing at
-    // all otherwise, which is the same bargain the layers poll makes.
-    LaunchedEffect(practice.running, practice.index) {
-        if (!practice.running) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(100)
-            val gone = System.currentTimeMillis() - practiceStartedAt
-            val left = 1f - gone.toFloat() / practiceLengthMs
-            if (left <= 0f) {
-                nextPose(skip = false)
-                return@LaunchedEffect
-            }
-            practice = practice.copy(left = left)
-        }
+    // The clock, and it wakes **once a pose** rather than ten times a second.
+    // The bar in the panel draws its own draining; see `DrainBar`. What this is
+    // for is the one moment the page has to turn.
+    LaunchedEffect(learner.practice.running, learner.practice.index) {
+        if (!learner.practice.running) return@LaunchedEffect
+        val gone = System.currentTimeMillis() - learner.startedAt
+        val wait = learner.lengthMs - gone
+        if (wait > 0) delay(wait)
+        nextPose()
     }
 
     val refPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         // Backing out is not a failure and not worth a line of chrome.
-        if (uri != null) addReference(uri, "")
+        if (uri != null) {
+            scope.launch {
+                learner.addPicture(context, uri)
+                    ?.let { importNote = "could not add that picture: $it" }
+            }
+        }
     }
 
     val picker = rememberLauncherForActivityResult(
@@ -1884,7 +1788,7 @@ private fun CanvasScreen(
                         // And the tool puts itself away. See ToolItem.PICK_COLOUR:
                         // the pen goes back to the brush that was in it, unless
                         // the button was held.
-                        if (!pickHeld) pickingColour = false
+                        if (!learner.pickHeld) learner.pickingColour = false
                     }
                     onView(it)
                 }
@@ -1892,154 +1796,35 @@ private fun CanvasScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // Ik13's rulers, under the selection's outline and under the chrome.
+        // Ik13's rulers, the ants, the two view modes' tell-tale and Lr1's
+        // ring: everything drawn over the paper and under the chrome.
         //
-        // Under the outline on purpose: a guide is furniture and a selection is
-        // something you are doing, so where they cross the thing being done
-        // wins. Both are over the paper, which is the only order that matters
-        // against the canvas itself.
-        //
-        // The paths are rebuilt inside the draw lambda rather than held as
-        // state, for `SelectionOverlay`'s reason and one of its own: an
-        // infinite ruler has to be cut to what is visible before it can be
-        // transformed, so the geometry genuinely depends on the pan and the
-        // zoom and there is nothing to cache across one.
-        GuideOverlay(
-            live = {
-                guideTick
-                outlineTick.intValue
-                if (document.guides.isEmpty) null else {
-                    document.guides.outline(
-                        guidePath, visibleDoc(surface, document), pageOf(document), on = true,
-                    )
-                    guidePath
-                }
+        // Split out of this function for ART's sake -- see [CanvasOverlays] --
+        // and the split is where it should have been anyway: this is the one
+        // part of the screen that is about the *canvas* rather than about the
+        // app around it.
+        CanvasOverlays(
+            surface = surface,
+            document = document,
+            guideTick = guideTick,
+            outlineTick = outlineTick,
+            pickTick = pickTick,
+            pickRingTick = pickRingTick,
+            onGuidesMoved = {
+                guideTick.intValue++
+                outlineTick.intValue++
             },
-            dim = {
-                guideTick
-                outlineTick.intValue
-                if (document.guides.isEmpty) null else {
-                    document.guides.outline(
-                        guideDim, visibleDoc(surface, document), pageOf(document), on = false,
-                    )
-                    guideDim
-                }
-            },
-            // Null outside arrange mode, which is what makes the handles
-            // invisible there rather than a flag inside the overlay: a caller
-            // that has decided not to offer handles should not be building
-            // their positions every frame. See `GuideHandles`.
-            handles = {
-                guideTick
-                if (!arranging || document.guides.isEmpty) null else handlesOf(document.guides)
-            },
-            docToView = {
-                outlineTick.intValue
-                surface?.fillDocToView(outlineMatrix)
-                outlineMatrix
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        // And the hand that moves them, which takes a pointer only when there
-        // is a ruler under it -- so a drag on empty paper in arrange mode still
-        // reaches whatever the dock wanted to do with it.
-        if (arranging && !document.guides.isEmpty) {
-            GuideHandles(
-                guides = document.guides,
-                docToView = {
-                    outlineTick.intValue
-                    surface?.fillDocToView(outlineMatrix)
-                    outlineMatrix
-                },
-                onChanged = {
-                    guideTick++
-                    outlineTick.intValue++
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
-        // Above the canvas and below the chrome, for the reason the ring is
-        // there: the outline belongs over the paper.
-        SelectionOverlay(
-            selection = {
-                outlineTick.intValue
-                // Hidden while pixels are in the air: the transform box is the
-                // outline then, and two rectangles -- one around the hole, one
-                // around what came out of it -- is a picture nobody can read.
-                if (floatingBox != null) null else selectionShape.path
-            },
-            marquee = {
-                outlineTick.intValue
-                surface?.liveMarquee?.takeIf { it.isOpen }?.path
-            },
-            picked = {
-                outlineTick.intValue
-                // Hidden while pixels are in the air, for the reason the ants
-                // are: the transform box is the outline then.
-                if (floatingBox != null) null else pickInfo.outline
-            },
-            pickedTransform = {
-                pickTick.intValue
-                if (floatingBox != null) null else pickMatrix
-            },
-            docToView = {
-                outlineTick.intValue
-                surface?.fillDocToView(outlineMatrix)
-                outlineMatrix
-            },
-            // Recomposes when the answer moves, which is once per selection
-            // rather than once per frame -- and it is what stops the ants
-            // ticking over a page with nothing on it.
-            showing = selectionShape.active || selecting || pickInfo.active,
-            modifier = Modifier.fillMaxSize(),
-        )
-
-        // Lr5's tell-tale. A view mode you forget about is a bug, and the lit
-        // button that says so may be on a bar at the other end of the glass --
-        // or on no bar at all, if the mode was turned on from a panel. A band
-        // along the top edge is on the screen wherever the eye is.
-        if (flipView || greyView) {
-            Box(
-                Modifier
-                    .align(Alignment.TopCenter)
-                    // The window is edge to edge, so the top of this Box is
-                    // *behind the status bar* -- a band without this is drawn,
-                    // correctly, where nobody can see it. Found by making it
-                    // twenty times too big and bright red and still not finding
-                    // it on the tablet.
-                    .systemBarsPadding()
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(MaterialTheme.colorScheme.primary),
-            )
-        }
-
-        // Lr1's ring, over everything the canvas draws: it is the answer to a
-        // question being asked right now, so nothing on the paper may cover it.
-        // Absent unless a pick is in the hand — `PickRing` returns on the first
-        // line when there is none — so an ordinary stroke costs one comparison
-        // a frame.
-        PickRing(
-            at = {
-                pickRingTick.intValue
-                val v = surface
-                if (v == null || v.pickPreview == 0) {
-                    Offset.Unspecified
-                } else {
-                    Offset(v.pickAtX, v.pickAtY)
-                }
-            },
-            colour = {
-                pickRingTick.intValue
-                surface?.pickPreview ?: 0
-            },
-            was = {
-                pickRingTick.intValue
-                surface?.pickWas ?: 0
-            },
-            modifier = Modifier.fillMaxSize(),
+            arranging = arranging,
+            guidePath = guidePath,
+            guideDim = guideDim,
+            outlineMatrix = outlineMatrix,
+            selectionShape = selectionShape,
+            selecting = selecting,
+            pickInfo = pickInfo,
+            pickMatrix = pickMatrix,
+            floatingBox = floatingBox,
+            flipView = learner.flipView,
+            greyView = learner.greyView,
         )
 
         // Ik9's box, over the picked strokes. Absent unless something is
@@ -2146,205 +1931,49 @@ private fun CanvasScreen(
         // button you cannot press — but a readout whose first three lines are
         // under the top bar is also a readout that cannot be read, so the
         // padding here clears the bar rather than relying on the draw order.
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .systemBarsPadding()
-                .padding(start = READOUT_INSET, top = READOUT_TOP, end = READOUT_INSET),
-        ) {
-            ExportStatus(export, exporting)
-            // What the saver and the loader had to say. Usually nothing: a save
-            // that wrote the drawing has no news, and a line that appeared
-            // every three seconds would be a line nobody reads on the day it
-            // says something.
-            if (projectNote.isNotEmpty()) {
-                Text(
-                    text = projectNote,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            if (importNote.isNotEmpty()) {
-                Text(
-                    text = importNote,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-            if (stats) {
-                // Ik0's table, kept on screen until the next run replaces it.
-                // Beside the readout rather than inside it because it is a
-                // measurement somebody asked for, not a live number: the
-                // readout is polled and this is not.
-                //
-                // **The buttons moved above the readout with it**, and that is
-                // a fix rather than a rearrangement: the readout is now
-                // forty-odd lines and runs off the bottom of a 1440-pixel
-                // screen, so every control under it had become unreachable on
-                // the one device this app is developed against.
-                vectorReport?.let { text ->
-                    Text(
-                        text = text,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .padding(top = 6.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
+        // The readouts and the instruments, which own everything they show.
+        //
+        // Split out of this function for ART's sake -- see [Readouts] -- and
+        // the seven pieces of state the instruments keep went with them, which
+        // is where they belonged: nothing else on this screen has ever read a
+        // stress runner.
+        Readouts(
+            surface = surface,
+            document = document,
+            report = report,
+            refreshHzNow = refreshHzNow,
+            onRefreshPolicy = onRefreshPolicy,
+            onForceNinety = onForceNinety,
+            export = export,
+            exporting = exporting,
+            projectNote = projectNote,
+            importNote = importNote,
+            lastSave = lastSave,
+            project = project,
+            saver = saver,
+            library = library,
+            ink = ink,
+            stats = stats,
+            polling = polling,
+            generation = generation,
+            eraserBrush = eraserBrush,
+            onWetBrush = { preset ->
+                val v = surface
+                if (v != null) {
+                    val p = library.entryFor(preset.id)
+                    p.applyTo(v.ink)
+                    brushId = p.id
+                    sizeMax = v.ink.sizeMax
+                    smoothing = v.ink.stabilization
+                    opacity = v.ink.opacity
+                    flow = v.ink.flow
+                    grain = v.ink.grain.strength
+                    generation++
                 }
-                DebugRow(
-                    surface = surface,
-                    policy = policy,
-                    onPolicy = { policy = it; onRefreshPolicy(it); generation++ },
-                    panelStatus = panelStatus,
-                    onForceNinety = {
-                        panelStatus = "checking..."
-                        onForceNinety { msg -> panelStatus = msg; generation++ }
-                    },
-                    pinchRunning = pinch?.running == true,
-                    rejectRunning = reject?.running == true,
-                    stressRunning = stress?.running == true,
-                    onPinch = {
-                        val v = surface ?: return@DebugRow
-                        val g = pinch ?: GestureStress(v).also { pinch = it }
-                        polling = false
-                        g.start { polling = true; generation++ }
-                    },
-                    onTap = {
-                        val v = surface ?: return@DebugRow
-                        val g = pinch ?: GestureStress(v).also { pinch = it }
-                        polling = false
-                        g.tap { polling = true; generation++ }
-                    },
-                    onReject = {
-                        val v = surface ?: return@DebugRow
-                        val g = reject ?: RejectionStress(v).also { reject = it }
-                        // Cleared first: three of the eight cases commit ink on
-                        // purpose, and the seven that must not are counted
-                        // against the document's stroke count.
-                        v.clear()
-                        polling = false
-                        g.start { polling = true; generation++ }
-                    },
-                    onPredict = {
-                        val v = surface ?: return@DebugRow
-                        v.predictionEnabled = !v.predictionEnabled
-                        v.predictor?.enabled = v.predictionEnabled
-                        generation++
-                    },
-                    onStamp = {
-                        val v = surface ?: return@DebugRow
-                        v.stampMode = !v.stampMode
-                        generation++
-                    },
-                    onF16 = {
-                        val v = surface ?: return@DebugRow
-                        v.scratchF16 = !v.scratchF16
-                        generation++
-                    },
-                    onWet = {
-                        val v = surface ?: return@DebugRow
-                        val on = v.ink.opacity < 1f
-                        val p = library.entryFor(
-                            if (on) BrushPreset.PEN.id else BrushPreset.PENCIL.id,
-                        )
-                        p.applyTo(v.ink)
-                        brushId = p.id
-                        sizeMax = v.ink.sizeMax
-                        smoothing = v.ink.stabilization
-                        opacity = v.ink.opacity
-                        flow = v.ink.flow
-                        grain = v.ink.grain.strength
-                        generation++
-                    },
-                    onVector = {
-                        val v = surface ?: return@DebugRow
-                        vectorRunning = true
-                        // Paused for the same reason a stress run pauses it:
-                        // the readout recomposes and allocates, and this is a
-                        // measurement of the render thread's time.
-                        polling = false
-                        // By name, not by what is in the hand. The plan's stop
-                        // condition is about the pencil and its fallback is
-                        // "opaque nibs only", so the pair that answers it is
-                        // the pencil and an ink pen — and a third with a
-                        // picture tip, because Wb5 made that a nib the app
-                        // ships and nobody has priced re-rendering one.
-                        val nibs = IK0_NIBS.mapNotNull { id ->
-                            library.find(id)?.let { it.label to it.create() }
-                        }
-                        // 100 and 300, not 1000. The stop condition is written about
-                        // 300, and the pen's own run showed the per-stroke cost
-                        // flat from 100 to 1000 — 3.80, 3.71, 3.65 ms — so the
-                        // third row costs ten minutes to confirm a straight
-                        // line.
-                        v.measureRerender(intArrayOf(100, 300), nibs) {
-                            vectorReport = it
-                            vectorRunning = false
-                            polling = true
-                            generation++
-                        }
-                    },
-                    onRebuild = {
-                        val v = surface ?: return@DebugRow
-                        // The whole page, because the point of the button is to
-                        // show that a rebuild puts back what was there: a small
-                        // rectangle would prove it for a corner.
-                        v.rebuildWholeActiveSheet()
-                        generation++
-                    },
-                    vectorRunning = vectorRunning,
-                    onStress = { pressure, path ->
-                        val v = surface ?: return@DebugRow
-                        val s = stress ?: StrokeStress(v).also { stress = it }
-                        v.clear()
-                        // The readout is paused for the duration: recomposing
-                        // it allocates, and this run is measuring allocation.
-                        polling = false
-                        s.start(pressure = pressure, path = path) {
-                            polling = true
-                            generation++
-                        }
-                    },
-                )
-                Text(
-                    text = readout(
-                        surface, document, report, refreshHzNow(), policy,
-                        reject, export, exporting, generation,
-                        stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
-                        project, lastSave,
-                        eraserBrush?.label ?: "the brush in the hand",
-                    ),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    // A ground of its own, like the bars. Without it this is
-                    // grey monospace over a dark desk on one side and white
-                    // paper on the other, and the half over the desk is
-                    // unreadable — which is a readout that exists and cannot be
-                    // read, the worst of both.
-                    modifier = Modifier
-                        .padding(top = 6.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
+            },
+            onChanged = { generation++ },
+        )
+
 
         // The chooser's Brushes tab, handed down rather than threaded through
         // four signatures that have no other reason to mention a brush. See
@@ -2524,30 +2153,30 @@ private fun CanvasScreen(
                     grain = grain,
                     onGrain = { grain = it },
                     erasing = erasing,
-                    pickingColour = pickingColour,
+                    pickingColour = learner.pickingColour,
                     onPickColourHeld = {
-                        pickHeld = true
-                        pickingColour = true
+                        learner.pickHeld = true
+                        learner.pickingColour = true
                         generation++
                     },
                     onPickColour = { on ->
-                        pickingColour = on
+                        learner.pickingColour = on
                         // A plain tap always means one pick. Holding is the
                         // only thing that makes it stay, and turning it off
                         // forgets that it was held.
-                        if (!on) pickHeld = false
+                        if (!on) learner.pickHeld = false
                         generation++
                     },
-                    pickLayerOnly = pickLayerOnly,
+                    pickLayerOnly = learner.pickLayerOnly,
                     onPickLayerOnly = {
-                        pickLayerOnly = it
+                        learner.pickLayerOnly = it
                         generation++
                     },
-                    refPictures = refPictures,
-                    refSelected = refSelected,
-                    refBitmap = refBitmap,
-                    refThumbs = refThumbs,
-                    onRefSelect = { refSelected = it },
+                    refPictures = learner.pictures,
+                    refSelected = learner.selected,
+                    refBitmap = learner.bitmap,
+                    refThumbs = learner.thumbs,
+                    onRefSelect = { learner.selected = it },
                     onRefAdd = {
                         refPicker.launch(
                             PickVisualMediaRequest(
@@ -2555,14 +2184,15 @@ private fun CanvasScreen(
                             ),
                         )
                     },
-                    cards = cards,
-                    cardThumbs = cardThumbs,
-                    cardTags = cardTags,
-                    cardTag = cardTag,
-                    onCardTag = { cardTag = it },
-                    openCard = cards.firstOrNull { it.id == openCardId },
-                    openCardBitmap = openCardBitmap,
-                    onCardOpen = { openCardId = it },
+                    onRefRemove = { id -> scope.launch { learner.removePicture(id) } },
+                    cards = learner.cards,
+                    cardThumbs = learner.cardThumbs,
+                    cardTags = learner.cardTags,
+                    cardTag = learner.cardTag,
+                    onCardTag = { learner.cardTag = it },
+                    openCard = learner.openCard,
+                    openCardBitmap = learner.openCardBitmap,
+                    onCardOpen = { learner.openCardId = it },
                     onKeepCard = { title, note, tags -> keepCard(title, note, tags) },
                     // The bar button keeps it with nothing written on it. A
                     // form in the way of the one act that happens mid-drawing
@@ -2570,63 +2200,36 @@ private fun CanvasScreen(
                     // named later, from the deck, when the hand is free.
                     onKeepNow = { keepCard("", "", emptyList()) },
                     onPractise = { practiseCard(it) },
-                    onCardDelete = { card ->
-                        cards = cards.filterNot { it.id == card.id }
-                        if (openCardId == card.id) openCardId = null
-                        scope.launch { withContext(Dispatchers.IO) { cardFiles.delete(card.id) } }
-                    },
-                    flipView = flipView,
+                    onCardDelete = { card -> scope.launch { learner.removeCard(card) } },
+                    flipView = learner.flipView,
                     onFlipView = {
-                        flipView = it
+                        learner.flipView = it
                         generation++
                     },
-                    greyView = greyView,
+                    greyView = learner.greyView,
                     onGreyView = {
-                        greyView = it
+                        learner.greyView = it
                         generation++
                     },
-                    practice = practice,
+                    practice = learner.practice,
+                    practiceLengthMs = learner.lengthMs,
                     onPracticeStart = { ms ->
                         // The pictures in the pane, in the order they are in
                         // it. Shuffling is the obvious idea and the wrong one
                         // here: a beginner who has put four hands in the
                         // library has put them there in an order, and a random
                         // one is a library they cannot work through.
-                        val order = refPictures.map { it.id }
-                        if (order.isNotEmpty()) {
-                            practiceLengthMs = ms
-                            practiceOrder = order
-                            practiceStartedAt = System.currentTimeMillis()
-                            refSelected = order.first()
-                            practice = be.thalos.artiest.ui.PracticeState(
-                                running = true, index = 0, total = order.size, left = 1f,
-                            )
-                            generation++
-                        }
+                        learner.startPractice(ms)
+                        generation++
                     },
-                    onPracticeSkip = { nextPose(skip = true) },
+                    onPracticeSkip = { nextPose() },
                     onPracticeStop = {
-                        practice = practice.copy(
-                            running = false,
-                            finished = practice.drawn.isNotEmpty(),
-                        )
+                        learner.stopPractice()
                         generation++
                     },
                     onPracticeDone = {
-                        // The pictures are released here rather than left to
-                        // the collector: twenty pages is tens of megabytes and
-                        // nothing else is holding them.
-                        for ((_, bmp) in practice.drawn) bmp?.recycle()
-                        practice = be.thalos.artiest.ui.PracticeState()
+                        learner.clearPractice()
                         generation++
-                    },
-                    onRefRemove = { id ->
-                        // The list first, so the panel never draws a row whose
-                        // file has gone. The delete is the slow half and it
-                        // cannot fail in a way the user could act on.
-                        refPictures = refPictures.filterNot { it.id == id }
-                        if (refSelected == id) refSelected = refPictures.firstOrNull()?.id
-                        scope.launch { withContext(Dispatchers.IO) { refFiles.delete(id) } }
                     },
                     barrel = barrel,
                     library = library,
@@ -2861,8 +2464,9 @@ private fun ToolSlot(
     onFlipView: (Boolean) -> Unit,
     greyView: Boolean,
     onGreyView: (Boolean) -> Unit,
-    /** Lr9. The timed session. */
+    /** Lr9. The timed session, and how long a pose gets. */
     practice: be.thalos.artiest.ui.PracticeState,
+    practiceLengthMs: Long,
     onPracticeStart: (Long) -> Unit,
     onPracticeSkip: () -> Unit,
     onPracticeStop: () -> Unit,
@@ -3012,303 +2616,83 @@ private fun ToolSlot(
             selected = brushId == BrushPreset.SOFT_ERASER.id && !selecting && !barrel,
         )
 
-        // Lr1. Off again after one pick -- the click here only turns it *on*,
-        // and `onColourPicked` is what turns it back off. Held, it stays.
-        ToolItem.PICK_COLOUR -> IconToolButton(
-            icon = ToolIcons.pickColour,
-            label = item.label,
-            onClick = { onPickColour(!pickingColour) },
-            selected = pickingColour,
-            onLongPress = onPickColourHeld,
-        )
-
-        ToolItem.PICK_LAYER_ONLY -> IconToolButton(
-            icon = ToolIcons.pickLayerOnly,
-            label = item.label,
-            onClick = { onPickLayerOnly(!pickLayerOnly) },
-            selected = pickLayerOnly,
-        )
-
-        // Lr2. The pane, as a button that opens it, and the pane kept on a bar.
-        // The pair is COLOUR/COLOUR_PANEL's and for its reason.
-        ToolItem.REFERENCES -> ReferenceButton(
-            pictures = refPictures,
-            selected = refSelected,
-            onSelect = onRefSelect,
-            bitmap = refBitmap,
-            thumbnails = refThumbs,
-            onAdd = onRefAdd,
-            onRemove = onRefRemove,
-            onInk = onInk,
-            onFixate = { onFixate(ToolItem.REFERENCE_PANEL, it) },
-        )
-
-        ToolItem.REFERENCE_PANEL -> ReferencePanelCard(
-            pictures = refPictures,
-            selected = refSelected,
-            onSelect = onRefSelect,
-            bitmap = refBitmap,
-            thumbnails = refThumbs,
-            onAdd = onRefAdd,
-            onRemove = onRefRemove,
-            onInk = onInk,
-        )
-
-        // Lr7. The deck, and the one act that happens while you are drawing.
-        ToolItem.DECK -> DeckButtonAndPanel(
-            cards = cards,
-            thumbnails = cardThumbs,
-            tags = cardTags,
-            tag = cardTag,
-            onTag = onCardTag,
-            open = openCard,
-            openBitmap = openCardBitmap,
-            onOpen = onCardOpen,
-            onKeep = onKeepCard,
-            onPractise = onPractise,
-            onDelete = onCardDelete,
-            onFixate = { onFixate(ToolItem.DECK_PANEL, it) },
-        )
-
-        ToolItem.DECK_PANEL -> DeckPanelCard(
-            cards = cards,
-            thumbnails = cardThumbs,
-            tags = cardTags,
-            tag = cardTag,
-            onTag = onCardTag,
-            open = openCard,
-            openBitmap = openCardBitmap,
-            onOpen = onCardOpen,
-            onKeep = onKeepCard,
-            onPractise = onPractise,
-            onDelete = onCardDelete,
-        )
-
-        ToolItem.KEEP_CARD -> IconToolButton(
-            icon = ToolIcons.keepCard,
-            label = item.label,
-            onClick = onKeepNow,
-        )
-
-        // Lr9. The clock, and the contact sheet at the end of it.
-        ToolItem.PRACTICE -> PracticeButtonAndPanel(
-            state = practice,
-            available = refPictures.size,
-            thumbnails = refThumbs,
-            onStart = onPracticeStart,
-            onSkip = onPracticeSkip,
-            onStop = onPracticeStop,
-            onDone = onPracticeDone,
-            onFixate = { onFixate(ToolItem.PRACTICE_PANEL, it) },
-        )
-
-        ToolItem.PRACTICE_PANEL -> PracticePanelCard(
-            state = practice,
-            available = refPictures.size,
-            thumbnails = refThumbs,
-            onStart = onPracticeStart,
-            onSkip = onPracticeSkip,
-            onStop = onPracticeStop,
-            onDone = onPracticeDone,
-        )
-
-        ToolItem.FLIP_VIEW -> IconToolButton(
-            icon = ToolIcons.flipView,
-            label = item.label,
-            onClick = { onFlipView(!flipView) },
-            selected = flipView,
-        )
-
-        ToolItem.GREY_VIEW -> IconToolButton(
-            icon = ToolIcons.greyView,
-            label = item.label,
-            onClick = { onGreyView(!greyView) },
-            selected = greyView,
-        )
+        ToolItem.PICK_COLOUR, ToolItem.PICK_LAYER_ONLY, ToolItem.REFERENCES,
+        ToolItem.REFERENCE_PANEL, ToolItem.DECK, ToolItem.DECK_PANEL, ToolItem.KEEP_CARD,
+        ToolItem.PRACTICE, ToolItem.PRACTICE_PANEL, ToolItem.FLIP_VIEW, ToolItem.GREY_VIEW ->
+            LearnSlot(
+                item = item,
+                onInk = onInk,
+                onFixate = onFixate,
+                pickingColour = pickingColour,
+                onPickColour = onPickColour,
+                onPickColourHeld = onPickColourHeld,
+                pickLayerOnly = pickLayerOnly,
+                onPickLayerOnly = onPickLayerOnly,
+                refPictures = refPictures,
+                refSelected = refSelected,
+                refBitmap = refBitmap,
+                refThumbs = refThumbs,
+                onRefSelect = onRefSelect,
+                onRefAdd = onRefAdd,
+                onRefRemove = onRefRemove,
+                cards = cards,
+                cardThumbs = cardThumbs,
+                cardTags = cardTags,
+                cardTag = cardTag,
+                onCardTag = onCardTag,
+                openCard = openCard,
+                openCardBitmap = openCardBitmap,
+                onCardOpen = onCardOpen,
+                onKeepCard = onKeepCard,
+                onKeepNow = onKeepNow,
+                onPractise = onPractise,
+                onCardDelete = onCardDelete,
+                flipView = flipView,
+                onFlipView = onFlipView,
+                greyView = greyView,
+                onGreyView = onGreyView,
+                practice = practice,
+                practiceLengthMs = practiceLengthMs,
+                onPracticeStart = onPracticeStart,
+                onPracticeSkip = onPracticeSkip,
+                onPracticeStop = onPracticeStop,
+                onPracticeDone = onPracticeDone,
+            )
 
         ToolItem.UNDO ->
             IconToolButton(ToolIcons.undo, item.label, onUndo, enabled = canUndo)
         ToolItem.REDO ->
             IconToolButton(ToolIcons.redo, item.label, onRedo, enabled = canRedo)
 
-        ToolItem.MARQUEE -> IconToolButton(
-            ToolIcons.marquee,
-            item.label,
-            { onSelecting(!selecting) },
-            selected = selecting,
-        )
-        ToolItem.SELECTION -> SelectionButton(
-            shape = marqueeShape,
-            mode = marqueeMode,
-            selecting = selecting,
-            hasSelection = hasSelection,
-            floating = floating,
-            picking = picking,
-            eraseMode = eraseMode,
-            pickedStrokes = pickInfo.count,
-            ink = ink,
-            brushText = brushText,
-            onShape = onMarqueeShape,
-            onMode = onMarqueeMode,
-            onPicking = onPicking,
-            onEraseMode = onEraseMode,
-            onStrokeOp = onStrokeOp,
-            onOp = onSelectOp,
-            onFloatOp = onFloatOp,
-            onSelecting = onSelecting,
-            onFixate = { onFixate(ToolItem.SELECTION_PANEL, it) },
-        )
-
-        /** The same panel, kept. See [ToolItem.SELECTION_PANEL]. */
-        ToolItem.SELECTION_PANEL -> SelectionPanelCard(
-            shape = marqueeShape,
-            mode = marqueeMode,
-            selecting = selecting,
-            hasSelection = hasSelection,
-            floating = floating,
-            picking = picking,
-            eraseMode = eraseMode,
-            pickedStrokes = pickInfo.count,
-            ink = ink,
-            brushText = brushText,
-            onShape = { onMarqueeShape(it); onSelecting(true) },
-            onMode = onMarqueeMode,
-            onPicking = onPicking,
-            onEraseMode = onEraseMode,
-            onStrokeOp = onStrokeOp,
-            onOp = onSelectOp,
-            onFloatOp = onFloatOp,
-        )
-        // ---- the selection panel, taken apart ------------------------------
-        //
-        // Each of these is the panel's own button on a bar of its own. They
-        // share the panel's state, its icons and its enabling rules, because
-        // they are the same controls -- see `ToolItem.PICK_STROKES` for why
-        // they exist at all.
-
-        ToolItem.PICK_STROKES -> IconToolButton(
-            ToolIcons.addVector,
-            item.label,
-            { onPicking(picking != true) },
-            selected = picking == true,
-            // Null means the sheet keeps no strokes, so there is nothing to
-            // pick. Disabled rather than hidden: a button that vanished when
-            // the active sheet changed would be a hole in the bar.
-            enabled = picking != null,
-        )
-
-        // Choosing a shape turns selecting on, which is what the panel does
-        // too: nobody picks "ellipse" meaning "and keep drawing".
-        ToolItem.MARQUEE_RECT -> IconToolButton(
-            ToolIcons.marquee,
-            item.label,
-            { onMarqueeShape(MarqueeShape.RECTANGLE); onSelecting(true) },
-            selected = selecting && marqueeShape == MarqueeShape.RECTANGLE,
-        )
-        ToolItem.MARQUEE_OVAL -> IconToolButton(
-            ToolIcons.marqueeOval,
-            item.label,
-            { onMarqueeShape(MarqueeShape.ELLIPSE); onSelecting(true) },
-            selected = selecting && marqueeShape == MarqueeShape.ELLIPSE,
-        )
-        ToolItem.MARQUEE_LASSO -> IconToolButton(
-            ToolIcons.marqueeLasso,
-            item.label,
-            { onMarqueeShape(MarqueeShape.LASSO); onSelecting(true) },
-            selected = selecting && marqueeShape == MarqueeShape.LASSO,
-        )
-
-        ToolItem.SELECT_NEW -> IconToolButton(
-            ToolIcons.selectNew,
-            item.label,
-            { onMarqueeMode(SelectMode.NEW) },
-            selected = marqueeMode == SelectMode.NEW,
-        )
-        ToolItem.SELECT_ADD -> IconToolButton(
-            ToolIcons.selectAdd,
-            item.label,
-            { onMarqueeMode(SelectMode.ADD) },
-            selected = marqueeMode == SelectMode.ADD,
-        )
-        ToolItem.SELECT_SUBTRACT -> IconToolButton(
-            ToolIcons.selectSubtract,
-            item.label,
-            { onMarqueeMode(SelectMode.SUBTRACT) },
-            selected = marqueeMode == SelectMode.SUBTRACT,
-        )
-        ToolItem.SELECT_OVERLAP -> IconToolButton(
-            ToolIcons.selectIntersect,
-            item.label,
-            { onMarqueeMode(SelectMode.INTERSECT) },
-            selected = marqueeMode == SelectMode.INTERSECT,
-        )
-
-        ToolItem.SELECT_ALL -> IconToolButton(
-            ToolIcons.selectAll, item.label, { onSelectOp(SelectOp.All) },
-        )
-        ToolItem.SELECT_NONE -> IconToolButton(
-            ToolIcons.selectNone, item.label, { onSelectOp(SelectOp.None) },
-            enabled = hasSelection,
-        )
-        ToolItem.SELECT_INVERT -> IconToolButton(
-            ToolIcons.selectInvert, item.label, { onSelectOp(SelectOp.Invert) },
-            enabled = hasSelection,
-        )
-
-        ToolItem.FLOAT_MOVE -> IconToolButton(
-            ToolIcons.moveFloat, item.label, { onFloatOp(FloatOp.LiftSelection) },
-            enabled = hasSelection && !floating,
-        )
-        ToolItem.FLOAT_COPY -> IconToolButton(
-            ToolIcons.copyFloat, item.label, { onFloatOp(FloatOp.CopySelection) },
-            enabled = hasSelection && !floating,
-        )
-        // Live with a selection or a float, because the op lifts for itself.
-        ToolItem.FLIP_ACROSS -> IconToolButton(
-            ToolIcons.flipAcross, item.label, { onFloatOp(FloatOp.Flip(across = true)) },
-            enabled = hasSelection || floating,
-        )
-        ToolItem.FLIP_DOWN -> IconToolButton(
-            ToolIcons.flipDown, item.label, { onFloatOp(FloatOp.Flip(across = false)) },
-            enabled = hasSelection || floating,
-        )
-        ToolItem.FLOAT_SHEET -> IconToolButton(
-            ToolIcons.moveSheet, item.label, { onFloatOp(FloatOp.LiftLayer) },
-            enabled = !floating,
-        )
-        ToolItem.FLOAT_PASTE -> IconToolButton(
-            ToolIcons.dropFloat, item.label, { onFloatOp(FloatOp.Drop) },
-            enabled = floating,
-        )
-        ToolItem.FLOAT_CANCEL -> IconToolButton(
-            ToolIcons.close, item.label, { onFloatOp(FloatOp.Cancel) },
-            enabled = floating,
-        )
-
-        // The rubber's three modes. In Draw rather than Selection -- see
-        // `ToolItem.ERASE_WHOLE`. Dimmed on a sheet that keeps no strokes,
-        // where there is no stroke to take back to a junction.
-        ToolItem.ERASE_WHOLE -> IconToolButton(
-            ToolIcons.eraser,
-            item.label,
-            { onEraseMode(be.thalos.artiest.doc.EraseMode.WHOLE) },
-            selected = eraseMode == be.thalos.artiest.doc.EraseMode.WHOLE,
-            enabled = picking != null,
-        )
-        ToolItem.ERASE_JUNCTION -> IconToolButton(
-            ToolIcons.selectIntersect,
-            item.label,
-            { onEraseMode(be.thalos.artiest.doc.EraseMode.TO_JUNCTION) },
-            selected = eraseMode == be.thalos.artiest.doc.EraseMode.TO_JUNCTION,
-            enabled = picking != null,
-        )
-        ToolItem.ERASE_PART -> IconToolButton(
-            ToolIcons.softEraser,
-            item.label,
-            { onEraseMode(be.thalos.artiest.doc.EraseMode.PART) },
-            selected = eraseMode == be.thalos.artiest.doc.EraseMode.PART,
-            enabled = picking != null,
-        )
+        ToolItem.MARQUEE, ToolItem.SELECTION, ToolItem.SELECTION_PANEL, ToolItem.PICK_STROKES,
+        ToolItem.MARQUEE_RECT, ToolItem.MARQUEE_OVAL, ToolItem.MARQUEE_LASSO,
+        ToolItem.SELECT_NEW, ToolItem.SELECT_ADD, ToolItem.SELECT_SUBTRACT,
+        ToolItem.SELECT_OVERLAP, ToolItem.SELECT_ALL, ToolItem.SELECT_NONE,
+        ToolItem.SELECT_INVERT, ToolItem.FLOAT_MOVE, ToolItem.FLOAT_COPY, ToolItem.FLIP_ACROSS,
+        ToolItem.FLIP_DOWN, ToolItem.FLOAT_SHEET, ToolItem.FLOAT_PASTE, ToolItem.FLOAT_CANCEL,
+        ToolItem.ERASE_WHOLE, ToolItem.ERASE_JUNCTION, ToolItem.ERASE_PART ->
+            SelectSlot(
+                item = item,
+                ink = ink,
+                onFixate = onFixate,
+                selecting = selecting,
+                picking = picking,
+                onPicking = onPicking,
+                eraseMode = eraseMode,
+                onEraseMode = onEraseMode,
+                pickInfo = pickInfo,
+                onStrokeOp = onStrokeOp,
+                brushText = brushText,
+                onSelecting = onSelecting,
+                marqueeShape = marqueeShape,
+                onMarqueeShape = onMarqueeShape,
+                marqueeMode = marqueeMode,
+                onMarqueeMode = onMarqueeMode,
+                hasSelection = hasSelection,
+                floating = floating,
+                onFloatOp = onFloatOp,
+                onSelectOp = onSelectOp,
+            )
 
         ToolItem.GUIDES -> GuidesButton(
             info = guideInfo,
@@ -4210,3 +3594,852 @@ private val READOUT_INSET = be.thalos.artiest.ui.Chrome.BAR_THICKNESS +
     be.thalos.artiest.ui.Chrome.EDGE_INSET * 2
 
 private val READOUT_TOP = READOUT_INSET
+
+/**
+ * The Selection group's twenty-four controls, on their own.
+ *
+ * Split out of [ToolSlot] because ART would not compile it. The `when` there
+ * had grown to 12 372 code units and the JIT's threshold for a "huge method" is
+ * 10 000, so it was **interpreted** — on the path that runs once per button per
+ * recomposition. The tablet showed it as the whole app hanging, and the log
+ * said so in one line:
+ *
+ * ```
+ * Method exceeds compiler instruction limit: 16819 in ... CanvasScreen
+ * ```
+ *
+ * Split by *group*, and by group for a reason beyond the arithmetic: a group is
+ * what a workspace offers, so the set of controls that appear together is the
+ * set that shares parameters. Each of these takes the twenty it needs rather
+ * than the hundred and five [ToolSlot] has.
+ */
+@Composable
+private fun SelectSlot(
+    item: ToolItem,
+    ink: Int,
+    onFixate: (ToolItem, Cell) -> Unit,
+    selecting: Boolean,
+    /** See `InkSurfaceView.pickingStrokes`. Null when the sheet keeps no strokes. */
+    picking: Boolean?,
+    onPicking: (Boolean) -> Unit,
+    eraseMode: be.thalos.artiest.doc.EraseMode,
+    onEraseMode: (be.thalos.artiest.doc.EraseMode) -> Unit,
+    pickInfo: be.thalos.artiest.doc.StrokePickInfo,
+    onStrokeOp: (be.thalos.artiest.doc.StrokeOp) -> Unit,
+    /** `BrushCodec.encode` of the brush in the hand. See `StrokeOp.Restyle`. */
+    brushText: () -> String,
+    onSelecting: (Boolean) -> Unit,
+    marqueeShape: MarqueeShape,
+    onMarqueeShape: (MarqueeShape) -> Unit,
+    marqueeMode: SelectMode,
+    onMarqueeMode: (SelectMode) -> Unit,
+    hasSelection: Boolean,
+    floating: Boolean,
+    onFloatOp: (FloatOp) -> Unit,
+    onSelectOp: (SelectOp) -> Unit,
+) {
+    when (item) {
+        ToolItem.MARQUEE -> IconToolButton(
+            ToolIcons.marquee,
+            item.label,
+            { onSelecting(!selecting) },
+            selected = selecting,
+        )
+        ToolItem.SELECTION -> SelectionButton(
+            shape = marqueeShape,
+            mode = marqueeMode,
+            selecting = selecting,
+            hasSelection = hasSelection,
+            floating = floating,
+            picking = picking,
+            eraseMode = eraseMode,
+            pickedStrokes = pickInfo.count,
+            ink = ink,
+            brushText = brushText,
+            onShape = onMarqueeShape,
+            onMode = onMarqueeMode,
+            onPicking = onPicking,
+            onEraseMode = onEraseMode,
+            onStrokeOp = onStrokeOp,
+            onOp = onSelectOp,
+            onFloatOp = onFloatOp,
+            onSelecting = onSelecting,
+            onFixate = { onFixate(ToolItem.SELECTION_PANEL, it) },
+        )
+
+        /** The same panel, kept. See [ToolItem.SELECTION_PANEL]. */
+        ToolItem.SELECTION_PANEL -> SelectionPanelCard(
+            shape = marqueeShape,
+            mode = marqueeMode,
+            selecting = selecting,
+            hasSelection = hasSelection,
+            floating = floating,
+            picking = picking,
+            eraseMode = eraseMode,
+            pickedStrokes = pickInfo.count,
+            ink = ink,
+            brushText = brushText,
+            onShape = { onMarqueeShape(it); onSelecting(true) },
+            onMode = onMarqueeMode,
+            onPicking = onPicking,
+            onEraseMode = onEraseMode,
+            onStrokeOp = onStrokeOp,
+            onOp = onSelectOp,
+            onFloatOp = onFloatOp,
+        )
+        // ---- the selection panel, taken apart ------------------------------
+        //
+        // Each of these is the panel's own button on a bar of its own. They
+        // share the panel's state, its icons and its enabling rules, because
+        // they are the same controls -- see `ToolItem.PICK_STROKES` for why
+        // they exist at all.
+
+        ToolItem.PICK_STROKES -> IconToolButton(
+            ToolIcons.addVector,
+            item.label,
+            { onPicking(picking != true) },
+            selected = picking == true,
+            // Null means the sheet keeps no strokes, so there is nothing to
+            // pick. Disabled rather than hidden: a button that vanished when
+            // the active sheet changed would be a hole in the bar.
+            enabled = picking != null,
+        )
+
+        // Choosing a shape turns selecting on, which is what the panel does
+        // too: nobody picks "ellipse" meaning "and keep drawing".
+        ToolItem.MARQUEE_RECT -> IconToolButton(
+            ToolIcons.marquee,
+            item.label,
+            { onMarqueeShape(MarqueeShape.RECTANGLE); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.RECTANGLE,
+        )
+        ToolItem.MARQUEE_OVAL -> IconToolButton(
+            ToolIcons.marqueeOval,
+            item.label,
+            { onMarqueeShape(MarqueeShape.ELLIPSE); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.ELLIPSE,
+        )
+        ToolItem.MARQUEE_LASSO -> IconToolButton(
+            ToolIcons.marqueeLasso,
+            item.label,
+            { onMarqueeShape(MarqueeShape.LASSO); onSelecting(true) },
+            selected = selecting && marqueeShape == MarqueeShape.LASSO,
+        )
+
+        ToolItem.SELECT_NEW -> IconToolButton(
+            ToolIcons.selectNew,
+            item.label,
+            { onMarqueeMode(SelectMode.NEW) },
+            selected = marqueeMode == SelectMode.NEW,
+        )
+        ToolItem.SELECT_ADD -> IconToolButton(
+            ToolIcons.selectAdd,
+            item.label,
+            { onMarqueeMode(SelectMode.ADD) },
+            selected = marqueeMode == SelectMode.ADD,
+        )
+        ToolItem.SELECT_SUBTRACT -> IconToolButton(
+            ToolIcons.selectSubtract,
+            item.label,
+            { onMarqueeMode(SelectMode.SUBTRACT) },
+            selected = marqueeMode == SelectMode.SUBTRACT,
+        )
+        ToolItem.SELECT_OVERLAP -> IconToolButton(
+            ToolIcons.selectIntersect,
+            item.label,
+            { onMarqueeMode(SelectMode.INTERSECT) },
+            selected = marqueeMode == SelectMode.INTERSECT,
+        )
+
+        ToolItem.SELECT_ALL -> IconToolButton(
+            ToolIcons.selectAll, item.label, { onSelectOp(SelectOp.All) },
+        )
+        ToolItem.SELECT_NONE -> IconToolButton(
+            ToolIcons.selectNone, item.label, { onSelectOp(SelectOp.None) },
+            enabled = hasSelection,
+        )
+        ToolItem.SELECT_INVERT -> IconToolButton(
+            ToolIcons.selectInvert, item.label, { onSelectOp(SelectOp.Invert) },
+            enabled = hasSelection,
+        )
+
+        ToolItem.FLOAT_MOVE -> IconToolButton(
+            ToolIcons.moveFloat, item.label, { onFloatOp(FloatOp.LiftSelection) },
+            enabled = hasSelection && !floating,
+        )
+        ToolItem.FLOAT_COPY -> IconToolButton(
+            ToolIcons.copyFloat, item.label, { onFloatOp(FloatOp.CopySelection) },
+            enabled = hasSelection && !floating,
+        )
+        // Live with a selection or a float, because the op lifts for itself.
+        ToolItem.FLIP_ACROSS -> IconToolButton(
+            ToolIcons.flipAcross, item.label, { onFloatOp(FloatOp.Flip(across = true)) },
+            enabled = hasSelection || floating,
+        )
+        ToolItem.FLIP_DOWN -> IconToolButton(
+            ToolIcons.flipDown, item.label, { onFloatOp(FloatOp.Flip(across = false)) },
+            enabled = hasSelection || floating,
+        )
+        ToolItem.FLOAT_SHEET -> IconToolButton(
+            ToolIcons.moveSheet, item.label, { onFloatOp(FloatOp.LiftLayer) },
+            enabled = !floating,
+        )
+        ToolItem.FLOAT_PASTE -> IconToolButton(
+            ToolIcons.dropFloat, item.label, { onFloatOp(FloatOp.Drop) },
+            enabled = floating,
+        )
+        ToolItem.FLOAT_CANCEL -> IconToolButton(
+            ToolIcons.close, item.label, { onFloatOp(FloatOp.Cancel) },
+            enabled = floating,
+        )
+
+        // The rubber's three modes. In Draw rather than Selection -- see
+        // `ToolItem.ERASE_WHOLE`. Dimmed on a sheet that keeps no strokes,
+        // where there is no stroke to take back to a junction.
+        ToolItem.ERASE_WHOLE -> IconToolButton(
+            ToolIcons.eraser,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.WHOLE) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.WHOLE,
+            enabled = picking != null,
+        )
+        ToolItem.ERASE_JUNCTION -> IconToolButton(
+            ToolIcons.selectIntersect,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.TO_JUNCTION) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.TO_JUNCTION,
+            enabled = picking != null,
+        )
+        ToolItem.ERASE_PART -> IconToolButton(
+            ToolIcons.softEraser,
+            item.label,
+            { onEraseMode(be.thalos.artiest.doc.EraseMode.PART) },
+            selected = eraseMode == be.thalos.artiest.doc.EraseMode.PART,
+            enabled = picking != null,
+        )
+
+        else -> Unit
+    }
+}
+
+/**
+ * The Learn group, the colour picker and the two view modes.
+ *
+ * [SelectSlot]'s reason, and the same split. These eleven are what Lr1 to Lr9
+ * added to [ToolSlot], which is what pushed it past the limit in the first
+ * place.
+ */
+@Composable
+private fun LearnSlot(
+    item: ToolItem,
+    onInk: (Int) -> Unit,
+    onFixate: (ToolItem, Cell) -> Unit,
+    /**
+     * Lr1. Whether the pen is picking a colour rather than laying one down.
+     *
+     * Not [picking], which is one word away and means the other thing on this
+     * canvas that is called picking — whether the marquee takes strokes or
+     * pixels. Both are old enough to keep their names; this one is qualified.
+     */
+    pickingColour: Boolean,
+    onPickColour: (Boolean) -> Unit,
+    /** Press and hold: the picker stays on for a run of colours. */
+    onPickColourHeld: () -> Unit,
+    pickLayerOnly: Boolean,
+    onPickLayerOnly: (Boolean) -> Unit,
+    /** Lr2/Lr3. The reference library, and the one being looked at. */
+    refPictures: List<be.thalos.artiest.ref.RefPicture>,
+    refSelected: String?,
+    refBitmap: android.graphics.Bitmap?,
+    refThumbs: Map<String, android.graphics.Bitmap>,
+    onRefSelect: (String) -> Unit,
+    onRefAdd: () -> Unit,
+    onRefRemove: (String) -> Unit,
+    /** Lr7. The deck. */
+    cards: List<be.thalos.artiest.card.Card>,
+    cardThumbs: Map<String, android.graphics.Bitmap>,
+    cardTags: List<String>,
+    cardTag: String?,
+    onCardTag: (String?) -> Unit,
+    openCard: be.thalos.artiest.card.Card?,
+    openCardBitmap: android.graphics.Bitmap?,
+    onCardOpen: (String?) -> Unit,
+    onKeepCard: (String, String, List<String>) -> Unit,
+    /** Keep it with no title and no note: the button on the bar. */
+    onKeepNow: () -> Unit,
+    onPractise: (be.thalos.artiest.card.Card) -> Unit,
+    onCardDelete: (be.thalos.artiest.card.Card) -> Unit,
+    /** Lr5. Two ways of looking. */
+    flipView: Boolean,
+    onFlipView: (Boolean) -> Unit,
+    greyView: Boolean,
+    onGreyView: (Boolean) -> Unit,
+    /** Lr9. The timed session, and how long a pose gets. */
+    practice: be.thalos.artiest.ui.PracticeState,
+    practiceLengthMs: Long,
+    onPracticeStart: (Long) -> Unit,
+    onPracticeSkip: () -> Unit,
+    onPracticeStop: () -> Unit,
+    onPracticeDone: () -> Unit,
+) {
+    when (item) {
+        // Lr1. Off again after one pick -- the click here only turns it *on*,
+        // and `onColourPicked` is what turns it back off. Held, it stays.
+        ToolItem.PICK_COLOUR -> IconToolButton(
+            icon = ToolIcons.pickColour,
+            label = item.label,
+            onClick = { onPickColour(!pickingColour) },
+            selected = pickingColour,
+            onLongPress = onPickColourHeld,
+        )
+
+        ToolItem.PICK_LAYER_ONLY -> IconToolButton(
+            icon = ToolIcons.pickLayerOnly,
+            label = item.label,
+            onClick = { onPickLayerOnly(!pickLayerOnly) },
+            selected = pickLayerOnly,
+        )
+
+        // Lr2. The pane, as a button that opens it, and the pane kept on a bar.
+        // The pair is COLOUR/COLOUR_PANEL's and for its reason.
+        ToolItem.REFERENCES -> ReferenceButton(
+            pictures = refPictures,
+            selected = refSelected,
+            onSelect = onRefSelect,
+            bitmap = refBitmap,
+            thumbnails = refThumbs,
+            onAdd = onRefAdd,
+            onRemove = onRefRemove,
+            onInk = onInk,
+            onFixate = { onFixate(ToolItem.REFERENCE_PANEL, it) },
+        )
+
+        ToolItem.REFERENCE_PANEL -> ReferencePanelCard(
+            pictures = refPictures,
+            selected = refSelected,
+            onSelect = onRefSelect,
+            bitmap = refBitmap,
+            thumbnails = refThumbs,
+            onAdd = onRefAdd,
+            onRemove = onRefRemove,
+            onInk = onInk,
+        )
+
+        // Lr7. The deck, and the one act that happens while you are drawing.
+        ToolItem.DECK -> DeckButtonAndPanel(
+            cards = cards,
+            thumbnails = cardThumbs,
+            tags = cardTags,
+            tag = cardTag,
+            onTag = onCardTag,
+            open = openCard,
+            openBitmap = openCardBitmap,
+            onOpen = onCardOpen,
+            onKeep = onKeepCard,
+            onPractise = onPractise,
+            onDelete = onCardDelete,
+            onFixate = { onFixate(ToolItem.DECK_PANEL, it) },
+        )
+
+        ToolItem.DECK_PANEL -> DeckPanelCard(
+            cards = cards,
+            thumbnails = cardThumbs,
+            tags = cardTags,
+            tag = cardTag,
+            onTag = onCardTag,
+            open = openCard,
+            openBitmap = openCardBitmap,
+            onOpen = onCardOpen,
+            onKeep = onKeepCard,
+            onPractise = onPractise,
+            onDelete = onCardDelete,
+        )
+
+        ToolItem.KEEP_CARD -> IconToolButton(
+            icon = ToolIcons.keepCard,
+            label = item.label,
+            onClick = onKeepNow,
+        )
+
+        // Lr9. The clock, and the contact sheet at the end of it.
+        ToolItem.PRACTICE -> PracticeButtonAndPanel(
+            state = practice,
+            lengthMs = practiceLengthMs,
+            available = refPictures.size,
+            thumbnails = refThumbs,
+            onStart = onPracticeStart,
+            onSkip = onPracticeSkip,
+            onStop = onPracticeStop,
+            onDone = onPracticeDone,
+            onFixate = { onFixate(ToolItem.PRACTICE_PANEL, it) },
+        )
+
+        ToolItem.PRACTICE_PANEL -> PracticePanelCard(
+            state = practice,
+            lengthMs = practiceLengthMs,
+            available = refPictures.size,
+            thumbnails = refThumbs,
+            onStart = onPracticeStart,
+            onSkip = onPracticeSkip,
+            onStop = onPracticeStop,
+            onDone = onPracticeDone,
+        )
+
+        ToolItem.FLIP_VIEW -> IconToolButton(
+            icon = ToolIcons.flipView,
+            label = item.label,
+            onClick = { onFlipView(!flipView) },
+            selected = flipView,
+        )
+
+        ToolItem.GREY_VIEW -> IconToolButton(
+            icon = ToolIcons.greyView,
+            label = item.label,
+            onClick = { onGreyView(!greyView) },
+            selected = greyView,
+        )
+
+        else -> Unit
+    }
+}
+
+/**
+ * Everything drawn over the paper and under the chrome.
+ *
+ * Split out of `CanvasScreen` because ART would not compile that function:
+ * 16 819 code units against a 10 000-unit threshold for a "huge method", so it
+ * was **interpreted**, and a screen that recomposes at the rate a drawing app
+ * recomposes at cannot afford to be. The tablet showed it as the app hanging.
+ *
+ * The split is where it should have been anyway. These five are the part of the
+ * screen that is about the *canvas* — the rulers, the ants, the picked strokes'
+ * outline, the view modes' tell-tale and the picker's ring — as against the
+ * part that is about the app around it.
+ *
+ * **The ticks are passed as state objects, not as values**, and that is the
+ * whole reason this can be split at all: `outlineTick`, `pickTick` and
+ * `pickRingTick` are read *inside draw lambdas*, so they invalidate a draw and
+ * recompose nothing. Passing their `intValue` would have turned every pan into
+ * a recomposition of this function and every pick into ten a second.
+ */
+@Composable
+private fun CanvasOverlays(
+    surface: InkSurfaceView?,
+    document: Document,
+    guideTick: androidx.compose.runtime.MutableIntState,
+    outlineTick: androidx.compose.runtime.MutableIntState,
+    pickTick: androidx.compose.runtime.MutableIntState,
+    pickRingTick: androidx.compose.runtime.MutableIntState,
+    /** A ruler was dragged. Bumps both ticks; see `GuideHandles`. */
+    onGuidesMoved: () -> Unit,
+    arranging: Boolean,
+    guidePath: android.graphics.Path,
+    guideDim: android.graphics.Path,
+    outlineMatrix: android.graphics.Matrix,
+    selectionShape: be.thalos.artiest.doc.SelectionInfo,
+    selecting: Boolean,
+    pickInfo: be.thalos.artiest.doc.StrokePickInfo,
+    pickMatrix: android.graphics.Matrix?,
+    floatingBox: android.graphics.Rect?,
+    flipView: Boolean,
+    greyView: Boolean,
+) {
+    Box(Modifier.fillMaxSize()) {
+        // Ik13's rulers, under the selection's outline and under the chrome.
+        //
+        // Under the outline on purpose: a guide is furniture and a selection is
+        // something you are doing, so where they cross the thing being done
+        // wins. Both are over the paper, which is the only order that matters
+        // against the canvas itself.
+        //
+        // The paths are rebuilt inside the draw lambda rather than held as
+        // state, for `SelectionOverlay`'s reason and one of its own: an
+        // infinite ruler has to be cut to what is visible before it can be
+        // transformed, so the geometry genuinely depends on the pan and the
+        // zoom and there is nothing to cache across one.
+        GuideOverlay(
+            live = {
+                guideTick.intValue
+                outlineTick.intValue
+                if (document.guides.isEmpty) null else {
+                    document.guides.outline(
+                        guidePath, visibleDoc(surface, document), pageOf(document), on = true,
+                    )
+                    guidePath
+                }
+            },
+            dim = {
+                guideTick.intValue
+                outlineTick.intValue
+                if (document.guides.isEmpty) null else {
+                    document.guides.outline(
+                        guideDim, visibleDoc(surface, document), pageOf(document), on = false,
+                    )
+                    guideDim
+                }
+            },
+            // Null outside arrange mode, which is what makes the handles
+            // invisible there rather than a flag inside the overlay: a caller
+            // that has decided not to offer handles should not be building
+            // their positions every frame. See `GuideHandles`.
+            handles = {
+                guideTick.intValue
+                if (!arranging || document.guides.isEmpty) null else handlesOf(document.guides)
+            },
+            docToView = {
+                outlineTick.intValue
+                surface?.fillDocToView(outlineMatrix)
+                outlineMatrix
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // And the hand that moves them, which takes a pointer only when there
+        // is a ruler under it -- so a drag on empty paper in arrange mode still
+        // reaches whatever the dock wanted to do with it.
+        if (arranging && !document.guides.isEmpty) {
+            GuideHandles(
+                guides = document.guides,
+                docToView = {
+                    outlineTick.intValue
+                    surface?.fillDocToView(outlineMatrix)
+                    outlineMatrix
+                },
+                onChanged = {
+                    guideTick.intValue++
+                    outlineTick.intValue++
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // Above the canvas and below the chrome, for the reason the ring is
+        // there: the outline belongs over the paper.
+        SelectionOverlay(
+            selection = {
+                outlineTick.intValue
+                // Hidden while pixels are in the air: the transform box is the
+                // outline then, and two rectangles -- one around the hole, one
+                // around what came out of it -- is a picture nobody can read.
+                if (floatingBox != null) null else selectionShape.path
+            },
+            marquee = {
+                outlineTick.intValue
+                surface?.liveMarquee?.takeIf { it.isOpen }?.path
+            },
+            picked = {
+                outlineTick.intValue
+                // Hidden while pixels are in the air, for the reason the ants
+                // are: the transform box is the outline then.
+                if (floatingBox != null) null else pickInfo.outline
+            },
+            pickedTransform = {
+                pickTick.intValue
+                if (floatingBox != null) null else pickMatrix
+            },
+            docToView = {
+                outlineTick.intValue
+                surface?.fillDocToView(outlineMatrix)
+                outlineMatrix
+            },
+            // Recomposes when the answer moves, which is once per selection
+            // rather than once per frame -- and it is what stops the ants
+            // ticking over a page with nothing on it.
+            showing = selectionShape.active || selecting || pickInfo.active,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Lr5's tell-tale. A view mode you forget about is a bug, and the lit
+        // button that says so may be on a bar at the other end of the glass --
+        // or on no bar at all, if the mode was turned on from a panel. A band
+        // along the top edge is on the screen wherever the eye is.
+        if (flipView || greyView) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    // The window is edge to edge, so the top of this Box is
+                    // *behind the status bar* -- a band without this is drawn,
+                    // correctly, where nobody can see it. Found by making it
+                    // twenty times too big and bright red and still not finding
+                    // it on the tablet.
+                    .systemBarsPadding()
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+
+        // Lr1's ring, over everything the canvas draws: it is the answer to a
+        // question being asked right now, so nothing on the paper may cover it.
+        // Absent unless a pick is in the hand — `PickRing` returns on the first
+        // line when there is none — so an ordinary stroke costs one comparison
+        // a frame.
+        PickRing(
+            at = {
+                pickRingTick.intValue
+                val v = surface
+                if (v == null || v.pickPreview == 0) {
+                    Offset.Unspecified
+                } else {
+                    Offset(v.pickAtX, v.pickAtY)
+                }
+            },
+            colour = {
+                pickRingTick.intValue
+                surface?.pickPreview ?: 0
+            },
+            was = {
+                pickRingTick.intValue
+                surface?.pickWas ?: 0
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+    }
+}
+
+/**
+ * The readouts down the left, and the instruments behind the Stats toggle.
+ *
+ * Split out of `CanvasScreen` for [CanvasOverlays]' reason — ART refuses to
+ * compile a method over 10 000 code units and runs it interpreted instead,
+ * which on a screen that recomposes whenever anything on the glass changes is
+ * an app that hangs.
+ *
+ * The seven pieces of state the instruments keep came with them, and that is
+ * where they belonged: nothing else on this screen has ever read a stress
+ * runner, a vector report or a panel-refresh policy. What stays outside is
+ * [polling], because the poll loop that feeds every readout lives out there and
+ * a stress run has to be able to stop it.
+ */
+@Composable
+private fun Readouts(
+    surface: InkSurfaceView?,
+    document: Document,
+    report: DeviceReport,
+    refreshHzNow: () -> Float,
+    onRefreshPolicy: (RefreshPolicy) -> Unit,
+    onForceNinety: ((String) -> Unit) -> Unit,
+    export: ExportResult?,
+    exporting: Boolean,
+    projectNote: String,
+    importNote: String,
+    lastSave: SaveResult.Saved?,
+    project: be.thalos.artiest.project.Project,
+    saver: ProjectSaver,
+    library: BrushLibrary,
+    ink: Int,
+    stats: Boolean,
+    /** Whether the poll loop outside may keep asking. A stress run turns it off. */
+    polling: androidx.compose.runtime.MutableState<Boolean>,
+    /** The drawing's own counter, for the readout's "recompose" line. */
+    generation: Int,
+    eraserBrush: BrushEntry?,
+    /**
+     * The wet-path A/B swaps the brush, which is the one thing in here that
+     * reaches outside. The screen owns the brush and the sliders, so it does
+     * the swap; this only asks.
+     */
+    onWetBrush: (BrushPreset) -> Unit,
+    /** Something the readouts changed that the screen has to notice. */
+    onChanged: () -> Unit,
+) {
+    var stress by remember { mutableStateOf<StrokeStress?>(null) }
+    var pinch by remember { mutableStateOf<GestureStress?>(null) }
+    var reject by remember { mutableStateOf<RejectionStress?>(null) }
+    var vectorReport by remember { mutableStateOf<String?>(null) }
+    var vectorRunning by remember { mutableStateOf(false) }
+    var policy by remember { mutableStateOf(RefreshPolicy.HIGHEST) }
+    var panelStatus by remember { mutableStateOf("") }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .systemBarsPadding()
+                .padding(start = READOUT_INSET, top = READOUT_TOP, end = READOUT_INSET),
+        ) {
+            ExportStatus(export, exporting)
+            // What the saver and the loader had to say. Usually nothing: a save
+            // that wrote the drawing has no news, and a line that appeared
+            // every three seconds would be a line nobody reads on the day it
+            // says something.
+            if (projectNote.isNotEmpty()) {
+                Text(
+                    text = projectNote,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            if (importNote.isNotEmpty()) {
+                Text(
+                    text = importNote,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            if (stats) {
+                // Ik0's table, kept on screen until the next run replaces it.
+                // Beside the readout rather than inside it because it is a
+                // measurement somebody asked for, not a live number: the
+                // readout is polled and this is not.
+                //
+                // **The buttons moved above the readout with it**, and that is
+                // a fix rather than a rearrangement: the readout is now
+                // forty-odd lines and runs off the bottom of a 1440-pixel
+                // screen, so every control under it had become unreachable on
+                // the one device this app is developed against.
+                vectorReport?.let { text ->
+                    Text(
+                        text = text,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .padding(top = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                DebugRow(
+                    surface = surface,
+                    policy = policy,
+                    onPolicy = { policy = it; onRefreshPolicy(it); onChanged() },
+                    panelStatus = panelStatus,
+                    onForceNinety = {
+                        panelStatus = "checking..."
+                        onForceNinety { msg -> panelStatus = msg; onChanged() }
+                    },
+                    pinchRunning = pinch?.running == true,
+                    rejectRunning = reject?.running == true,
+                    stressRunning = stress?.running == true,
+                    onPinch = {
+                        val v = surface ?: return@DebugRow
+                        val g = pinch ?: GestureStress(v).also { pinch = it }
+                        polling.value = false
+                        g.start { polling.value = true; onChanged() }
+                    },
+                    onTap = {
+                        val v = surface ?: return@DebugRow
+                        val g = pinch ?: GestureStress(v).also { pinch = it }
+                        polling.value = false
+                        g.tap { polling.value = true; onChanged() }
+                    },
+                    onReject = {
+                        val v = surface ?: return@DebugRow
+                        val g = reject ?: RejectionStress(v).also { reject = it }
+                        // Cleared first: three of the eight cases commit ink on
+                        // purpose, and the seven that must not are counted
+                        // against the document's stroke count.
+                        v.clear()
+                        polling.value = false
+                        g.start { polling.value = true; onChanged() }
+                    },
+                    onPredict = {
+                        val v = surface ?: return@DebugRow
+                        v.predictionEnabled = !v.predictionEnabled
+                        v.predictor?.enabled = v.predictionEnabled
+                        onChanged()
+                    },
+                    onStamp = {
+                        val v = surface ?: return@DebugRow
+                        v.stampMode = !v.stampMode
+                        onChanged()
+                    },
+                    onF16 = {
+                        val v = surface ?: return@DebugRow
+                        v.scratchF16 = !v.scratchF16
+                        onChanged()
+                    },
+                    onWet = {
+                        val v = surface ?: return@DebugRow
+                        onWetBrush(if (v.ink.opacity < 1f) BrushPreset.PEN else BrushPreset.PENCIL)
+                    },
+                    onVector = {
+                        val v = surface ?: return@DebugRow
+                        vectorRunning = true
+                        // Paused for the same reason a stress run pauses it:
+                        // the readout recomposes and allocates, and this is a
+                        // measurement of the render thread's time.
+                        polling.value = false
+                        // By name, not by what is in the hand. The plan's stop
+                        // condition is about the pencil and its fallback is
+                        // "opaque nibs only", so the pair that answers it is
+                        // the pencil and an ink pen — and a third with a
+                        // picture tip, because Wb5 made that a nib the app
+                        // ships and nobody has priced re-rendering one.
+                        val nibs = IK0_NIBS.mapNotNull { id ->
+                            library.find(id)?.let { it.label to it.create() }
+                        }
+                        // 100 and 300, not 1000. The stop condition is written about
+                        // 300, and the pen's own run showed the per-stroke cost
+                        // flat from 100 to 1000 — 3.80, 3.71, 3.65 ms — so the
+                        // third row costs ten minutes to confirm a straight
+                        // line.
+                        v.measureRerender(intArrayOf(100, 300), nibs) {
+                            vectorReport = it
+                            vectorRunning = false
+                            polling.value = true
+                            onChanged()
+                        }
+                    },
+                    onRebuild = {
+                        val v = surface ?: return@DebugRow
+                        // The whole page, because the point of the button is to
+                        // show that a rebuild puts back what was there: a small
+                        // rectangle would prove it for a corner.
+                        v.rebuildWholeActiveSheet()
+                        onChanged()
+                    },
+                    vectorRunning = vectorRunning,
+                    onStress = { pressure, path ->
+                        val v = surface ?: return@DebugRow
+                        val s = stress ?: StrokeStress(v).also { stress = it }
+                        v.clear()
+                        // The readout is paused for the duration: recomposing
+                        // it allocates, and this run is measuring allocation.
+                        polling.value = false
+                        s.start(pressure = pressure, path = path) {
+                            polling.value = true
+                            onChanged()
+                        }
+                    },
+                )
+                Text(
+                    text = readout(
+                        surface, document, report, refreshHzNow(), policy,
+                        reject, export, exporting, generation,
+                        stress?.strokeTimes()?.joinToString(" ") { r(it, 0) + "ms" } ?: "",
+                        project, lastSave,
+                        eraserBrush?.label ?: "the brush in the hand",
+                    ),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    // A ground of its own, like the bars. Without it this is
+                    // grey monospace over a dark desk on one side and white
+                    // paper on the other, and the half over the desk is
+                    // unreadable — which is a readout that exists and cannot be
+                    // read, the worst of both.
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+}

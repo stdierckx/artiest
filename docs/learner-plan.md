@@ -922,6 +922,61 @@ one was drawn correctly and was invisible: the window is edge to edge, so the
 top of the canvas is **behind the status bar**. Found by making it twenty times
 too big and bright red and still not finding it.
 
+## The hang, and what ART would not compile
+
+Reported from the tablet the same afternoon: *"it seems to be hanging"*. The log
+said it in one line, repeating every few hundred milliseconds:
+
+```
+Method exceeds compiler instruction limit: 16819 in ... CanvasScreen
+```
+
+ART refuses to compile a method over **10 000 code units** — `kHugeMethodThreshold`
+— and runs it interpreted instead. Measured off the APK with `dexdump`, two
+methods were over it:
+
+| | before | after |
+|---|---|---|
+| `ToolSlot` | 12 372 | 6 684 |
+| `CanvasScreen` | 16 819 | 11 539 |
+
+**`ToolSlot` is the one that caused the hang.** It runs once per placed control
+per recomposition, and Lr1–Lr9 added eleven branches to its `when`, which pushed
+it over. It is split by *group* now — `SelectSlot` and `LearnSlot` — and the
+split is right beyond the arithmetic: a group is what a workspace offers, so the
+controls that appear together are the ones that share parameters. Each takes the
+twenty it needs rather than the hundred and five.
+
+**The second half was the practice clock.** It wrote the remaining fraction to
+shared state ten times a second, and every write recomposed the whole screen.
+`PracticeState` carries the pose's *start* now — written once — and the bar works
+the fraction out for itself in `DrainBar`, which recomposes eight
+device-independent pixels and nothing else.
+
+### What the bytecode said
+
+Counting `invoke`s inside `CanvasScreen` found the weight: **174
+`startReplaceGroup`/`endReplaceGroup` pairs and 170 `rememberedValue` reads**.
+The cost is not the composable calls, it is the `remember` sites — which is why
+splitting 157 lines of overlays out bought 1 093 units and collapsing
+twenty-five pieces of learner state into one object bought 2 200.
+
+Three splits were made: `CanvasOverlays`, `Readouts` (which took the seven
+pieces of state the instruments keep with it), and `LearnerState`.
+
+### What is still owed
+
+`CanvasScreen` is 11 539 and the limit is 10 000, so it is still interpreted.
+**It was interpreted before this work too** — 92 `remember` sites against
+today's 97 — so this is a long-standing cost rather than a new one, and the app
+was usable with it. It is named here rather than left: the way down is the same
+one that worked, holders for the brush state, the project state and the canvas
+chrome, and the file is the better for each of them.
+
+Measured after the fix: no `exceeds compiler instruction limit` line at all
+during a drawing session, 1.87 % janky frames, 9 ms at the 50th percentile and
+11 ms at the 90th.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

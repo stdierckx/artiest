@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +73,8 @@ import androidx.compose.ui.window.PopupProperties
 @Composable
 fun PracticeBody(
     state: PracticeState,
+    /** How long a pose gets, for the bar to divide by. */
+    lengthMs: Long,
     /**
      * How many pictures are in the library right now.
      *
@@ -142,23 +145,7 @@ fun PracticeBody(
             }
 
             state.running -> {
-                // A bar draining rather than a number counting down. A number
-                // asks to be read; a bar is seen without looking away from the
-                // paper, which is where the eyes are supposed to be.
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(scheme.surfaceContainerHighest),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(state.left.coerceIn(0f, 1f))
-                            .fillMaxSize()
-                            .background(scheme.primary),
-                    )
-                }
+                DrainBar(state.startedAt, lengthMs)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     WideButton("Next", Modifier.weight(1f), onClick = onSkip)
@@ -215,6 +202,41 @@ private fun Shot(bitmap: android.graphics.Bitmap?) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+}
+
+/**
+ * The clock, draining.
+ *
+ * A bar rather than a number counting down. A number asks to be read; a bar is
+ * seen without looking away from the paper, which is where the eyes are
+ * supposed to be.
+ *
+ * **It keeps its own clock**, and that is not tidiness. The fraction used to
+ * live on `PracticeState`, which meant a write to shared state ten times a
+ * second and a recomposition of the whole screen with it — on a `CanvasScreen`
+ * ART had already refused to compile. Here the tick recomposes eight
+ * device-independent pixels of bar and nothing else.
+ */
+@Composable
+private fun DrainBar(startedAt: Long, lengthMs: Long) {
+    val scheme = MaterialTheme.colorScheme
+    var left by remember(startedAt) { mutableStateOf(1f) }
+    LaunchedEffect(startedAt, lengthMs) {
+        while (true) {
+            kotlinx.coroutines.delay(TICK_MS)
+            val gone = System.currentTimeMillis() - startedAt
+            left = (1f - gone.toFloat() / lengthMs).coerceIn(0f, 1f)
+        }
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(scheme.surfaceContainerHighest),
+    ) {
+        Box(Modifier.fillMaxWidth(left).fillMaxSize().background(scheme.primary))
     }
 }
 
@@ -279,6 +301,7 @@ private fun PracticeButton(
 @Composable
 fun PracticeButtonAndPanel(
     state: PracticeState,
+    lengthMs: Long,
     available: Int,
     thumbnails: Map<String, android.graphics.Bitmap>,
     onStart: (Long) -> Unit,
@@ -317,6 +340,7 @@ fun PracticeButtonAndPanel(
                 ) {
                     PracticeBody(
                         state = state,
+                        lengthMs = lengthMs,
                         available = available,
                         thumbnails = thumbnails,
                         onStart = {
@@ -361,6 +385,7 @@ fun PracticeButtonAndPanel(
 @Composable
 fun PracticePanelCard(
     state: PracticeState,
+    lengthMs: Long,
     available: Int,
     thumbnails: Map<String, android.graphics.Bitmap>,
     onStart: (Long) -> Unit,
@@ -371,6 +396,7 @@ fun PracticePanelCard(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         PracticeBody(
             state = state,
+            lengthMs = lengthMs,
             available = available,
             thumbnails = thumbnails,
             onStart = onStart,
@@ -397,8 +423,15 @@ data class PracticeState(
     /** Which picture, counting from zero. */
     val index: Int = 0,
     val total: Int = 0,
-    /** How much of the clock is left, 1 down to 0. */
-    val left: Float = 1f,
+    /**
+     * When this pose began, as `System.currentTimeMillis`.
+     *
+     * **Not how much of the clock is left**, which is what this carried first
+     * and what made the app hang: a fraction on shared state is a write ten
+     * times a second, and every one of those recomposed the whole screen. The
+     * start is written once per pose; the bar works out the rest for itself.
+     */
+    val startedAt: Long = 0L,
     val drawn: List<Pair<String, android.graphics.Bitmap?>> = emptyList(),
 )
 
@@ -413,3 +446,6 @@ private val SHEET_MAX_HEIGHT = 260.dp
 private val SHOT_W = 130.dp
 private val SHOT_H = 86.dp
 private val CARD_FURNITURE = 110.dp
+
+/** Ten a second, which is smooth on a bar and cheap on one panel. */
+private const val TICK_MS = 100L
