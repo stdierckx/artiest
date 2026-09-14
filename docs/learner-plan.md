@@ -205,12 +205,30 @@ Days are focused working days in the sense the other plans use.
 | **Lr3** | **The reference library.** Pictures on disk under the app's own files, added from the system picker, the clipboard or the camera; thumbnails; a set attached to a drawing and a set that is always there. Krita's choice made explicitly: **copy into the library, do not link**, because a phone photo that moves breaks a link silently. | `:app` | Med | Lr2 | 4–6 |
 | **Lr4** | **The reference layer, finished.** `PictureImporter` already lands a picture as its own layer. It needs **lock** (the pen cannot paint it — this does not exist and the Painter wants it too), a **desaturate** toggle, *fit to page*, and one switch that hides every reference layer so an export never bakes one in. | `:app` | Low | — | 2–3 |
 | **Lr5** | **The mirror and the grey.** Two view-only buttons: flip the canvas horizontally, and show it in greyscale. Neither edits anything, neither is undoable, both are one pass in `StackCompositor` and both are the most-repeated advice in every beginner guide there is. | `:app` | Low | — | 2–3 |
-| **Lr6** | **Replay.** Scrub a drawing stroke by stroke; play it at the pace it was drawn; at each stroke show the brush, the colour and the ruler. Snapshots every N strokes so scrubbing backwards is not a full rebuild. **The one high-risk item, and the one everything else leans on.** | `:app` | **High** | Ik3, Ik5 | 5–8 |
-| **Lr7** | **The card, and the deck.** Title, note, a replayable drawing, tags. Decks on disk beside projects, one file per card, a card openable as a new drawing to practise on top of. *Keep this* from the canvas; the deck as a panel. | `:app` | Med | Lr6 | 6–9 |
+| **Lr6** | **HELD, on the user's call 2026-09-14 — "no, for now".** Replay. Scrub a drawing stroke by stroke; play it at the pace it was drawn; at each stroke show the brush, the colour and the ruler. Snapshots every N strokes so scrubbing backwards is not a full rebuild. **The one high-risk item, and the one everything else leans on.** | `:app` | **High** | Ik3, Ik5 | 5–8 |
+| **Lr7** | **The card, and the deck.** Title, note, a replayable drawing, tags. Decks on disk beside projects, one file per card, a card openable as a new drawing to practise on top of. *Keep this* from the canvas; the deck as a panel. | `:app` | Med | Lr3 | 5–7 |
 | **Lr8** | **A starter deck and the Learner workspace.** Five or six cards drawn in the app, and a fifth shipped workspace that is **smaller** than the others. | `:app`, docs | Low | Lr7 | 3–5 |
 | **Lr9** | **Practice sessions.** Choose a set from the library, choose 30 s / 1 m / 2 m / 5 m, the picture changes and the page turns. Auto-advance, pause, skip, and no score of any kind. | `:app` | Med | Lr3 | 4–6 |
-| **Lr10** | **The grid method.** `docs/guides-plan.md` item 9 — a 2D grid guide — plus the same grid drawn over the reference pane. Two grids of the same divisions is the whole trick. | `:engine`, `:app` | Low | Lr2 | 2–3 |
+| **Lr10** | **DROPPED, on the user's call 2026-09-14 — "no".** The grid method. `docs/guides-plan.md` item 9 — a 2D grid guide — plus the same grid drawn over the reference pane. Two grids of the same divisions is the whole trick. | `:engine`, `:app` | Low | Lr2 | 2–3 |
 | **Lr11** | **Measure it, and the feel pass.** Replay cost on a real 500-stroke drawing; library size on disk; and an hour of somebody actually learning with it. | device, docs | Low | all | 1–2 |
+
+### What the user chose, 2026-09-14
+
+Read the ten walkthroughs and answered: **the grid method no, replay not for
+now, build the rest.**
+
+So the build is **Lr1–Lr5, Lr7, Lr8, Lr9 and Lr11** — and Lr7 is the one item
+the decision changes rather than removes. A card keeps its title, its note, its
+drawing and its tags, and **Practice this**, which puts the card's drawing under
+a blank page as a ghost. What it loses until Lr6 exists is the player inside the
+card and the **Draw from here** button. The card file is written with room for
+them, so the drawings kept now do not have to be remade later: the strokes are
+saved beside the picture either way, because `ProjectSaver` has done that since
+Ik6.
+
+The grid method is dropped rather than held. It is the one item on the list that
+teaches a beginner to copy rather than to see, and the divisions control would
+have been a permanent piece of interface serving it.
 
 **Total: 35–54 days.** For comparison, `docs/master-plan.md` prices the Painter
 at 120–160 and the Comic at 250+.
@@ -222,6 +240,10 @@ days.** That is enough to know whether the idea is right: a beginner can keep a
 reference on screen and steal its colours, and can watch any drawing rebuild
 itself stroke by stroke. Everything else in the list is a consequence of those
 three being good.
+
+> Overtaken by the decision above: replay is held, so the first three built are
+> **Lr1, Lr5 and Lr4** — the picker, the two view buttons and the locked
+> reference layer — which is the cheapest way to have something in the hand.
 
 ## Part 5 — what each of these looks like in the hand
 
