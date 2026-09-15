@@ -4,6 +4,59 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Filament's material compiler, as a build dependency rather than a checked-in
+// binary. `contour.mat` is source and belongs in the repository; the `.filamat`
+// it turns into is a build product and does not -- the same rule this module
+// already applies to `catalogue.json`.
+//
+// matc is a native executable published per host platform, so the classifier is
+// chosen from the machine doing the build. An unsupported host fails here, with
+// its own name in the message, rather than three tasks later with a missing
+// asset.
+val matc: Configuration by configurations.creating
+
+val matcHost: String = run {
+    val os = System.getProperty("os.name").lowercase()
+    val arch = System.getProperty("os.arch").lowercase()
+    when {
+        os.contains("linux") -> "linux-x86_64"
+        os.contains("mac") || os.contains("darwin") ->
+            if (arch.contains("aarch64") || arch.contains("arm")) "osx-aarch_64" else "osx-x86_64"
+        os.contains("windows") -> "windows-x86_64"
+        else -> throw GradleException("no Filament matc build for $os/$arch")
+    }
+}
+
+val materialsOut: Provider<Directory> = layout.buildDirectory.dir("generated/materials")
+
+/**
+ * Compiles every `.mat` in `src/main/materials` into `assets/materials`.
+ *
+ * `-p mobile` and `-a opengl`, because that is the only backend this app ever
+ * asks Filament for and the other shader families are dead weight in the APK.
+ */
+val compileMaterials = tasks.register("compileMaterials") {
+    group = "build"
+    description = "Compiles Filament .mat sources into .filamat."
+    val sources = fileTree("src/main/materials") { include("**/*.mat") }
+    val tool = matc
+    inputs.files(sources)
+    inputs.files(tool)
+    outputs.dir(materialsOut)
+    doLast {
+        val exe = tool.singleFile
+        exe.setExecutable(true)
+        val into = materialsOut.get().dir("materials").asFile
+        into.mkdirs()
+        for (source in sources) {
+            val out = File(into, source.name.removeSuffix(".mat") + ".filamat")
+            providers.exec {
+                commandLine(exe.absolutePath, "-p", "mobile", "-a", "opengl", "-o", out.absolutePath, source.absolutePath)
+            }.result.get().assertNormalExitValue()
+        }
+    }
+}
+
 android {
     // Distinct from :spike's be.thalos.artiest.spike on purpose. The two APKs
     // have to sit on the tablet at the same time: :spike is the measured A/B
@@ -20,6 +73,14 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1-phase1"
+
+        // Filament ships four ABIs and each one is about six megabytes of
+        // native code. This tablet is arm64, every Android tablet anybody
+        // draws on has been arm64 since 2019, and shipping the other three
+        // would quadruple the cost of the 3D reference for nobody. It is a
+        // filter on what is packaged, not a toolchain requirement: the NDK is
+        // still not needed to build this module.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
@@ -52,6 +113,14 @@ android {
         compose = true
     }
 
+    // The task and not the directory. AGP resolves a source directory through
+    // `project.files(...)`, which carries a task's output dependency with it —
+    // and the plain path does not, which shows up as lint refusing to run
+    // against a directory nothing has told it is generated yet.
+    sourceSets.getByName("main") {
+        assets.srcDir(compileMaterials)
+    }
+
     testOptions {
         // The starter brushes ride in `assets/`, and `StarterBrushesTest` is
         // the only thing that checks the shipped files parse. Without this,
@@ -63,6 +132,8 @@ android {
 }
 
 dependencies {
+    matc("com.google.android.filament:matc:${libs.versions.filament.get()}:$matcHost@exe")
+
     // The whole point of the module split. Everything decidable without a
     // device lives behind this line, and the compiler keeps it there.
     implementation(project(":engine"))
@@ -87,6 +158,13 @@ dependencies {
 
     // See the note at the end of this block.
     implementation(libs.androidx.input.motionprediction)
+
+    // Lr12. The 3D reference. Apache-2.0, which is why it can be a dependency
+    // at all -- the alternatives a drawing app would reach for are GPL, and
+    // this repository's rule for those is read-and-reimplement. Two AARs,
+    // arm64 only: 3.0 MB of renderer and 3.1 MB of glTF loader.
+    implementation(libs.filament.android)
+    implementation(libs.filament.gltfio)
 
     // Plain JVM unit tests, matching :engine's choice of framework so a test
     // moving across the boundary keeps its imports. This is the only place the

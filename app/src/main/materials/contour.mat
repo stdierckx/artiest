@@ -1,0 +1,77 @@
+// Cross-contour lines on a form, for learning to draw it.
+//
+// Lr12. What an artist means by "the wireframe" is not the mesh's own edges: a
+// photogrammetry scan is an unstructured soup of a hundred thousand triangles
+// and one edge in twenty of it is noise, not information. What teaches is the
+// draughtsman's device -- rings that wrap the form the way a contour line wraps
+// a hill, and a second family crossing them. Those are the lines a hatch
+// follows, which is why hatching that follows them describes a volume and
+// hatching that ignores them describes a stain.
+//
+// So the lines here are slices: two families of parallel planes through the
+// model, drawn where the surface crosses them. That is computed per pixel from
+// the position, which means it costs nothing to change the spacing, it works on
+// any mesh whatever its topology, and the lines are on the surface rather than
+// floating in front of it, so the far side of the form hides them for free.
+material {
+    name : contour,
+    shadingModel : lit,
+    blending : opaque,
+    vertexDomain : object,
+    // The position the lines are measured in. It has to be a varying: the
+    // fragment shader's own world position is camera-relative, which would
+    // slide the whole grid across the model every time the camera moved.
+    variables : [ formPosition ],
+    parameters : [
+        { type : float3, name : clay },
+        { type : float3, name : ink },
+        { type : float,  name : roughness },
+        // One unit is one slice. Handed in as 1/spacing so the shader does not
+        // divide once a pixel.
+        { type : float,  name : perUnit },
+        // Half the line width, in pixels.
+        { type : float,  name : weight }
+    ]
+}
+
+vertex {
+    void materialVertex(inout MaterialVertexInputs material) {
+        material.formPosition = getWorldFromModelMatrix() * getPosition();
+    }
+}
+
+fragment {
+    // One family of evenly spaced planes, anti-aliased to a constant width on
+    // the screen however steeply the surface is turning away.
+    //
+    // `d` is the distance to the nearest slice, zero on it. `fwidth` is how
+    // much `v` changes across one pixel, so a line `weight` pixels wide is
+    // `weight * fwidth` wide in slice units -- which is what keeps the line one
+    // pixel at every zoom instead of thickening as you come closer.
+    //
+    // The fade is what stops a model seen small from turning into a solid grey
+    // block: once one pixel spans half a slice there is no line left to draw,
+    // only moire, and the honest thing to draw is nothing.
+    float slices(float v, float weight) {
+        float fw = fwidth(v);
+        float d = 0.5 - abs(fract(v) - 0.5);
+        float line = 1.0 - smoothstep(weight * fw, weight * fw + fw, d);
+        float fade = 1.0 - smoothstep(0.12, 0.34, fw);
+        return line * fade;
+    }
+
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+
+        vec3 p = variable_formPosition.xyz * materialParams.perUnit;
+        // Rings around the form, and a family crossing them. Up and across, the
+        // way they are drawn on paper.
+        float rings = slices(p.y, materialParams.weight);
+        float overs = slices(p.x, materialParams.weight);
+        float mask = clamp(rings + overs, 0.0, 1.0);
+
+        material.baseColor = vec4(mix(materialParams.clay, materialParams.ink, mask), 1.0);
+        material.roughness = materialParams.roughness;
+        material.metallic = 0.0;
+    }
+}

@@ -1515,6 +1515,28 @@ private fun CanvasScreen(
         }
     }
 
+    /**
+     * Lr12. The picker for a 3D model.
+     *
+     * `OpenDocument` with the type left open, and both halves of that are the
+     * `.ora` picker's reasons. The photo picker would not list a `.glb` because
+     * the system does not think it is a picture; and a tablet that has never
+     * seen one does not know what to call it, so a mime filter would show an
+     * empty folder. What the file actually is gets decided by reading it — see
+     * `RefModelImport`.
+     */
+    val modelPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                importNote = "reading the model…"
+                val trouble = learner.addModel(context, uri)
+                importNote = trouble?.let { "could not add that model: $it" } ?: ""
+            }
+        }
+    }
+
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -2204,6 +2226,11 @@ private fun CanvasScreen(
                         )
                     },
                     onRefRemove = { id -> scope.launch { learner.removePicture(id) } },
+                    refStage = learner.stage,
+                    refGlb = learner.modelBytes,
+                    refWantPoster = learner.posterWanted,
+                    onRefPoster = { id, shot -> scope.launch { learner.keepPoster(id, shot) } },
+                    onRefAddModel = { modelPicker.launch(arrayOf("*/*")) },
                     cards = learner.cards,
                     cardThumbs = learner.cardThumbs,
                     cardTags = learner.cardTags,
@@ -2459,6 +2486,12 @@ private fun ToolSlot(
     onRefSelect: (String) -> Unit,
     onRefAdd: () -> Unit,
     onRefRemove: (String) -> Unit,
+    /** Lr12. The 3D half of the same library. See `ModelStage`. */
+    refStage: be.thalos.artiest.model.ModelStage,
+    refGlb: ByteArray?,
+    refWantPoster: Boolean,
+    onRefPoster: (String, android.graphics.Bitmap) -> Unit,
+    onRefAddModel: () -> Unit,
     /** Lr7. The deck. */
     cards: List<be.thalos.artiest.card.Card>,
     cardThumbs: Map<String, android.graphics.Bitmap>,
@@ -2650,6 +2683,11 @@ private fun ToolSlot(
                 onRefSelect = onRefSelect,
                 onRefAdd = onRefAdd,
                 onRefRemove = onRefRemove,
+                refStage = refStage,
+                refGlb = refGlb,
+                refWantPoster = refWantPoster,
+                onRefPoster = onRefPoster,
+                onRefAddModel = onRefAddModel,
                 cards = cards,
                 cardThumbs = cardThumbs,
                 cardTags = cardTags,
@@ -3872,6 +3910,12 @@ private fun LearnSlot(
     onRefSelect: (String) -> Unit,
     onRefAdd: () -> Unit,
     onRefRemove: (String) -> Unit,
+    /** Lr12. The 3D half of the same library. See `ModelStage`. */
+    refStage: be.thalos.artiest.model.ModelStage,
+    refGlb: ByteArray?,
+    refWantPoster: Boolean,
+    onRefPoster: (String, android.graphics.Bitmap) -> Unit,
+    onRefAddModel: () -> Unit,
     /** Lr7. The deck. */
     cards: List<be.thalos.artiest.card.Card>,
     cardThumbs: Map<String, android.graphics.Bitmap>,
@@ -3929,6 +3973,11 @@ private fun LearnSlot(
             onRemove = onRefRemove,
             onInk = onInk,
             pane = refPane,
+            stage = refStage,
+            glb = refGlb,
+            wantPoster = refWantPoster,
+            onPoster = onRefPoster,
+            onAddModel = onRefAddModel,
             onFixate = { onFixate(ToolItem.REFERENCE_PANEL, it) },
         )
 
@@ -3942,6 +3991,11 @@ private fun LearnSlot(
             onRemove = onRefRemove,
             onInk = onInk,
             pane = refPane,
+            stage = refStage,
+            glb = refGlb,
+            wantPoster = refWantPoster,
+            onPoster = onRefPoster,
+            onAddModel = onRefAddModel,
         )
 
         // Lr7. The deck, and the one act that happens while you are drawing.

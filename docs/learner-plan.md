@@ -1063,6 +1063,164 @@ screen does. The one rule that was worth keeping is kept: picking a **different
 picture** resets all of it, because a zoom that belonged to the last photograph
 is a zoom nobody asked for. Hoisting keeps the rule and drops the accident.
 
+## Lr12 — a model in the pane, and the lines that teach how to draw it
+
+> *"What would be a really killer is to be able to load 3d models into the
+> reference window as well. Being able to spin the object and move around the
+> lighting."*
+
+### What it is
+
+A reference can now be a 3D model. It sits in the same pane a photograph sits
+in, in the same library, in the same strip, under the same tags and the same
+practice clock — a learner looking at a hand is thinking about hands, not about
+which of the two files in front of them is a mesh. What changes is what the pane
+does with it: a drag turns the model, a pinch comes closer, and a switch turns
+the drag into moving the light instead.
+
+Three ways of looking at it, because they teach different things:
+
+- **As scanned.** Marble, dust and all. What the thing is.
+- **Clay.** Matte grey, no texture, no shine. The colour and the surface removed
+  so that the only thing left in the picture is the light on the planes. It is
+  the maquette every atelier keeps on the shelf.
+- **Contour.** The clay with about twenty rings drawn up it and twenty across,
+  which is the second thing the tablet asked for and the more interesting one:
+
+> *"when the artist draws the wireframe (or a simplified version of it) that
+> will make him understand how to put it on paper, making 3d of 2d drawing, and
+> also giving him insight in how to crosshatch. Crosshatching with intention
+> shows the shape. The hatchmarks follow the contours, and thus the wireframe."*
+
+That is exactly right and it is why the lines here are **not the mesh's own
+edges**. A photogrammetry scan is an unstructured soup of a hundred thousand
+triangles arranged by a camera rather than by a draughtsman; one edge in twenty
+of that is noise, and it would teach a learner nothing except that 3D is
+complicated. The lines drawn are the draughtsman's device instead: two families
+of parallel planes sliced through the form, so the lines wrap it the way a
+contour line wraps a hill and bunch where the surface turns away. Those are the
+lines a hatch should follow. Hatching along them describes a volume; hatching
+that ignores them describes a stain.
+
+The spacing is a share of the model's own size, so a bust exported in
+millimetres and one exported in metres both get about twenty rings up their
+height.
+
+### Where the light is
+
+> *"It would also be very useful to indicate where the light source is with an
+> icon/object because it is unclear how dragging influences the light position."*
+
+It was, and there was nothing to read but the shading itself — which is the one
+thing a beginner is still learning to read. So while the light is being moved
+the pane draws the lamp: a dotted circle for the whole sphere the light can
+stand on seen flat, and a sun on it. Middle is a light in line with the eye, rim
+is a light square to the side, **filled** is a light on this side of the model
+and **hollow** is a light behind it. A hollow sun explains a face gone dark far
+better than a shaded cheek does.
+
+It is arithmetic on the four angles the pane already holds — where the camera is
+and where the light is — so nothing is added to the 3D scene and the marker
+cannot get out of step with the light it is drawing.
+
+### Filament, and why a dependency rather than a reimplementation
+
+`com.google.android.filament`, two AARs, 6.1 MB of arm64 native code. Apache-2.0
+— which is not a footnote. This repository's rule for the drawing engines it
+learns from is read-and-reimplement, because they are GPL, and that rule would
+have applied to a 3D engine just as hard. Filament's licence is this project's
+own, so it can simply be used.
+
+Measured on the DTH-A116 before any of it was written, as a throwaway app:
+
+| question | answer |
+|---|---|
+| does it render | yes — GL backend, feature level 2, on the Mali-G57 MC2 |
+| frame rate | 59.7 fps sustained, full screen |
+| model load | 16 ms for a 2 MB bust |
+| APK cost | +6.6 MB |
+
+### The two things that had to be got right
+
+**It draws when something changes, and never otherwise.** There is no render
+loop. A new model, a drag, the light, a resize, a new surface — each ends in one
+posted Choreographer callback, and sixty drag events between two vsyncs draw one
+frame rather than sixty. With a model on screen and nobody touching it,
+`dumpsys gfxinfo` counts **zero frames in four seconds**.
+
+That matters here more than in any normal 3D app, because the thing sharing this
+GPU is a front-buffered canvas whose entire purpose is for the ink to arrive
+under the nib. Measured with the same stroke drawn twice, once with a model in
+the pane and once with a photograph:
+
+| in the pane | 50th | 90th | janky |
+|---|---|---|---|
+| a photograph | 9 ms | 11 ms | 0 % |
+| a model | 9 ms | 11 ms | 0 % |
+
+**The renderer outlives the panel.** The pane is a panel, and a panel leaves the
+composition every time the bars are rearranged — the defect `PaneView` was
+written for, one section above. A model has far more to lose than a zoom: the
+mesh on the GPU, the materials compiled for it, and an engine that costs a tenth
+of a second to build. So `ModelStage` — engine, scene, lights, loaded model —
+lives on `LearnerState`, and the only thing the pane owns is the `SwapChain`,
+which is the one piece that genuinely belongs to a surface. Arranging the
+toolbars and coming back leaves the model turned exactly where it was, lit
+exactly as it was, with the contour lines still on.
+
+### The smaller decisions, and why
+
+**GLB only.** A `.gltf` is a JSON file that names its meshes and textures in
+files beside it; copied into the library on its own it is a reference that shows
+nothing, and the moment that goes wrong is hours later in front of a drawing.
+The importer reads the first twelve bytes and says so at the moment the file is
+chosen — and says *"export it as .glb"* when it recognises the mistake.
+`tools/glb-pack.py` does that conversion for the free libraries that only
+publish `.gltf`.
+
+**A TextureView, not a SurfaceView.** A SurfaceView has its own window behind
+the app's, which is why it is right for the canvas and wrong here: this pane
+lives inside a rounded card inside a popup that can sit over the drawing, and a
+surface behind the window ignores all three.
+
+**No environment map.** The usual way to light a model well is an HDR photograph
+of a room prefiltered into a cubemap. It looks wonderful and it costs a megabyte
+and a half of binary sitting in the repository for ever. Three directional
+lights and a flat ambient cost nothing, read as code, and are what a life
+drawing room actually is: a key, a fill, something behind, and the grey of the
+walls. It also makes the feature honest — *moving the lighting* means moving
+lights, and these are lights.
+
+**The renderer paints no background.** It was tried, and it is subtly wrong: a
+background painted inside the scene goes through the tone mapper with everything
+else, so the same grey the panel is drawn in came out at (36,45,57) against the
+card's (50,57,66) — close enough to look like a mistake and not close enough to
+be one. The model is rendered onto nothing and the card shows through.
+
+**The strip gets a poster.** The first frame of a model is read back and kept as
+its face in the strip, because that is the only moment in this app where a mesh
+has pixels. It goes through Filament's own `readPixels` rather than
+`TextureView.getBitmap`: `endFrame` only *queues* a frame, so a `getBitmap` in
+the same callback reads a surface nothing has been written to yet and comes back
+solid black — which is what the strip filled up with the first time. The read is
+answered on Filament's driver thread, which only runs while frames are pumped,
+so the pane pumps a small budget of frames until the picture lands and then goes
+quiet again.
+
+**Six buttons.** 40dp each with 6dp between them is 270 in a 300dp row, and a
+seventh would be 316. So a picture and a model get different middles: a picture
+keeps Flip and Greyscale, a model gets Move-the-light, Clay and Contour.
+Greyscale is the one lost, and it is the right one to lose — clay and contour
+have already taken the colour out, and what it was for was judging the values in
+a photograph.
+
+### Where the models come from
+
+Poly Haven: 521 CC0 models with a plain JSON API, mostly props, tools and
+furniture, with some sculpture. Not yet searched: Smithsonian Open Access 3D
+(CC0, needs an API key), Three D Scans, Sketchfab's CC0 filter. Poly Haven alone
+is thin on figures, and the figure and anatomy supply is the part still to do.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

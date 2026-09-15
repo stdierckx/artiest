@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -12,8 +13,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import be.thalos.artiest.card.Card
 import be.thalos.artiest.card.CardFiles
+import be.thalos.artiest.model.ModelStage
 import be.thalos.artiest.ref.RefFiles
 import be.thalos.artiest.ref.RefImport
+import be.thalos.artiest.ref.RefKind
+import be.thalos.artiest.ref.RefModelImport
 import be.thalos.artiest.ref.RefPicture
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -72,6 +76,30 @@ class LearnerState(context: Context) {
      */
     var bitmap by mutableStateOf<Bitmap?>(null)
     var thumbs by mutableStateOf(emptyMap<String, Bitmap>())
+
+    /**
+     * Lr12. The selected reference when it is a model, as the bytes of its
+     * `.glb`, and null when it is a picture or still being read.
+     *
+     * Held rather than streamed to the renderer, for one reason that is worth
+     * the megabytes: turning clay on and off reloads the model, and reloading
+     * from a field is one frame where reloading from the disk is a read on
+     * another thread and a pane that blinks. One model at a time, dropped the
+     * moment a different reference is selected.
+     */
+    var modelBytes by mutableStateOf<ByteArray?>(null)
+
+    /** Whether the selected model still has no face for the strip. */
+    var posterWanted by mutableStateOf(false)
+
+    /**
+     * The 3D renderer, which is deliberately owned here and not by the pane.
+     *
+     * Constructing it is free — it holds no engine until the first model asks
+     * for one — and it living here is what keeps a loaded mesh alive across the
+     * panel being rearranged, fixated or reopened. See [ModelStage].
+     */
+    val stage = ModelStage(context)
 
     /** Whether the library has finished reading itself. See the share. */
     var loaded by mutableStateOf(false)
@@ -142,9 +170,32 @@ class LearnerState(context: Context) {
         }
     }
 
+    /**
+     * Read whatever the selection is, and let go of whatever it is not.
+     *
+     * The two halves are exclusive on purpose: a pane showing a model must not
+     * also be holding the last photograph's pixels, and the field that is not
+     * in use is cleared *before* the read rather than after, so there is no
+     * moment where both are set and the panel has to guess.
+     */
     suspend fun readSelected() {
         val id = selected
-        bitmap = if (id == null) null else withContext(Dispatchers.IO) { refFiles.load(id) }
+        val entry = pictures.firstOrNull { it.id == id }
+        if (id == null || entry == null) {
+            bitmap = null
+            modelBytes = null
+            posterWanted = false
+            return
+        }
+        if (entry.kind == RefKind.MODEL) {
+            bitmap = null
+            posterWanted = withContext(Dispatchers.IO) { !refFiles.hasPoster(id) }
+            modelBytes = withContext(Dispatchers.IO) { refFiles.loadModel(id) }
+        } else {
+            modelBytes = null
+            posterWanted = false
+            bitmap = withContext(Dispatchers.IO) { refFiles.load(id) }
+        }
     }
 
     suspend fun readDeck() {
@@ -180,6 +231,37 @@ class LearnerState(context: Context) {
             }
             is RefImport.Result.Failed -> r.reason
         }
+
+    /** Lr12. Put a model in the library and show it. Answers what went wrong. */
+    suspend fun addModel(context: Context, uri: Uri): String? =
+        when (val r = RefModelImport.add(context, refFiles, uri)) {
+            is RefModelImport.Result.Added -> {
+                pictures = listOf(r.model) + pictures
+                selected = r.model.id
+                null
+            }
+            is RefModelImport.Result.Failed -> r.reason
+        }
+
+    /**
+     * Keep the first frame the pane rendered of [id] as its face in the strip.
+     *
+     * The flag goes down first and unconditionally. A failed write is a poster
+     * that will be made again the next time this model is opened, and asking
+     * the pane for another one in the same second would be asking it to fail
+     * again at sixty frames a second.
+     */
+    suspend fun keepPoster(id: String, shot: Bitmap) {
+        posterWanted = false
+        val written = withContext(Dispatchers.IO) { refFiles.setPoster(id, shot) }
+        if (written) readThumbs()
+    }
+
+    /** Give the renderer back. Called when the screen goes; see [rememberLearner]. */
+    fun closeModels() {
+        modelBytes = null
+        stage.shutdown()
+    }
 
     /**
      * Forget a picture.
@@ -273,5 +355,9 @@ fun rememberLearner(context: Context): LearnerState {
     LaunchedEffect(learner) { learner.readDeck() }
     LaunchedEffect(learner.cards) { learner.readCardThumbs() }
     LaunchedEffect(learner.openCardId) { learner.readOpenCard() }
+    // The one thing here that has to be given back rather than collected: a
+    // Filament engine holds native memory and a GL context, and this screen is
+    // not the only thing on this tablet using the GPU.
+    DisposableEffect(learner) { onDispose { learner.closeModels() } }
     return learner
 }

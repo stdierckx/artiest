@@ -12,6 +12,14 @@ composeBom = "2024.12.01"
 graphicsCore = "1.0.4"
 # Stylus motion prediction. Stable since 1.0.0 (Nov 2025).
 motionPrediction = "1.0.0"
+# Filament, for the 3D reference. Google's real-time renderer, Apache-2.0, so
+# it can be linked rather than reimplemented -- which is the whole reason it and
+# not one of the GPL engines. Two artifacts and not three: filament-utils carries
+# the HDR loader and the IBL prefilter, and the reference pane lights its models
+# with directional lights it builds itself, so there is nothing in that AAR this
+# app calls.
+filament = "1.71.5"
+
 # Unit tests only. Robolectric is a JUnit 4 runner, so it drags junit:junit and
 # the vintage engine in behind it — see :app's test dependencies for why that is
 # worth paying.
@@ -29,6 +37,8 @@ androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-graphics-core = { group = "androidx.graphics", name = "graphics-core", version.ref = "graphicsCore" }
 androidx-input-motionprediction = { group = "androidx.input", name = "input-motionprediction", version.ref = "motionPrediction" }
+filament-android = { group = "com.google.android.filament", name = "filament-android", version.ref = "filament" }
+filament-gltfio = { group = "com.google.android.filament", name = "gltfio-android", version.ref = "filament" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
 junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engine", version.ref = "junitVintage" }

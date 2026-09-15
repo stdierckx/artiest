@@ -1432,6 +1432,109 @@ object ToolIcons {
         }
     }
 
+    /**
+     * A cube in isometric: a hexagon with a three-armed star in it.
+     *
+     * Lr12, and it is the one picture everybody already reads as *3D*. It is
+     * deliberately not [isometric], which is the same cube with its faces left
+     * open because that icon is about a grid; this one is a solid, because what
+     * it labels is a thing you can turn over in your hand.
+     */
+    val cube: ImageVector by lazy {
+        icon("cube") {
+            stroke {
+                moveTo(12f, 2.4f)
+                lineTo(20.6f, 7.2f)
+                lineTo(20.6f, 16.8f)
+                lineTo(12f, 21.6f)
+                lineTo(3.4f, 16.8f)
+                lineTo(3.4f, 7.2f)
+                close()
+                moveTo(12f, 12f)
+                lineTo(20.6f, 7.2f)
+                moveTo(12f, 12f)
+                lineTo(3.4f, 7.2f)
+                moveTo(12f, 12f)
+                lineTo(12f, 21.6f)
+            }
+        }
+    }
+
+    /**
+     * A sun: a small disc and eight rays.
+     *
+     * The light, and the button that makes a drag move it instead of the model.
+     * A lamp on a stand would say *studio* more precisely and read as a smudge
+     * at twenty density-independent pixels; a sun is the shape everybody
+     * recognises at any size, and what the button does is aim a key light,
+     * which is what a sun is.
+     */
+    val light: ImageVector by lazy {
+        icon("light") {
+            fill { circle(12f, 12f, 4.3f) }
+            stroke {
+                moveTo(12f, 1.8f); lineTo(12f, 4.6f)
+                moveTo(12f, 19.4f); lineTo(12f, 22.2f)
+                moveTo(1.8f, 12f); lineTo(4.6f, 12f)
+                moveTo(19.4f, 12f); lineTo(22.2f, 12f)
+                moveTo(4.8f, 4.8f); lineTo(6.8f, 6.8f)
+                moveTo(17.2f, 17.2f); lineTo(19.2f, 19.2f)
+                moveTo(19.2f, 4.8f); lineTo(17.2f, 6.8f)
+                moveTo(6.8f, 17.2f); lineTo(4.8f, 19.2f)
+            }
+        }
+    }
+
+    /**
+     * A shaded ball: a circle with its far side filled.
+     *
+     * Clay mode. It is the first thing anybody is taught to draw and the exact
+     * thing the button is for — the same form with the colour and the texture
+     * taken away, so that what is left in the picture is the light on it.
+     *
+     * The terminator is a curve and not a straight edge, because a straight one
+     * reads as a half-moon badge rather than as a sphere turning away.
+     */
+    val clay: ImageVector by lazy {
+        icon("clay") {
+            fill {
+                moveTo(20.2f, 7.6f)
+                curveTo(21.4f, 11.6f, 19.6f, 16.2f, 15.8f, 18.6f)
+                curveTo(12.6f, 20.6f, 8.8f, 20.6f, 5.9f, 19.0f)
+                curveTo(10.2f, 19.8f, 14.4f, 18.0f, 16.6f, 14.4f)
+                curveTo(18.4f, 11.5f, 18.6f, 9.2f, 20.2f, 7.6f)
+                close()
+            }
+            stroke {
+                circle(12f, 12f, 9.3f)
+            }
+        }
+    }
+
+    /**
+     * A ball with three contour lines bent around it.
+     *
+     * The contour mode, and it is drawn the way the thing itself is drawn: a
+     * circle, and inside it arcs that bow with the surface. Straight lines
+     * across a circle would say *cut in slices*; bowed ones say *the surface
+     * turns*, which is the whole of what the mode is for.
+     */
+    val contour: ImageVector by lazy {
+        icon("contour") {
+            stroke {
+                circle(12f, 12f, 9.3f)
+                moveTo(3.4f, 8.0f)
+                curveTo(6.6f, 10.4f, 17.4f, 10.4f, 20.6f, 8.0f)
+                moveTo(2.9f, 13.4f)
+                curveTo(6.4f, 15.9f, 17.6f, 15.9f, 21.1f, 13.4f)
+                moveTo(7.4f, 3.4f)
+                curveTo(5.0f, 6.6f, 5.0f, 17.4f, 7.4f, 20.6f)
+                moveTo(16.6f, 3.4f)
+                curveTo(19.0f, 6.6f, 19.0f, 17.4f, 16.6f, 20.6f)
+            }
+        }
+    }
+
     /** Two sheets, one behind the other. Duplicate. */
     val duplicate: ImageVector by lazy {
         icon("duplicate") {

@@ -23,12 +23,24 @@ data class RefPicture(
      * same millisecond still differ.
      */
     val id: String,
+    /**
+     * Whether the payload is a picture or a 3D model. Lr12.
+     *
+     * The list, the strip, the tags and the practice clock do not read this;
+     * only the pane does, when it decides whether to draw pixels or render a
+     * mesh. See [RefKind].
+     */
+    val kind: RefKind = RefKind.PICTURE,
     /** What the user calls it. Never a file path, and may be empty. */
     val label: String = "",
     val tags: List<String> = emptyList(),
     /** `System.currentTimeMillis()` when it was added. Newest first in the list. */
     val addedMs: Long = 0L,
-    /** What it is, after the downscale. Both zero if it was never recorded. */
+    /**
+     * What it is, after the downscale. Both zero if it was never recorded, and
+     * both zero for a model — a mesh has no pixel size, and the poster the pane
+     * grabs for the strip is not the reference.
+     */
     val widthPx: Int = 0,
     val heightPx: Int = 0,
     /** What the stored file takes on disk. See `RefFiles.bytes`. */

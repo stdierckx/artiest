@@ -27,6 +27,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -61,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import be.thalos.artiest.model.ModelStage
+import be.thalos.artiest.ref.RefKind
 import be.thalos.artiest.ref.RefPicture
 
 /**
@@ -107,6 +111,56 @@ class PaneView {
 
     var grey by mutableStateOf(false)
 
+    // ---- and the same pane, when what is in it is a model --------------------
+
+    /**
+     * Lr12. Degrees around the model, degrees above it, and how close.
+     *
+     * Three numbers and not a camera, for exactly the reason the five above are
+     * three numbers and not a matrix: this has to survive the panel being
+     * rearranged, and what survives is what lives out here. A camera belongs to
+     * a renderer and the renderer belongs to a surface that comes and goes.
+     *
+     * [dolly] multiplies the framing distance, so 1 is the whole model in the
+     * pane and bigger is closer in. It is the same idea [scale] is for a
+     * picture and it is clamped in the same spirit.
+     */
+    var spin by mutableFloatStateOf(24f)
+    var tilt by mutableFloatStateOf(8f)
+    var dolly by mutableFloatStateOf(1f)
+
+    /** Where the key light stands, in the same two angles. */
+    var lightAzimuth by mutableFloatStateOf(-35f)
+    var lightElevation by mutableFloatStateOf(34f)
+
+    /**
+     * Whether a drag moves the light instead of the model.
+     *
+     * A switch and not a modifier key, because there is no keyboard, and not a
+     * second finger, because the second finger already means *closer*. It is
+     * the pane's own button and it lights up while it is on, the way Flip and
+     * Grey do.
+     */
+    var lighting by mutableStateOf(false)
+
+    /** Matte grey instead of whatever the model was scanned wearing. */
+    var clay by mutableStateOf(false)
+
+    /**
+     * Cross-contour lines over the form: about twenty rings up it and twenty
+     * across it.
+     *
+     * The thing an artist means by *the wireframe*, and not the mesh's own
+     * edges — a scan has a hundred thousand triangles arranged by a camera
+     * rather than by a draughtsman, and one edge in twenty of that is noise.
+     * These are slices, and they are the lines a hatch should follow: hatching
+     * along them describes a volume, hatching across them describes a stain.
+     *
+     * Drawn on clay, always, because that is the picture that teaches — which
+     * is why turning this on turns [clay] on with it.
+     */
+    var contour by mutableStateOf(false)
+
     /**
      * Back to the whole picture, square, in the middle.
      *
@@ -120,6 +174,9 @@ class PaneView {
         scale = 1f
         offset = Offset.Zero
         turn = 0f
+        spin = 24f
+        tilt = 8f
+        dolly = 1f
     }
 
     /** [fit], and the two switches off as well. What a new picture gets. */
@@ -127,6 +184,27 @@ class PaneView {
         fit()
         flipped = false
         grey = false
+        lighting = false
+        clay = false
+        contour = false
+        lightAzimuth = -35f
+        lightElevation = 34f
+    }
+
+    /** A drag of [dx], [dy] pane pixels, into whichever of the two it is moving. */
+    fun dragged(dx: Float, dy: Float) {
+        if (lighting) {
+            lightAzimuth -= dx * LIGHT_PER_PX
+            lightElevation = (lightElevation + dy * LIGHT_PER_PX).coerceIn(-80f, 80f)
+        } else {
+            spin -= dx * SPIN_PER_PX
+            tilt = (tilt + dy * SPIN_PER_PX).coerceIn(-85f, 85f)
+        }
+    }
+
+    /** A pinch of [zoom], as a ratio. Clamped so a model cannot be lost. */
+    fun pinched(zoom: Float) {
+        dolly = (dolly * zoom).coerceIn(MIN_DOLLY, MAX_DOLLY)
     }
 }
 
@@ -173,11 +251,26 @@ fun ReferenceBody(
     onInk: (Int) -> Unit,
     /** How the picture sits in the pane. Held outside; see [PaneView]. */
     pane: PaneView,
+    /** Lr12. The renderer, which outlives this panel. See [ModelStage]. */
+    stage: ModelStage,
+    /** The bytes of [selected] when it is a model, and null when it is not. */
+    glb: ByteArray?,
+    /** Whether [selected] still needs a face for the strip. */
+    wantPoster: Boolean,
+    onPoster: (String, android.graphics.Bitmap) -> Unit,
+    onAddModel: () -> Unit,
     modifier: Modifier = Modifier,
     pictureHeight: Dp = PICTURE_HEIGHT,
     trailing: @Composable () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
+
+    // What is in the pane decides which half of it draws and which buttons sit
+    // under it. Nothing else in this panel branches on the kind: the strip, the
+    // selecting, the delete and the tags are the same for a mesh as for a
+    // photograph, which is the point of there being one library.
+    val current = pictures.firstOrNull { it.id == selected }
+    val isModel = current?.kind == RefKind.MODEL
 
     // Named locals over the holder's fields, so the gesture arithmetic below
     // reads as it did when these were five `remember`s -- `scale` and not
@@ -217,9 +310,19 @@ fun ReferenceBody(
                 .clip(RoundedCornerShape(10.dp))
                 .background(scheme.surfaceContainerHighest),
         ) {
-            if (bitmap == null) {
+            if (isModel) {
+                ModelPane(
+                    stage = stage,
+                    glb = glb,
+                    modelId = selected,
+                    pane = pane,
+                    onPoster = { shot -> selected?.let { onPoster(it, shot) } },
+                    wantPoster = wantPoster,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (bitmap == null) {
                 Text(
-                    if (pictures.isEmpty()) "No pictures yet" else "…",
+                    if (pictures.isEmpty()) "Nothing here yet" else "…",
                     fontSize = 12.sp,
                     color = scheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center),
@@ -311,20 +414,51 @@ fun ReferenceBody(
 
         Spacer(Modifier.height(8.dp))
 
+        // Six buttons is what fits across a 320dp panel: 40dp each and 6dp
+        // between them is 270, and a seventh would be 316 in a 300dp row. So a
+        // picture and a model get different middles. Greyscale is the one that
+        // does not survive the split, and it is the right one to lose — clay
+        // and contour have already taken the colour out, and what it was for
+        // was judging the values in a photograph.
+        val showing = isModel || bitmap != null
         Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
-            PaneAction(ToolIcons.add, "Add a picture", true, onClick = onAdd)
+            AddAction(onAdd = onAdd, onAddModel = onAddModel)
             PaneAction(
-                ToolIcons.fit, "Fit", bitmap != null,
+                ToolIcons.fit, "Fit", showing,
                 onClick = { pane.fit() },
             )
-            PaneAction(
-                ToolIcons.flipAcross, "Flip", bitmap != null, lit = flipped,
-                onClick = { flipped = !flipped },
-            )
-            PaneAction(
-                ToolIcons.greyscale, "Take the colour out", bitmap != null, lit = grey,
-                onClick = { grey = !grey },
-            )
+            if (isModel) {
+                PaneAction(
+                    ToolIcons.light, "Move the light", true, lit = pane.lighting,
+                    onClick = { pane.lighting = !pane.lighting },
+                )
+                PaneAction(
+                    ToolIcons.clay, "Clay", true, lit = pane.clay,
+                    // Clay off takes the lines with it: the lines are drawn on
+                    // the clay and there is nothing for them to be drawn on
+                    // once the scan's own surface is back.
+                    onClick = {
+                        pane.clay = !pane.clay
+                        if (!pane.clay) pane.contour = false
+                    },
+                )
+                PaneAction(
+                    ToolIcons.contour, "Contour lines", true, lit = pane.contour,
+                    onClick = {
+                        pane.contour = !pane.contour
+                        if (pane.contour) pane.clay = true
+                    },
+                )
+            } else {
+                PaneAction(
+                    ToolIcons.flipAcross, "Flip", bitmap != null, lit = flipped,
+                    onClick = { flipped = !flipped },
+                )
+                PaneAction(
+                    ToolIcons.greyscale, "Take the colour out", showing, lit = grey,
+                    onClick = { grey = !grey },
+                )
+            }
             Spacer(Modifier.weight(1f))
             PaneAction(
                 ToolIcons.trash, "Remove", selected != null,
@@ -362,6 +496,17 @@ fun ReferenceBody(
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
                             )
+                        } else if (p.kind == RefKind.MODEL) {
+                            // A model that has never been looked at has no
+                            // poster yet, and an empty frame in the strip reads
+                            // as a picture that failed rather than as a thing
+                            // waiting to be opened.
+                            Icon(
+                                ToolIcons.cube,
+                                p.label,
+                                Modifier.size(22.dp).align(Alignment.Center),
+                                scheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -388,6 +533,11 @@ fun ReferenceButton(
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
     pane: PaneView,
+    stage: ModelStage,
+    glb: ByteArray?,
+    wantPoster: Boolean,
+    onPoster: (String, android.graphics.Bitmap) -> Unit,
+    onAddModel: () -> Unit,
     onFixate: (Cell) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -415,6 +565,11 @@ fun ReferenceButton(
                 onRemove = onRemove,
                 onInk = onInk,
                 pane = pane,
+                stage = stage,
+                glb = glb,
+                wantPoster = wantPoster,
+                onPoster = onPoster,
+                onAddModel = onAddModel,
                 onDismiss = { open = false },
                 onFixate = {
                     open = false
@@ -442,6 +597,11 @@ fun ReferencePanelPopup(
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
     pane: PaneView,
+    stage: ModelStage,
+    glb: ByteArray?,
+    wantPoster: Boolean,
+    onPoster: (String, android.graphics.Bitmap) -> Unit,
+    onAddModel: () -> Unit,
     onDismiss: () -> Unit,
     onFixate: () -> Unit,
 ) {
@@ -467,6 +627,11 @@ fun ReferencePanelPopup(
                 onRemove = onRemove,
                 onInk = onInk,
                 pane = pane,
+                stage = stage,
+                glb = glb,
+                wantPoster = wantPoster,
+                onPoster = onPoster,
+                onAddModel = onAddModel,
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -505,6 +670,11 @@ fun ReferencePanelCard(
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
     pane: PaneView,
+    stage: ModelStage,
+    glb: ByteArray?,
+    wantPoster: Boolean,
+    onPoster: (String, android.graphics.Bitmap) -> Unit,
+    onAddModel: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val forPicture = (maxHeight - CARD_FURNITURE).coerceAtLeast(MIN_PICTURE)
@@ -518,9 +688,43 @@ fun ReferencePanelCard(
             onRemove = onRemove,
             onInk = onInk,
             pane = pane,
+            stage = stage,
+            glb = glb,
+            wantPoster = wantPoster,
+            onPoster = onPoster,
+            onAddModel = onAddModel,
             modifier = Modifier.fillMaxSize(),
             pictureHeight = forPicture,
         )
+    }
+}
+
+/**
+ * The Add button, and the two things it can add.
+ *
+ * A menu and not a long press. A long press is the repository's idiom for a
+ * *variation* on what the tap does — the colour picker's hold-to-stay — and
+ * adding a 3D model is not a variation on adding a photograph; it is the other
+ * half of what this library holds. A button whose second half nobody can find
+ * is a feature nobody has.
+ */
+@Composable
+private fun AddAction(onAdd: () -> Unit, onAddModel: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        PaneAction(ToolIcons.add, "Add", true, onClick = { open = true })
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Picture…", fontSize = 13.sp) },
+                leadingIcon = { Icon(ToolIcons.references, null, Modifier.size(17.dp)) },
+                onClick = { open = false; onAdd() },
+            )
+            DropdownMenuItem(
+                text = { Text("3D model…", fontSize = 13.sp) },
+                leadingIcon = { Icon(ToolIcons.cube, null, Modifier.size(17.dp)) },
+                onClick = { open = false; onAddModel() },
+            )
+        }
     }
 }
 
@@ -771,5 +975,21 @@ private val MIN_PICTURE = 90.dp
 
 private const val MIN_ZOOM = 0.2f
 private const val MAX_ZOOM = 12f
+
+/**
+ * Degrees of turn per pane pixel dragged.
+ *
+ * A third of a degree, so a drag across a three-hundred-pixel pane is a
+ * hundred degrees: rather more than a quarter turn in one comfortable sweep,
+ * which is what makes spinning a model feel like handling it. The light moves
+ * slower than the model does, because it is aimed rather than handled and
+ * overshooting a rim light is more annoying than overshooting an angle.
+ */
+private const val SPIN_PER_PX = 0.34f
+private const val LIGHT_PER_PX = 0.22f
+
+/** Whole model in the pane, up to an eyelash. */
+private const val MIN_DOLLY = 0.4f
+private const val MAX_DOLLY = 14f
 private const val RING_RADIUS = 26f
 private const val RING_LIFT = 52f
