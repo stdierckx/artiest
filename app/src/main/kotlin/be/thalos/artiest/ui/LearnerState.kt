@@ -244,6 +244,34 @@ class LearnerState(context: Context) {
         }
 
     /**
+     * Add several models in one go, and say what went wrong with which.
+     *
+     * One at a time and in order, deliberately: a model is tens of megabytes of
+     * mesh being read, checked and copied, and doing eight of those at once on
+     * a tablet is eight times the peak memory for the same total time. The
+     * strip fills in as they arrive, which is also the progress report.
+     *
+     * The last one that worked ends up selected, which is what a picker that
+     * was handed a folder should leave you looking at.
+     */
+    suspend fun addModels(context: Context, uris: List<Uri>): String? {
+        var failed = 0
+        var last: String? = null
+        for (uri in uris) {
+            val trouble = addModel(context, uri)
+            if (trouble != null) {
+                failed++
+                last = trouble
+            }
+        }
+        return when {
+            failed == 0 -> null
+            failed == 1 -> last
+            else -> "$failed of ${uris.size} could not be added — $last"
+        }
+    }
+
+    /**
      * Keep the first frame the pane rendered of [id] as its face in the strip.
      *
      * The flag goes down first and unconditionally. A failed write is a poster

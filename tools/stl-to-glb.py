@@ -29,14 +29,14 @@ to write Z-up and glTF is Y-up, so the default turns the model a quarter turn
 about X. Pass `--up y` for a file that is already the right way round.
 """
 import argparse
-import json
+import os
 import struct
 import sys
 
 import numpy as np
 
-JSON_CHUNK = 0x4E4F534A
-BIN_CHUNK = 0x004E4942
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from glbwrite import facet, settle, write_glb  # noqa: E402
 
 
 def read_stl(path):
@@ -119,99 +119,6 @@ def thin(points, faces, target):
     return best
 
 
-def normals(points, faces):
-    """Area-weighted vertex normals: the smooth shading the clay mode needs."""
-    a = points[faces[:, 0]]
-    b = points[faces[:, 1]]
-    c = points[faces[:, 2]]
-    face = np.cross(b - a, c - a)
-    out = np.zeros_like(points)
-    for i in range(3):
-        np.add.at(out, faces[:, i], face)
-    length = np.linalg.norm(out, axis=1, keepdims=True)
-    length[length == 0] = 1.0
-    return out / length
-
-
-def write_glb(path, points, faces, name):
-    points = points.astype("<f4")
-    norms = normals(points.astype(np.float64), faces).astype("<f4")
-    indices = faces.astype("<u4")
-
-    blob = bytearray()
-
-    def add(array):
-        start = len(blob)
-        blob.extend(array.tobytes())
-        while len(blob) % 4:
-            blob.append(0)
-        return start, array.nbytes
-
-    pos_at, pos_len = add(points)
-    nor_at, nor_len = add(norms)
-    idx_at, idx_len = add(indices)
-
-    low = points.min(axis=0).tolist()
-    high = points.max(axis=0).tolist()
-
-    doc = {
-        "asset": {"version": "2.0", "generator": "artiest stl-to-glb"},
-        "scene": 0,
-        "scenes": [{"nodes": [0]}],
-        "nodes": [{"mesh": 0, "name": name}],
-        "meshes": [
-            {
-                "name": name,
-                "primitives": [
-                    {
-                        "attributes": {"POSITION": 0, "NORMAL": 1},
-                        "indices": 2,
-                        "material": 0,
-                    }
-                ],
-            }
-        ],
-        "materials": [
-            {
-                "name": "plaster",
-                "pbrMetallicRoughness": {
-                    "baseColorFactor": [0.82, 0.80, 0.77, 1.0],
-                    "metallicFactor": 0.0,
-                    "roughnessFactor": 0.85,
-                },
-            }
-        ],
-        "accessors": [
-            {
-                "bufferView": 0, "componentType": 5126, "count": len(points),
-                "type": "VEC3", "min": low, "max": high,
-            },
-            {"bufferView": 1, "componentType": 5126, "count": len(norms), "type": "VEC3"},
-            {"bufferView": 2, "componentType": 5125, "count": indices.size, "type": "SCALAR"},
-        ],
-        "bufferViews": [
-            {"buffer": 0, "byteOffset": pos_at, "byteLength": pos_len, "target": 34962},
-            {"buffer": 0, "byteOffset": nor_at, "byteLength": nor_len, "target": 34962},
-            {"buffer": 0, "byteOffset": idx_at, "byteLength": idx_len, "target": 34963},
-        ],
-        "buffers": [{"byteLength": len(blob)}],
-    }
-
-    text = json.dumps(doc, separators=(",", ":")).encode("utf-8")
-    while len(text) % 4:
-        text += b" "
-    binary = bytes(blob)
-    total = 12 + 8 + len(text) + 8 + len(binary)
-    with open(path, "wb") as out:
-        out.write(b"glTF")
-        out.write(struct.pack("<II", 2, total))
-        out.write(struct.pack("<II", len(text), JSON_CHUNK))
-        out.write(text)
-        out.write(struct.pack("<II", len(binary), BIN_CHUNK))
-        out.write(binary)
-    return total
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("stl")
@@ -219,6 +126,11 @@ def main():
     ap.add_argument("--faces", type=int, default=120_000, help="triangles to aim for")
     ap.add_argument("--up", choices=["z", "y"], default="z", help="which axis is up in the STL")
     ap.add_argument("--name", default=None)
+    ap.add_argument(
+        "--flat",
+        action="store_true",
+        help="one normal per triangle: the planes show as planes",
+    )
     args = ap.parse_args()
 
     triangles = read_stl(args.stl)
@@ -230,15 +142,16 @@ def main():
         # A quarter turn about X: z-up becomes y-up, and what was +y goes back.
         points = np.stack([points[:, 0], points[:, 2], -points[:, 1]], axis=1)
 
-    # Centred and scaled to about a metre, so every model in the library arrives
-    # at a sane size whatever units it was scanned in.
-    points = points - (points.max(axis=0) + points.min(axis=0)) / 2.0
-    reach = float(np.abs(points).max())
-    if reach > 0:
-        points = points / reach
+    # Centred and scaled, so every model in the library arrives at the same
+    # size whatever units it was scanned in. See `glbwrite.settle`.
+    points = settle(points)
+
+    norms = None
+    if args.flat:
+        points, faces, norms = facet(points, faces)
 
     name = args.name or args.stl.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    size = write_glb(args.glb, points, faces, name)
+    size = write_glb(args.glb, points, faces, name, norms)
     print(
         "%s -> %s  %d -> %d triangles, %.1f MB"
         % (args.stl, args.glb, before, len(faces), size / 1e6)

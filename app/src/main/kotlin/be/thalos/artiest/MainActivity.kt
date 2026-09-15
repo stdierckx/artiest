@@ -1516,7 +1516,7 @@ private fun CanvasScreen(
     }
 
     /**
-     * Lr12. The picker for a 3D model.
+     * Lr12. The picker for 3D models.
      *
      * `OpenDocument` with the type left open, and both halves of that are the
      * `.ora` picker's reasons. The photo picker would not list a `.glb` because
@@ -1524,14 +1524,22 @@ private fun CanvasScreen(
      * seen one does not know what to call it, so a mime filter would show an
      * empty folder. What the file actually is gets decided by reading it — see
      * `RefModelImport`.
+     *
+     * **Multiple**, unlike the picture and drawing pickers beside it, because
+     * models arrive in sets and pictures arrive one at a time: nobody has ever
+     * wanted one solid out of a set of primitives, and a folder of scans is a
+     * folder. The photo picker already lets a tablet's own gallery
+     * multi-select; this is the same courtesy for files it has no idea about.
      */
     val modelPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) {
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (!uris.isNullOrEmpty()) {
             scope.launch {
-                importNote = "reading the model…"
-                val trouble = learner.addModel(context, uri)
+                importNote =
+                    if (uris.size == 1) "reading the model…"
+                    else "reading ${uris.size} models…"
+                val trouble = learner.addModels(context, uris)
                 importNote = trouble?.let { "could not add that model: $it" } ?: ""
             }
         }
