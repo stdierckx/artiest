@@ -1510,6 +1510,104 @@ And the thing that must not regress, checked three times in a row in both stone
 and contour mode: **zero frames in five idle seconds.** A reference that is
 being looked at and not touched still costs nothing.
 
+
+### Bronze, terracotta, and a sky to reflect
+
+> *"Can we do a bronze and a terracotta version too?"*
+
+Three materials now, and they are one shader with three sets of numbers rather
+than three shaders, because they differ in their numbers and not in their
+arithmetic: marble is pale stone with grey veins and dark flecks; terracotta is
+the same arithmetic in orange, with far more body mottling, pores instead of
+flecks and hardly any veins; bronze is the same again in metal, with the veins
+turned into patina.
+
+Two things were specific to the bronze.
+
+**Patina is not a vein.** A vein is a seam in a block and runs in a direction; a
+patina is a patch and spreads from where the water sat. So for a bronze the vein
+bands are blended with the broad blotches of a field the shader already has, and
+then weighted by which way the surface faces — `getWorldGeometricNormalVector()`
+— so it gathers on the planes that look up and streaks off the ones that look
+down. One number, `settling`, says how much of that to do: none for the two that
+are cut from a block, most of the way for the one that stood in a square.
+
+**A metal with nothing to reflect is a black shape with three scratches on it.**
+That is what the first bronze looked like, and it is not a bug in the material:
+a metal has no diffuse colour at all, so everything a bronze shows is the room
+reflected in it, and the room was three directional lamps and a constant grey.
+So there is a room now — a 32-pixel cubemap generated in `ModelStage`, bright
+and slightly cool overhead, dark and warm below. Not a photograph and not an
+`.hdr`: a gradient, and every mip level is generated rather than filtered down,
+because prefiltering a reflection map is blurring it by roughness and a gradient
+that smooth is already its own blur. It is the one environment that needs no
+`filament-utils`, no IBL prefilter, and no megabyte and a half of data in a
+repository that does not take data. The marble gained from it as well.
+
+The button for all this is a menu and not a cycle. Four states on one button was
+forced — six buttons is what fits across the panel and the row already had six —
+but a cycle through four states is one tap to change and four to find out what
+the options were, and it says nothing about what the next tap will give. A menu
+says all four at once, in the same shape as the Add button beside it.
+
+### Twelve more models, and a picker that takes more than one
+
+> *"Also I would like some extra models: an asaro head. Some primitives"*
+
+**The solids are generated.** `tools/primitives-to-glb.py` writes a sphere, a
+cube, a cylinder, a cone, a pyramid, a torus and an egg — the first half of
+every drawing course, and the forms a head is made of. There is no licence to
+honour on a sphere and nothing to go stale; thirty lines of trigonometry is a
+better source for a cylinder than anybody's model library. Each shape says which
+of its own parts are round, so a sphere has exact normals and no faceting at any
+zoom, a cube is flat, and a cylinder is smooth round the side and flat on the
+caps with a hard rim between.
+
+Five of the seven came out wound inside out, which is a solid whose front faces
+are the ones the renderer throws away. They are now measured rather than trusted:
+a closed mesh has a positive signed volume when it is wound correctly, the
+divergence theorem does not care where the origin is, and `glbwrite.outward`
+flips whatever comes out negative.
+
+**The heads came from Wikimedia Commons**: a CC0 human head, Nefertiti, Voltaire
+and a Minerva, all read off pages that state a licence.
+
+**And the picker takes several files at once now.** It had to: the models were
+already on the tablet and there was no way in. The library lives in the app's
+private storage, `run-as` only reaches it on a debuggable build, and making the
+release build debuggable to load some data is not a trade worth making. The
+honest way in was the door the artist uses — so the model picker became
+`OpenMultipleDocuments`, which is a better picker anyway. Models arrive in sets
+and pictures arrive one at a time.
+
+### The Asaro head, which could not be made and had to be found
+
+> *"the model is disappointing. It is a low poly head, but it is not a real
+> asaro head. It is a specific form with a specific set of faces."*
+
+Right, and the correction is worth writing down because the first two attempts
+were both wrong in the same way. A decimated head scan is a coarse head. A head
+whose surface has been grouped into big planes by a clustering algorithm — which
+was the second attempt, and it took a plane-fitting tool to find out — is a
+*plane abstraction of a particular head*. Neither is an Asaro head, because an
+Asaro head is a **designed object**: a specific set of planes chosen by a
+sculptor in 1976 to say what the planes of *a* head are. That is not something
+an algorithm derives from one man's face, and the tool that tried was deleted
+rather than kept.
+
+So it had to be found instead, and the good ones are all on sites that need an
+account to download from. The way in was **Objaverse** — Allen AI's mirror of
+the Creative-Commons part of Sketchfab, published on Hugging Face as `.glb`
+files with a public index and direct download. Two of them are in the library
+now: a CC BY Asaro head and a CC BY-SA *Planes of the head*, both credited, both
+data on the tablet and neither of them in this repository.
+
+They arrive as scene graphs of two dozen meshes and sixty-odd megabytes, so
+`tools/glb-flatten.py` walks the scene, multiplies each mesh by the transform of
+the node it hangs under, drops everything that is not a triangle, thins it, and
+writes the one-mesh `.glb` the library holds. Textures and materials are left
+behind on purpose: the pane dresses it in marble.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

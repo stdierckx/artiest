@@ -54,7 +54,8 @@ import com.google.android.filament.android.UiHelper
  * ## It draws when something changes
  *
  * There is no loop. Every source of change — a different model, a drag, the
- * light, stone, grey, a resize, a new surface — ends in [Frames.ask], which
+ * light, the material, grey, a resize, a new surface — ends in [Frames.ask],
+ * which
  * posts a single Choreographer callback. A model that is being looked at and
  * not touched costs nothing, and that is deliberate: the canvas next to it
  * draws ink into a front buffer and does not need a neighbour spending the GPU
@@ -136,12 +137,12 @@ fun ModelPane(
         // on what this writes, and that is one frame's work on a model this
         // size, paid once, against a white bust that cannot be drawn from.
         LaunchedEffect(glb) {
-            if (glb != null && !wearsItsOwnSurface(glb)) pane.stone = true
+            if (glb != null && !wearsItsOwnSurface(glb)) pane.cast = Cast.MARBLE
         }
 
         // Loading is the one change that is not just a number, so it is its own
         // effect and it is keyed on the two things that mean "load again".
-        LaunchedEffect(modelId, glb, pane.stone, pane.contour) {
+        LaunchedEffect(modelId, glb, pane.cast, pane.contour) {
             if (glb == null) {
                 stage.close()
             } else {
@@ -199,10 +200,12 @@ fun ModelPane(
     }
 }
 
-/** Which of the three ways of dressing the model the two switches mean. */
+/** Which of the five ways of dressing the model the two controls mean. */
 private fun look(pane: PaneView): ModelStage.Look = when {
     pane.contour -> ModelStage.Look.CONTOUR
-    pane.stone -> ModelStage.Look.STONE
+    pane.cast == Cast.MARBLE -> ModelStage.Look.MARBLE
+    pane.cast == Cast.BRONZE -> ModelStage.Look.BRONZE
+    pane.cast == Cast.TERRACOTTA -> ModelStage.Look.TERRACOTTA
     else -> ModelStage.Look.SCANNED
 }
 

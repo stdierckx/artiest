@@ -146,18 +146,23 @@ class PaneView {
     var lighting by mutableStateOf(false)
 
     /**
-     * Grey stone instead of whatever the model was scanned wearing.
+     * What the model is dressed in: its own scanned surface, or one of three
+     * materials a cast is made in.
      *
-     * A plaster cast, in other words, and for the reason a life room owns a
-     * shelf of them: the scan's own colour is information about marble and dust
-     * and the light it was photographed in, and none of that is the form. Grey
-     * takes it away and leaves the planes.
+     * A life room owns a shelf of casts for the reason this exists: a scan's
+     * own colour is information about marble and dust and the light it was
+     * photographed in, and none of that is the form. A cast takes that away and
+     * leaves the planes — and which cast is not a detail, because the three
+     * teach different things. Marble is the one to learn value on. Bronze is
+     * metal, so nothing on it is its own colour and everything is the room
+     * reflected, which is a different drawing entirely. Terracotta is warm and
+     * matte and closest to what a maquette in the hand looks like.
      *
-     * It starts **on** for a model that brought no surface of its own — see
-     * `wearsItsOwnSurface`. Those arrive white, and white is the one value form
-     * does not show in.
+     * It starts at [Cast.MARBLE] for a model that brought no surface of its
+     * own — see `wearsItsOwnSurface`. Those arrive white, and white is the one
+     * value form does not show in.
      */
-    var stone by mutableStateOf(false)
+    var cast by mutableStateOf(Cast.SCAN)
 
     /**
      * Cross-contour lines over the form: about twenty rings up it and twenty
@@ -170,7 +175,7 @@ class PaneView {
      * along them describes a volume, hatching across them describes a stain.
      *
      * Drawn on plain grey, always, because that is the picture that teaches —
-     * which is why turning this on turns [stone] on with it.
+     * which is why turning this on takes the scan's own surface off.
      */
     var contour by mutableStateOf(false)
 
@@ -211,7 +216,7 @@ class PaneView {
         flipped = false
         grey = false
         lighting = false
-        stone = false
+        cast = Cast.SCAN
         contour = false
         slices = DEFAULT_SLICES
         lightAzimuth = -35f
@@ -502,9 +507,9 @@ fun ReferenceBody(
         // Six buttons is what fits across a 320dp panel: 40dp each and 6dp
         // between them is 270, and a seventh would be 316 in a 300dp row. So a
         // picture and a model get different middles. Greyscale is the one that
-        // does not survive the split, and it is the right one to lose — stone
-        // and contour have already taken the colour out, and what it was for
-        // was judging the values in a photograph.
+        // does not survive the split, and it is the right one to lose — a cast
+        // and the contour lines have already taken the colour out, and what it
+        // was for was judging the values in a photograph.
         val showing = isModel || bitmap != null
         Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
             AddAction(onAdd = onAdd, onAddModel = onAddModel)
@@ -517,21 +522,14 @@ fun ReferenceBody(
                     ToolIcons.light, "Move the light", true, lit = pane.lighting,
                     onClick = { pane.lighting = !pane.lighting },
                 )
-                PaneAction(
-                    ToolIcons.stone, "Grey stone", true, lit = pane.stone,
-                    // Stone off takes the lines with it: the lines are drawn on
-                    // the grey and there is nothing for them to be drawn on
-                    // once the scan's own surface is back.
-                    onClick = {
-                        pane.stone = !pane.stone
-                        if (!pane.stone) pane.contour = false
-                    },
-                )
+                SurfaceAction(pane)
                 PaneAction(
                     ToolIcons.contour, "Contour lines", true, lit = pane.contour,
                     onClick = {
                         pane.contour = !pane.contour
-                        if (pane.contour) pane.stone = true
+                        if (pane.contour && pane.cast == Cast.SCAN) {
+                            pane.cast = Cast.MARBLE
+                        }
                     },
                 )
             } else {
@@ -794,6 +792,66 @@ fun ReferencePanelCard(
  * half of what this library holds. A button whose second half nobody can find
  * is a feature nobody has.
  */
+/**
+ * What a model is dressed in. Lr12.
+ *
+ * Four states on one button rather than four buttons, and that is a measurement
+ * rather than a preference: six buttons is what fits across the panel and the
+ * row already has six. See the comment above the row.
+ */
+enum class Cast {
+    /** The scan's own surface, whatever it was photographed wearing. */
+    SCAN,
+    MARBLE,
+    BRONZE,
+    TERRACOTTA,
+}
+
+/**
+ * The button that chooses a material, and the little menu it opens.
+ *
+ * A menu and not a cycle. A cycle through four states is one tap to change and
+ * four to find out what the options were, and it says nothing at all about what
+ * the next tap will give — which is fine for a switch and wrong for a choice.
+ * The same shape as the Add button beside it, so there is one idiom in the row
+ * and not two.
+ */
+@Composable
+private fun SurfaceAction(pane: PaneView) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        PaneAction(
+            ToolIcons.stone,
+            "What it is made of",
+            true,
+            lit = pane.cast != Cast.SCAN,
+            onClick = { open = true },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for ((cast, name, icon) in CASTS) {
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    leadingIcon = { Icon(icon, null, Modifier.size(17.dp)) },
+                    onClick = {
+                        pane.cast = cast
+                        // The lines are drawn on a cast and there is nothing to
+                        // draw them on once the scan's own surface is back.
+                        if (cast == Cast.SCAN) pane.contour = false
+                        open = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private val CASTS = listOf(
+    Triple(Cast.MARBLE, "Marble", ToolIcons.stone),
+    Triple(Cast.BRONZE, "Bronze", ToolIcons.bronze),
+    Triple(Cast.TERRACOTTA, "Terracotta", ToolIcons.terracotta),
+    Triple(Cast.SCAN, "As scanned", ToolIcons.cube),
+)
+
 @Composable
 private fun AddAction(onAdd: () -> Unit, onAddModel: () -> Unit) {
     var open by remember { mutableStateOf(false) }

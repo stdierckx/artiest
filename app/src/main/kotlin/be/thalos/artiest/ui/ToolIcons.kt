@@ -1521,6 +1521,48 @@ object ToolIcons {
     }
 
     /**
+     * A dark ball with a hard highlight in it.
+     *
+     * Bronze mode. The same ball as [stone] and the opposite treatment, which
+     * is the point: a metal has no colour of its own to shade, so what the eye
+     * gets is a dark form and one small bright reflection of the room. Drawn
+     * as a hole rather than as a white dot, because the toolbar behind it is
+     * not a colour this icon knows.
+     */
+    val bronze: ImageVector by lazy {
+        icon("bronze") {
+            fill(evenOdd = true) {
+                circle(12f, 12f, 9.3f)
+                circle(8.9f, 8.6f, 2.5f)
+            }
+        }
+    }
+
+    /**
+     * A pot.
+     *
+     * Terracotta mode, and the one of the three that is not drawn as a ball.
+     * Fired clay is the material of the maquette and the flowerpot, and a pot
+     * says that in a way a third shaded sphere would not — at seventeen density
+     * units across, three balls differing only in their shading are three
+     * smudges.
+     */
+    val terracotta: ImageVector by lazy {
+        icon("terracotta") {
+            stroke {
+                moveTo(4.6f, 5.4f)
+                lineTo(19.4f, 5.4f)
+                lineTo(18.2f, 8.6f)
+                lineTo(5.8f, 8.6f)
+                close()
+                moveTo(6.4f, 8.6f)
+                curveTo(6.9f, 14.6f, 8.2f, 18.6f, 12.0f, 20.2f)
+                curveTo(15.8f, 18.6f, 17.1f, 14.6f, 17.6f, 8.6f)
+            }
+        }
+    }
+
+    /**
      * A ball with three contour lines bent around it.
      *
      * The contour mode, and it is drawn the way the thing itself is drawn: a

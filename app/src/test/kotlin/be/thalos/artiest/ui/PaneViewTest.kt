@@ -107,22 +107,22 @@ class PaneViewTest {
     }
 
     /**
-     * Fit deliberately leaves the switches alone: flipped, grey, stone and the
-     * contour lines are how the artist has asked to see the thing, not where
-     * they have got to in it.
+     * Fit deliberately leaves the switches alone: flipped, grey, what the model
+     * is made of and the contour lines are how the artist has asked to see the
+     * thing, not where they have got to in it.
      */
     @Test
     fun `fit leaves the way of seeing alone`() {
         val pane = PaneView()
         pane.flipped = true
         pane.grey = true
-        pane.stone = true
+        pane.cast = Cast.BRONZE
         pane.contour = true
         pane.lighting = true
         pane.fit()
         assertTrue(pane.flipped)
         assertTrue(pane.grey)
-        assertTrue(pane.stone)
+        assertEquals(Cast.BRONZE, pane.cast)
         assertTrue(pane.contour)
         assertTrue(pane.lighting)
     }
@@ -150,7 +150,7 @@ class PaneViewTest {
         pane.scale = 4f
         pane.flipped = true
         pane.grey = true
-        pane.stone = true
+        pane.cast = Cast.TERRACOTTA
         pane.contour = true
         pane.lighting = true
         pane.dragged(300f, 40f)
@@ -164,7 +164,7 @@ class PaneViewTest {
         assertEquals(34f, pane.lightElevation)
         assertFalse(pane.flipped)
         assertFalse(pane.grey)
-        assertFalse(pane.stone)
+        assertEquals(Cast.SCAN, pane.cast)
         assertFalse(pane.contour)
         assertFalse(pane.lighting)
     }

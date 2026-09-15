@@ -1,4 +1,5 @@
-// Marble, made in the shader rather than fetched from a picture.
+// Marble, bronze and terracotta, made in the shader rather than fetched from
+// pictures.
 //
 // Lr12. Half the scans in a free model library arrive with no material on them
 // at all. glTF says a primitive with no material is plain white, and white is
@@ -8,57 +9,83 @@
 // artist is being asked to study form in the one value where form does not
 // show.
 //
-// What a life room puts in front of a student instead is a marble or a plaster
-// cast, and this is a copy of one: the reference for it is a photograph of a
-// fourteenth-century alabaster Virgin, chosen by the artist and measured off
-// the tablet rather than remembered.
+// What a life room puts in front of a student instead is a cast, and a cast is
+// in one of three things. This is those three, and they are one shader with one
+// set of parameters rather than three materials, because they differ in their
+// numbers and not in their arithmetic: a marble is pale stone with grey veins
+// and dark flecks, a terracotta is the same arithmetic in orange with more
+// mottling and hardly any veins, and a bronze is the same again in metal, with
+// the veins turned into patina and told to run downhill.
+//
+// The marble is measured off a photograph of a fourteenth-century alabaster
+// Virgin, chosen by the artist and read off the tablet rather than remembered:
+// a lit plane in it is (214, 204, 190) and a shadowed one (126, 114, 98).
 //
 // ## Why it is computed and not a photograph of marble
 //
 // A texture would need two things this repo will not have. It would need the
-// picture itself -- a tiling marble image, of a size worth shipping, under a
-// licence that survives being in an Apache-2.0 app -- and it would need UV
-// coordinates on the model, which a scan that arrived with no material also
-// usually has none of. Neither problem exists if the stone is a function of
-// where the point is on the form: it needs no file, no licence and no UVs, it
-// never repeats, and it costs a few dozen arithmetic instructions a pixel.
+// pictures themselves -- tiling marble, bronze and terracotta images, of a size
+// worth shipping, under licences that survive being in an Apache-2.0 app -- and
+// it would need UV coordinates on the model, which a scan that arrived with no
+// material also usually has none of. Neither problem exists if the surface is a
+// function of where the point is on the form: it needs no file, no licence and
+// no UVs, it never repeats, and it costs a few dozen arithmetic instructions a
+// pixel.
 //
-// ## What marble is made of, in the order it is visible
+// ## What is in it, in the order it is visible from across a room
 //
-//  - it is nearly white, and warm: a lit plane in the reference measures
-//    (214, 204, 190) and a shadowed one (126, 114, 98), so the whole thing is
-//    ivory and not grey, and the range between light and shadow is enormous;
-//  - the veins are soft, wide and wandering -- *nerves*, in the artist's word
-//    -- and they are a shade or two of grey-brown, never black. They are
-//    warped, because a vein that marches in a straight band is a deckchair;
-//  - the specks are few, dark, sharp and clustered here and there. Uniform
-//    speckle over the whole surface is granite or concrete, which is what this
-//    material was before this pass and what it read as;
-//  - it is faintly glossy, but only faintly, and the sheen is broken where the
-//    specks are, which is most of what tells the eye it is stone and not resin.
+//  - the body: the colour of the material itself, with a little unevenness in
+//    it, because nothing that was ever in the ground is flat;
+//  - the veins: soft wandering bands a shade or two darker. A sine gives
+//    parallel stripes and reads as fabric, so the sine's argument is displaced
+//    by several radians of noise and the stripes wander and fork instead;
+//  - the specks: a fine noise cut near its top so only the peaks survive, which
+//    is what makes them flecks rather than a haze, and thinned again where a
+//    slower field says the material is clean. Three per cent of the surface in
+//    marble, a good deal more in terracotta, where they are pores;
+//  - the sheen, broken where the specks are, which is most of what tells the
+//    eye it is stone and not resin.
+//
+// ## Patina runs downhill
+//
+// The one thing bronze does that the other two do not: its veins are patina,
+// and patina is weather. It gathers on the faces that look up and streaks off
+// the ones that look down. `settling` says how much of that to apply, which is
+// none for the two that are cut from a block and most of the way for the one
+// that stood in a square for three hundred years.
 //
 // The specks fade out as the pixels get bigger than they are, for the reason
 // the contour lines do: once one pixel spans several of them there is nothing
 // left to draw but a shimmer that crawls when the model turns.
 material {
-    name : stone,
+    name : cast,
     shadingModel : lit,
     blending : opaque,
     vertexDomain : object,
     // Where the point is on the form. A varying, and in the one space that is
     // nailed to the model -- see the vertex block, where getting this wrong
-    // made the stone slide about under the artist's finger.
+    // made the surface slide about under the artist's finger.
     variables : [ formPosition ],
     parameters : [
-        // The stone itself, the colour of its veins, and the colour of the
-        // specks in it.
+        // The material, the colour of its veins, and the colour of its specks.
         { type : float3, name : pale },
         { type : float3, name : vein },
         { type : float3, name : grit },
-        // One unit is the model's own half-size, so the same marble lands on a
+        // One unit is the model's own half-size, so the same stone lands on a
         // bust exported in millimetres and one exported in metres.
         { type : float,  name : perUnit },
-        { type : float,  name : roughness }
+        { type : float,  name : roughness },
+        // Metal or not. Nothing between 0 and 1 is a real material, but the
+        // patina on a bronze is not metal, so this is scaled down where the
+        // veins are and the in-between is a boundary rather than a substance.
+        { type : float,  name : metallic },
+        // How much of each of the three. See the top of this file.
+        { type : float,  name : veining },
+        { type : float,  name : speckling },
+        { type : float,  name : mottling },
+        // How far the veins prefer the faces that look up. Weather, in one
+        // number: nothing for cut stone, most of the way for a bronze.
+        { type : float,  name : settling }
     ]
 }
 
@@ -166,6 +193,25 @@ fragment {
         float fine = nerve((p.x * 3.1 - p.y * 1.4 + p.z * 2.6) * 5.6, (spread - 0.50) * 8.0, 0.88);
         float veins = clamp(wide + 0.55 * fine, 0.0, 1.0);
 
+        // Weather, and the two things it does.
+        //
+        // The first is that patina is not a vein. A vein is a seam in a block
+        // and runs in a direction; corrosion is a patch and spreads from where
+        // the water sat, so for a bronze the same bands are blended with the
+        // broad blotches of `spread` and come out as crust rather than as
+        // stripes. It is the field that was going to be computed anyway.
+        //
+        // The second is that it runs downhill. The geometric normal and not the
+        // shading one, because what is being asked is which way the surface
+        // faces, not what a normal map would like it to look like;
+        // camera-relative rendering moves the world but does not turn it, so up
+        // is still up in here.
+        float crust = smoothstep(0.42, 0.74, spread);
+        veins = mix(veins, max(veins * 0.55, crust), materialParams.settling);
+        float up = getWorldGeometricNormalVector().y;
+        float weather = mix(1.0, smoothstep(-0.55, 0.45, up), materialParams.settling);
+        veins = clamp(veins * weather * materialParams.veining, 0.0, 1.0);
+
         // The specks: a fine noise cut near its top so only the peaks survive,
         // which is what makes them dots rather than a haze, and then thinned
         // where `spread` says the stone is clean.
@@ -174,25 +220,27 @@ fragment {
         float legible = 1.0 - smoothstep(0.30, 0.85, across);
         float specks = smoothstep(0.80, 0.93, lump(fines))
                      * mix(0.15, 1.0, smoothstep(0.34, 0.70, spread))
-                     * legible;
+                     * legible * materialParams.speckling;
 
-        // A hint of unevenness in the body of the stone -- a couple of per cent,
-        // because marble is not mottled: it is nearly uniform, and reads as
-        // stone because of what little of it is not. It is the speck field
-        // read again rather than a third noise, which is two hashes instead of
-        // sixteen for a difference no eye could name.
+        // A hint of unevenness in the body -- a couple of per cent for marble,
+        // which is nearly uniform and reads as stone because of what little of
+        // it is not, and a good deal more for fired clay, which does not. It is
+        // the speck field read again rather than a third noise, which is two
+        // hashes instead of sixteen for a difference no eye could name.
 
-        float body = (lump(fines * 0.09) - 0.46) * 0.13 * legible;
+        float body = (lump(fines * 0.09) - 0.46) * materialParams.mottling * legible;
         vec3 colour = materialParams.pale * (1.0 + body);
-        colour = mix(colour, materialParams.vein, veins * 0.78);
+        colour = mix(colour, materialParams.vein, veins);
         colour = mix(colour, materialParams.grit, specks);
 
         material.baseColor = vec4(colour, 1.0);
         // Faintly glossy, and duller in the specks and along the veins -- a
-        // sheen that breaks is what separates stone from resin.
+        // sheen that breaks is what separates stone from resin, and patina from
+        // the metal it grew on.
         material.roughness = clamp(
-            materialParams.roughness + 0.34 * specks + 0.10 * veins - 0.35 * body,
+            materialParams.roughness + 0.34 * specks + 0.34 * veins - 0.35 * body,
             0.18, 1.0);
-        material.metallic = 0.0;
+        // Patina is an oxide, and oxides are not metal.
+        material.metallic = materialParams.metallic * (1.0 - 0.85 * veins);
     }
 }

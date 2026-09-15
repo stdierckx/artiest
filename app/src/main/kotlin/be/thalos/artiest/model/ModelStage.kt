@@ -97,10 +97,11 @@ class ModelStage(context: Context) {
     private var fillLight = 0
     private var rimLight = 0
     private var ambient: IndirectLight? = null
+    private var skyTexture: Texture? = null
     private var contour: Material? = null
     private var contourInstance: MaterialInstance? = null
-    private var stone: Material? = null
-    private var stoneInstance: MaterialInstance? = null
+    private var cast: Material? = null
+    private var castInstance: MaterialInstance? = null
     private var plainLook: ColorGrading? = null
     private var greyLook: ColorGrading? = null
 
@@ -226,14 +227,14 @@ class ModelStage(context: Context) {
      * still turns, and the one thing that stops working is the button that wanted
      * the material. A reference pane that refuses to show a bust because a shader
      * did not load would be the worse failure by far — so each is loaded on its
-     * own, and [applyStone] and [applyContour] both have a way to carry on
+     * own, and [applyCast] and [applyContour] both have a way to carry on
      * without theirs.
      */
     private fun loadOurMaterials(engine: Engine) {
         contour = build(engine, CONTOUR_ASSET)
         contourInstance = contour?.createInstance()
-        stone = build(engine, STONE_ASSET)
-        stoneInstance = stone?.createInstance()
+        cast = build(engine, CAST_ASSET)
+        castInstance = cast?.createInstance()
     }
 
     /** One compiled material out of the assets, or null and a line in the log. */
@@ -285,8 +286,16 @@ class ModelStage(context: Context) {
         // One band of spherical harmonics is a constant: light of the same
         // colour from every direction at once. It is the cheapest ambient there
         // is and it is exactly what the walls of a room do.
+        //
+        // The reflections are a different matter and are the reason [sky]
+        // exists. A metal has no diffuse colour at all — everything a bronze
+        // shows is the room reflected in it — so with nothing to reflect a
+        // bronze renders as a black shape with three bright scratches on it
+        // where the lamps are. That is what the first one looked like.
+        skyTexture = sky(engine)
         ambient = IndirectLight.Builder()
             .irradiance(1, floatArrayOf(AMBIENT_R, AMBIENT_G, AMBIENT_B))
+            .apply { skyTexture?.let { reflections(it) } }
             .build(engine)
 
         scene?.let { s ->
@@ -295,6 +304,87 @@ class ModelStage(context: Context) {
             s.addEntity(rimLight)
             s.indirectLight = ambient
         }
+    }
+
+    /**
+     * A tiny cubemap of the room, for the things that reflect it.
+     *
+     * Not a photograph and not an HDR file: a gradient. Bright and slightly
+     * cool overhead, mid at the horizon, dark and slightly warm below, which is
+     * what any room with a window and a floor does and is enough for a metal to
+     * have something to be. Thirty-two pixels a side, which is more than a
+     * gradient needs and is 100 kB of texture.
+     *
+     * Every mip level is generated rather than filtered down, and the two come
+     * to the same thing here: prefiltering a reflection map is blurring it by
+     * roughness, and a gradient this smooth is already its own blur. That is
+     * the whole reason the sky is a gradient — it is the one environment that
+     * needs no `filament-utils`, no IBL prefilter and no 1.5 MB `.hdr` in a
+     * repository that does not take data.
+     */
+    private fun sky(engine: Engine): Texture? = runCatching {
+        val levels = Integer.numberOfTrailingZeros(SKY_SIDE) + 1
+        val texture = Texture.Builder()
+            .width(SKY_SIDE)
+            .height(SKY_SIDE)
+            .levels(levels)
+            .format(Texture.InternalFormat.R11F_G11F_B10F)
+            .sampler(Texture.Sampler.SAMPLER_CUBEMAP)
+            .build(engine)
+        var side = SKY_SIDE
+        for (level in 0 until levels) {
+            val face = side * side * 3
+            val pixels = ByteBuffer
+                .allocateDirect(face * 6 * 4)
+                .order(ByteOrder.nativeOrder())
+            val floats = pixels.asFloatBuffer()
+            for (f in 0 until 6) {
+                for (y in 0 until side) {
+                    for (x in 0 until side) {
+                        val u = (x + 0.5f) / side * 2f - 1f
+                        val v = (y + 0.5f) / side * 2f - 1f
+                        val up = upward(f, u, v)
+                        // Up is sky, down is floor, and the horizon is the
+                        // blend. Squared, so the bright half is the top half
+                        // and not merely the upper hemisphere.
+                        val t = (up * 0.5f + 0.5f)
+                        val high = t * t
+                        floats.put(SKY_LOW_R + (SKY_HIGH_R - SKY_LOW_R) * high)
+                        floats.put(SKY_LOW_G + (SKY_HIGH_G - SKY_LOW_G) * high)
+                        floats.put(SKY_LOW_B + (SKY_HIGH_B - SKY_LOW_B) * high)
+                    }
+                }
+            }
+            pixels.rewind()
+            val offsets = IntArray(6) { it * face * 4 }
+            texture.setImage(
+                engine,
+                level,
+                Texture.PixelBufferDescriptor(pixels, Texture.Format.RGB, Texture.Type.FLOAT),
+                offsets,
+            )
+            side /= 2
+        }
+        texture
+    }.onFailure { Log.w(TAG, "no sky", it) }.getOrNull()
+
+    /**
+     * How far up the direction through [face] at [u], [v] points: +1 straight
+     * up, -1 straight down.
+     *
+     * The cubemap face order is the OpenGL one — +X, -X, +Y, -Y, +Z, -Z — and
+     * only the vertical component of the direction is wanted, so the other two
+     * axes are never built.
+     */
+    private fun upward(face: Int, u: Float, v: Float): Float {
+        val y = when (face) {
+            2 -> 1f      // +Y, the ceiling
+            3 -> -1f     // -Y, the floor
+            else -> -v   // the four walls
+        }
+        // Whatever the face, the three components of the direction are u, v and
+        // a ±1 in some order, so the length is the same expression for all six.
+        return y / sqrt(u * u + v * v + 1f)
     }
 
     /**
@@ -332,13 +422,13 @@ class ModelStage(context: Context) {
             scene?.addEntities(made.entities)
             asset = made
             measure(made)
-            when (look) {
-                Look.SCANNED -> Unit
-                Look.STONE -> applyStone()
-                Look.CONTOUR -> {
+            when {
+                look.isCast -> applyCast(look)
+                look == Look.CONTOUR -> {
                     applyContour()
                     density(slices)
                 }
+                else -> Unit
             }
             loaded = true
             trouble = ""
@@ -418,7 +508,7 @@ class ModelStage(context: Context) {
     }
 
     /**
-     * Dress the model in grey stone.
+     * Dress the model in marble, bronze or terracotta.
      *
      * Every primitive gets the same instance, for [applyContour]'s reason: one
      * model is one block of stone, and a bust whose base and head were separate
@@ -429,17 +519,27 @@ class ModelStage(context: Context) {
      * rule the contour spacing follows, and for the same reason.
      *
      * If the material did not compile in, this falls back to [applyClay]: flat
-     * grey with no grain in it, which is worse to draw from than stone and far
-     * better than white.
+     * grey with nothing in it, which is worse to draw from than any of the
+     * three and far better than white.
      */
-    private fun applyStone() {
+    private fun applyCast(look: Look) {
         val made = asset ?: return
-        val instance = stoneInstance ?: run { applyClay(); return }
+        val instance = castInstance ?: run { applyClay(); return }
         val rm = engine?.renderableManager ?: return
-        instance.setParameter("pale", PALE_R, PALE_G, PALE_B)
-        instance.setParameter("vein", VEIN_R, VEIN_G, VEIN_B)
-        instance.setParameter("grit", GRIT_R, GRIT_G, GRIT_B)
-        instance.setParameter("roughness", STONE_ROUGHNESS)
+        val recipe = when (look) {
+            Look.BRONZE -> BRONZE
+            Look.TERRACOTTA -> TERRACOTTA
+            else -> MARBLE
+        }
+        instance.setParameter("pale", recipe.paleR, recipe.paleG, recipe.paleB)
+        instance.setParameter("vein", recipe.veinR, recipe.veinG, recipe.veinB)
+        instance.setParameter("grit", recipe.gritR, recipe.gritG, recipe.gritB)
+        instance.setParameter("roughness", recipe.roughness)
+        instance.setParameter("metallic", recipe.metallic)
+        instance.setParameter("veining", recipe.veining)
+        instance.setParameter("speckling", recipe.speckling)
+        instance.setParameter("mottling", recipe.mottling)
+        instance.setParameter("settling", recipe.settling)
         instance.setParameter("perUnit", 1f / reach.coerceAtLeast(1e-6f))
         for (entity in made.renderableEntities) {
             val renderable = rm.getInstance(entity)
@@ -716,10 +816,11 @@ class ModelStage(context: Context) {
             materials?.destroy()
             if (engine != null) {
                 ambient?.let { engine.destroyIndirectLight(it) }
+                skyTexture?.let { engine.destroyTexture(it) }
                 contourInstance?.let { engine.destroyMaterialInstance(it) }
                 contour?.let { engine.destroyMaterial(it) }
-                stoneInstance?.let { engine.destroyMaterialInstance(it) }
-                stone?.let { engine.destroyMaterial(it) }
+                castInstance?.let { engine.destroyMaterialInstance(it) }
+                cast?.let { engine.destroyMaterial(it) }
                 plainLook?.let { engine.destroyColorGrading(it) }
                 greyLook?.let { engine.destroyColorGrading(it) }
                 val em = EntityManager.get()
@@ -739,11 +840,12 @@ class ModelStage(context: Context) {
         resources = null
         contourInstance = null
         contour = null
-        stoneInstance = null
-        stone = null
+        castInstance = null
+        cast = null
         loader = null
         materials = null
         ambient = null
+        skyTexture = null
         plainLook = null
         greyLook = null
         keyLight = 0
@@ -761,14 +863,29 @@ class ModelStage(context: Context) {
     /** The engine, for the pane that has to make a swap chain against it. */
     fun engineOrNull(): Engine? = engine
 
-    /** What the model is dressed in. See [open]. */
-    enum class Look { SCANNED, STONE, CONTOUR }
+    /**
+     * What the model is dressed in. See [open].
+     *
+     * The three materials are one shader and three sets of numbers — see
+     * `cast.mat` — so they are one branch here and not three.
+     */
+    enum class Look {
+        SCANNED,
+        MARBLE,
+        BRONZE,
+        TERRACOTTA,
+        CONTOUR,
+        ;
+
+        /** Whether this look is one of the cast materials. */
+        val isCast: Boolean get() = this == MARBLE || this == BRONZE || this == TERRACOTTA
+    }
 
     private companion object {
         const val TAG = "artiest-3d"
 
         const val CONTOUR_ASSET = "materials/contour.filamat"
-        const val STONE_ASSET = "materials/stone.filamat"
+        const val CAST_ASSET = "materials/cast.filamat"
 
         /** Half the line width in pixels. Under one, so the line is hairline. */
         const val LINE_HALF_PX = 0.38f
@@ -813,37 +930,110 @@ class ModelStage(context: Context) {
         const val AMBIENT_G = 0.16f
         const val AMBIENT_B = 0.17f
 
+        /**
+         * The room the metal reflects: a cool light above, a dark warm floor
+         * below. Linear, and in the same units as [AMBIENT_R] — a share of
+         * Filament's environment intensity, not lux.
+         */
+        const val SKY_SIDE = 32
+        const val SKY_HIGH_R = 0.62f
+        const val SKY_HIGH_G = 0.66f
+        const val SKY_HIGH_B = 0.74f
+        const val SKY_LOW_R = 0.09f
+        const val SKY_LOW_G = 0.08f
+        const val SKY_LOW_B = 0.07f
+
         /** Unbleached plasticine. Warm enough not to read as a screenshot. */
         const val CLAY_R = 0.58f
         const val CLAY_G = 0.55f
         const val CLAY_B = 0.52f
 
         /**
-         * The marble, its veins, and the specks in it.
+         * One of the three materials, as the numbers `cast.mat` asks for.
          *
-         * Measured off the reference the artist put in the pane — a photograph
-         * of an alabaster Virgin — rather than chosen: a lit plane in it is
-         * (214, 204, 190) and a shadowed one (126, 114, 98), which is ivory,
-         * warm, and a long way from the neutral grey this used to be. The veins
-         * are a grey-brown two stops under it and never black; the specks are
-         * nearly black and are the only thing here that is.
+         * A data class and not thirty loose constants, because the three of
+         * them are the same ten questions answered differently and the only way
+         * to see that is to have them written out side by side.
          */
-        const val PALE_R = 0.80f
-        const val PALE_G = 0.77f
-        const val PALE_B = 0.72f
-        const val VEIN_R = 0.36f
-        const val VEIN_G = 0.34f
-        const val VEIN_B = 0.31f
-        const val GRIT_R = 0.13f
-        const val GRIT_G = 0.11f
-        const val GRIT_B = 0.10f
+        data class Recipe(
+            val paleR: Float, val paleG: Float, val paleB: Float,
+            val veinR: Float, val veinG: Float, val veinB: Float,
+            val gritR: Float, val gritG: Float, val gritB: Float,
+            val roughness: Float,
+            val metallic: Float,
+            val veining: Float,
+            val speckling: Float,
+            val mottling: Float,
+            val settling: Float,
+        )
 
         /**
+         * Alabaster, measured off the reference the artist put in the pane — a
+         * photograph of a fourteenth-century Virgin — rather than chosen: a lit
+         * plane in it is (214, 204, 190) and a shadowed one (126, 114, 98),
+         * which is ivory, warm, and a long way from a neutral grey. The veins
+         * are a grey-brown two stops under it and never black; the specks are
+         * nearly black and are the only thing here that is.
+         *
          * Faintly glossy — *"somewhat glossy but not really"*. Polished marble
-         * is nowhere near a mirror and nowhere near chalk; the sheen is broad
-         * and it is broken by the specks, which is [stone.mat]'s business.
+         * is nowhere near a mirror and nowhere near chalk.
          */
-        const val STONE_ROUGHNESS = 0.42f
+        val MARBLE = Recipe(
+            paleR = 0.80f, paleG = 0.77f, paleB = 0.72f,
+            veinR = 0.36f, veinG = 0.34f, veinB = 0.31f,
+            gritR = 0.13f, gritG = 0.11f, gritB = 0.10f,
+            roughness = 0.42f,
+            metallic = 0f,
+            veining = 0.78f,
+            speckling = 1f,
+            mottling = 0.13f,
+            settling = 0f,
+        )
+
+        /**
+         * Bronze with a century on it.
+         *
+         * The metal is the warm copper-gold every founder's alloy is under the
+         * weather; what the eye actually reads at ten paces is the patina over
+         * it, which is why the veining is nearly at its maximum and carries the
+         * green. The specks are the casting pits.
+         *
+         * Metal, so there is no diffuse colour at all: everything a bronze
+         * shows is the room reflected in it, which is exactly why it teaches a
+         * different lesson from marble and is worth having. Smoother than the
+         * stone, because a bronze is polished and a marble is honed.
+         */
+        val BRONZE = Recipe(
+            paleR = 0.60f, paleG = 0.42f, paleB = 0.21f,
+            veinR = 0.15f, veinG = 0.21f, veinB = 0.17f,
+            gritR = 0.05f, gritG = 0.06f, gritB = 0.05f,
+            roughness = 0.46f,
+            metallic = 1f,
+            veining = 0.78f,
+            speckling = 0.7f,
+            mottling = 0.20f,
+            settling = 0.80f,
+        )
+
+        /**
+         * Fired clay: the warm orange of a maquette, and the one of the three
+         * that is *not* uniform.
+         *
+         * Terracotta has no veins to speak of — a trace, and only because a
+         * complete absence of them reads as plastic — and a great deal of body
+         * mottling and pore. Matte, because it is fired and not glazed.
+         */
+        val TERRACOTTA = Recipe(
+            paleR = 0.58f, paleG = 0.29f, paleB = 0.19f,
+            veinR = 0.44f, veinG = 0.21f, veinB = 0.13f,
+            gritR = 0.24f, gritG = 0.13f, gritB = 0.09f,
+            roughness = 0.86f,
+            metallic = 0f,
+            veining = 0.22f,
+            speckling = 1.5f,
+            mottling = 0.42f,
+            settling = 0f,
+        )
 
         /**
          * Screen-space occlusion: how strong, how fast it falls off, and how
