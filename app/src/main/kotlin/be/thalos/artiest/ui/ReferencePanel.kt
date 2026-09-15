@@ -31,6 +31,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,6 +67,7 @@ import androidx.compose.ui.window.PopupProperties
 import be.thalos.artiest.model.ModelStage
 import be.thalos.artiest.ref.RefKind
 import be.thalos.artiest.ref.RefPicture
+import kotlin.math.roundToInt
 
 /**
  * How the picture sits in the pane: the zoom, where it has been dragged to, how
@@ -162,6 +164,19 @@ class PaneView {
     var contour by mutableStateOf(false)
 
     /**
+     * How many rings up the form, and as many across it.
+     *
+     * Twenty is where it started, because that is the number the request came
+     * with and it is a good default — few enough to count and copy onto paper,
+     * many enough to describe the turn of a cheek rather than the turn of a
+     * head. But the right number is not a property of the app, it is a property
+     * of what is being studied and how closely: a whole figure wants fewer, an
+     * ear wants more. So it is a slider, and it lives here with the rest of the
+     * pose so that it survives the panel being rearranged.
+     */
+    var slices by mutableFloatStateOf(DEFAULT_SLICES)
+
+    /**
      * Back to the whole picture, square, in the middle.
      *
      * What the Fit button does — and it deliberately leaves [flipped] and
@@ -187,6 +202,7 @@ class PaneView {
         lighting = false
         clay = false
         contour = false
+        slices = DEFAULT_SLICES
         lightAzimuth = -35f
         lightElevation = 34f
     }
@@ -205,6 +221,21 @@ class PaneView {
     /** A pinch of [zoom], as a ratio. Clamped so a model cannot be lost. */
     fun pinched(zoom: Float) {
         dolly = (dolly * zoom).coerceIn(MIN_DOLLY, MAX_DOLLY)
+    }
+
+    companion object {
+        const val DEFAULT_SLICES = 20f
+
+        /**
+         * Four lines is a box and a hundred and twenty is a mesh.
+         *
+         * The bottom is where the grid stops describing a surface and starts
+         * being a shape of its own; the top is where the app stops drawing
+         * anyway, because the shader fades the lines out once one pixel spans
+         * half a slice rather than showing moire.
+         */
+        const val MIN_SLICES = 4f
+        const val MAX_SLICES = 120f
     }
 }
 
@@ -409,6 +440,34 @@ fun ReferenceBody(
                             },
                     )
                 }
+            }
+        }
+
+        if (isModel && pane.contour) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 2.dp),
+            ) {
+                Icon(
+                    ToolIcons.contour,
+                    "How many lines",
+                    Modifier.size(15.dp),
+                    scheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = pane.slices,
+                    onValueChange = { pane.slices = it },
+                    valueRange = PaneView.MIN_SLICES..PaneView.MAX_SLICES,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    pane.slices.roundToInt().toString(),
+                    fontSize = 11.sp,
+                    color = scheme.onSurface,
+                    modifier = Modifier.width(24.dp),
+                )
             }
         }
 
@@ -677,7 +736,8 @@ fun ReferencePanelCard(
     onAddModel: () -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val forPicture = (maxHeight - CARD_FURNITURE).coerceAtLeast(MIN_PICTURE)
+        val extra = if (pane.contour) SLICE_ROW else 0.dp
+        val forPicture = (maxHeight - CARD_FURNITURE - extra).coerceAtLeast(MIN_PICTURE)
         ReferenceBody(
             pictures = pictures,
             selected = selected,
@@ -969,6 +1029,9 @@ private val STRIP_THUMB_W = 62.dp
 
 /** Header, buttons, strip and the gaps between them. Counted, not guessed. */
 private val CARD_FURNITURE = 130.dp
+
+/** The lines slider, when it is there. Counted the same way as the furniture. */
+private val SLICE_ROW = 34.dp
 
 /** Below this the pane is not a picture any more, so the card stops shrinking it. */
 private val MIN_PICTURE = 90.dp

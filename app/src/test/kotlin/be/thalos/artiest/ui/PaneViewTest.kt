@@ -123,6 +123,22 @@ class PaneViewTest {
         assertTrue(pane.lighting)
     }
 
+    /**
+     * The line count is part of the pose, not of the app: it survives fitting
+     * (you have not asked for a different grid by reframing) and it is cleared
+     * by a new reference (the last model's grid is nobody's idea of this one's).
+     */
+    @Test
+    fun `how many lines is kept by fit and cleared by reset`() {
+        val pane = PaneView()
+        assertEquals(PaneView.DEFAULT_SLICES, pane.slices)
+        pane.slices = 64f
+        pane.fit()
+        assertEquals(64f, pane.slices)
+        pane.reset()
+        assertEquals(PaneView.DEFAULT_SLICES, pane.slices)
+    }
+
     /** A different reference starts clean; that is what `reset` is for. */
     @Test
     fun `reset clears everything a previous reference left`() {

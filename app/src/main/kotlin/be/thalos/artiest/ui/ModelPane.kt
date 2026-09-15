@@ -112,12 +112,13 @@ fun ModelPane(
                 Look(
                     pane.spin, pane.tilt, pane.dolly,
                     pane.lightAzimuth, pane.lightElevation,
-                    pane.grey,
+                    pane.grey, pane.slices,
                 )
             }.collect { look ->
                 stage.aim(look.spin, look.tilt, look.dolly)
                 stage.relight(look.azimuth, look.elevation)
                 stage.grey(look.grey)
+                stage.density(look.slices)
                 frames.ask()
             }
         }
@@ -128,7 +129,7 @@ fun ModelPane(
             if (glb == null) {
                 stage.close()
             } else {
-                stage.open(glb, look(pane))
+                stage.open(glb, look(pane), pane.slices)
                 stage.aim(pane.spin, pane.tilt, pane.dolly)
                 stage.relight(pane.lightAzimuth, pane.lightElevation)
                 stage.grey(pane.grey)
@@ -307,6 +308,7 @@ private data class Look(
     val azimuth: Float,
     val elevation: Float,
     val grey: Boolean,
+    val slices: Float,
 )
 
 /**

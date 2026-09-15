@@ -273,7 +273,7 @@ class ModelStage(context: Context) {
      * frame for a model of the size this library holds, and it cannot be
      * subtly wrong, which the alternative can.
      */
-    fun open(glb: ByteArray, look: Look): Boolean {
+    fun open(glb: ByteArray, look: Look, slices: Float): Boolean {
         if (!start()) return false
         val engine = engine ?: return false
         close()
@@ -301,7 +301,10 @@ class ModelStage(context: Context) {
             when (look) {
                 Look.SCANNED -> Unit
                 Look.CLAY -> applyClay()
-                Look.CONTOUR -> applyContour()
+                Look.CONTOUR -> {
+                    applyContour()
+                    density(slices)
+                }
             }
             loaded = true
             trouble = ""
@@ -378,19 +381,18 @@ class ModelStage(context: Context) {
      * bust whose base and head were separate primitives with separate spacings
      * would have the lines step at the join.
      *
-     * The spacing is a share of the model's own size rather than a number in
-     * metres, so a bust exported in millimetres and one exported in metres both
-     * get about [SLICES] rings up their height.
+     * The spacing itself is [density]'s business, and it is a share of the
+     * model's own size rather than a number in metres — so a bust exported in
+     * millimetres and one exported in metres both get the same number of rings
+     * up their height.
      */
     private fun applyContour() {
         val made = asset ?: return
         val instance = contourInstance ?: run { applyClay(); return }
         val rm = engine?.renderableManager ?: return
-        val spacing = (reach * 2f / SLICES).coerceAtLeast(1e-6f)
         instance.setParameter("clay", CLAY_R, CLAY_G, CLAY_B)
         instance.setParameter("ink", INK_R, INK_G, INK_B)
         instance.setParameter("roughness", 0.88f)
-        instance.setParameter("perUnit", 1f / spacing)
         instance.setParameter("weight", LINE_HALF_PX)
         for (entity in made.renderableEntities) {
             val renderable = rm.getInstance(entity)
@@ -399,6 +401,20 @@ class ModelStage(context: Context) {
                 runCatching { rm.setMaterialInstanceAt(renderable, i, instance) }
             }
         }
+    }
+
+    /**
+     * How many rings, and as many across.
+     *
+     * A parameter on a material instance, so moving the slider is a uniform
+     * written and a frame drawn — not a reload. That is what makes it usable as
+     * a slider rather than as a setting: the grid gets denser under the finger.
+     */
+    fun density(slices: Float) {
+        val instance = contourInstance ?: return
+        val count = if (slices.isFinite()) slices.coerceIn(2f, 400f) else 20f
+        val spacing = (reach * 2f / count).coerceAtLeast(1e-6f)
+        runCatching { instance.setParameter("perUnit", 1f / spacing) }
     }
 
     /**
@@ -667,16 +683,6 @@ class ModelStage(context: Context) {
         const val TAG = "artiest-3d"
 
         const val CONTOUR_ASSET = "materials/contour.filamat"
-
-        /**
-         * About how many rings up the model, and as many across it.
-         *
-         * Twenty is the number the request came with and it is a good one: few
-         * enough that a learner can count them and copy them onto paper, many
-         * enough that they describe the turn of a cheek rather than the turn of
-         * a head.
-         */
-        const val SLICES = 20f
 
         /** Half the line width in pixels. Under one, so the line is hairline. */
         const val LINE_HALF_PX = 0.38f
