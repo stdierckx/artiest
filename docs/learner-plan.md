@@ -1263,10 +1263,64 @@ a photograph.
 
 ### Where the models come from
 
-Poly Haven: 521 CC0 models with a plain JSON API, mostly props, tools and
-furniture, with some sculpture. Not yet searched: Smithsonian Open Access 3D
-(CC0, needs an API key), Three D Scans, Sketchfab's CC0 filter. Poly Haven alone
-is thin on figures, and the figure and anatomy supply is the part still to do.
+> *"Do we have some more models? A skull would be nice! Some animals / animal
+> heads would be nice"*
+
+Twenty-three on the tablet, from two collections, and neither is a scraper's
+prize — both publish a licence against every file, which is the only reason they
+were used.
+
+**Poly Haven**, CC0, a plain JSON API, 521 models: a bull's head, a lion's head,
+a horse's head, a horse, an elephant, a whale, a cat, a gothic figure, a marble
+bust, a shell, a pomegranate, a gas mask, a hand plane, a katana, a brass pot.
+Props, tools and sculpture. No skulls and no anatomy.
+
+**Wikimedia Commons**, searched as `filetype:3d <subject>`: a human skull, a
+hyena skull, a turtle skull, a wallaby skull, a human hand, the Belvedere torso,
+a moa skeleton, a lioness and a horse. The Natural History Museum of the
+University of Pisa has scanned a great many animal skulls and put them there.
+Licences run CC0 to CC BY-SA and are recorded per model beside the files, not
+guessed.
+
+Those arrive as STL, which is the format museums publish and the wrong one for a
+tablet: a hyena skull is ninety megabytes and 1.8 million triangles. So
+`tools/stl-to-glb.py` thins them by vertex clustering — the box is cut into a
+grid, every vertex in a cell becomes the average of them, and triangles whose
+corners collapse together disappear. It is not the best decimation there is, and
+at these sizes the difference is invisible: what survives is the form, which is
+the whole of what is being looked at. Ninety megabytes becomes 2.2, and 1.8
+million triangles become 93 thousand, in about three seconds.
+
+The orientation of twenty-three scans was checked without opening twenty-three
+models on the tablet, by rendering each one to a small shaded picture on the PC
+and reading the sheet. STL carries no idea of which way is up, and a bust lying
+on its back is not a bust anybody will use.
+
+**Not used, and why.** Three D Scans has the most beautiful sculpture scans
+anywhere and states no licence beyond the words *"free 3D scan archive"*, which
+is not enough for this repository's rule. Smithsonian Open Access is CC0 and
+exactly the right material — skulls, fossils, animals — and the whole site sits
+behind Cloudflare and refuses a script. Sketchfab's CC0 filter needs an OAuth
+token to download.
+
+Commons rate-limits by volume rather than by request: after about three hundred
+megabytes everything comes back 429 for a long while. Four more from the wanted
+list — Nefertiti, a bust of Augustus, a tortoise shell, a fallow deer — are
+still worth fetching another day.
+
+### The cap that models found
+
+A reference library is capped, and the cap is the number of *references* rather
+than of pictures — so a library of a hundred and ninety-nine photographs that
+gains twenty-three models is suddenly over it. That was worth finding, because
+of *how* it was over it: `list` applied the cap to the raw directory listing
+before reading anything, to save reading the rest. The saving was a few hundred
+four-kilobyte files. The cost was that whichever the file system happened to
+name last went invisible — which, on the day the models arrived, was the models
+nobody had looked at yet.
+
+It now sorts first and caps after, so what goes over the cap is the oldest, and
+the cap is four hundred.
 
 ## Sources
 

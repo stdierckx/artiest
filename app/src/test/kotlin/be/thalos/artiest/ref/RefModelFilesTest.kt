@@ -159,6 +159,30 @@ class RefModelFilesTest {
         assertEquals(emptyList(), files.list())
     }
 
+    /**
+     * Over the cap it is the oldest that go, not whichever the file system
+     * named last.
+     *
+     * The defect this pins down was live: a library of a hundred and ninety-nine
+     * pictures gained twenty-three models, went over the cap, and the cap was
+     * being applied to the raw directory listing — so what disappeared was
+     * arbitrary, and what disappeared first was the models nobody had seen yet.
+     */
+    @Test
+    fun `over the cap the oldest go`() {
+        val files = files()
+        val total = RefFiles.MAX_PICTURES + 12
+        for (i in 0 until total) {
+            File(dir, "r%04d.jpg".format(i)).writeBytes(byteArrayOf(1, 2, 3))
+            File(dir, "r%04d.txt".format(i)).writeText("added ${1000L + i}\n")
+        }
+        val listed = files.list()
+        assertEquals(RefFiles.MAX_PICTURES, listed.size)
+        // Newest first, and the twelve oldest are the ones missing.
+        assertEquals(1000L + total - 1, listed.first().addedMs)
+        assertEquals(1000L + 12, listed.last().addedMs)
+    }
+
     /** Pictures and models sort together, newest first, and neither hides the other. */
     @Test
     fun `both kinds share one list`() {

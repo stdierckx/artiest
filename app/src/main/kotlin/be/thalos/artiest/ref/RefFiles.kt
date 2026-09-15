@@ -70,9 +70,16 @@ class RefFiles(private val dir: File) {
     fun list(): List<RefPicture> = runCatching {
         val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(META) }
             ?: return emptyList()
-        files.take(MAX_PICTURES)
-            .mapNotNull { read(it) }
+        // Sorted *before* the cap, and that order matters. The cap used to be
+        // applied to the raw directory listing to save reading the rest, which
+        // was a saving of a few hundred four-kilobyte files and a cost of the
+        // wrong ones: whichever the file system happened to name last went
+        // invisible, rather than the oldest. Adding twenty-three models to a
+        // library of a hundred and ninety-nine pictures is exactly the case
+        // where that shows, and it showed.
+        files.mapNotNull { read(it) }
             .sortedByDescending { it.addedMs }
+            .take(MAX_PICTURES)
     }.getOrDefault(emptyList())
 
     /** Every tag in use, in alphabetical order, each one once. */
@@ -376,8 +383,19 @@ class RefFiles(private val dir: File) {
         /** High enough that the blocks are invisible, low enough to be the point. */
         const val QUALITY = 92
 
-        /** A library, not an archive. Forty is already more than anybody browses. */
-        const val MAX_PICTURES = 200
+        /**
+         * A library, not an archive.
+         *
+         * Forty is already more than anybody browses, and this is ten times
+         * that — a ceiling rather than a target. It is the number of *references*
+         * and not of pictures: a 3D model counts against it too, which is why it
+         * moved when models arrived and a two-hundred-picture library suddenly
+         * had two hundred and twenty-two things in it.
+         *
+         * Over the cap the **oldest** go, which is the whole reason [list]
+         * sorts first.
+         */
+        const val MAX_PICTURES = 400
 
         const val MAX_LABEL = 60
         const val MAX_TAG = 24
