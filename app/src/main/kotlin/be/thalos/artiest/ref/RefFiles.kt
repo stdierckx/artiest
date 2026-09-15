@@ -115,7 +115,7 @@ class RefFiles(private val dir: File) {
             id = id,
             label = label,
             tags = tags,
-            addedMs = System.currentTimeMillis(),
+            addedMs = freshest(),
             widthPx = bitmap.width,
             heightPx = bitmap.height,
             bytes = image.length(),
@@ -193,7 +193,7 @@ class RefFiles(private val dir: File) {
             kind = RefKind.MODEL,
             label = label,
             tags = tags,
-            addedMs = System.currentTimeMillis(),
+            addedMs = freshest(),
             bytes = file.length(),
         )
         if (!write(model)) {
@@ -346,6 +346,27 @@ class RefFiles(private val dir: File) {
             }
         }
         return RefPicture(id, kind, label, tags, added, w, h, bytes)
+    }
+
+    /**
+     * The stamp a reference added now should carry: the clock, unless something
+     * already in the library claims to be newer.
+     *
+     * The list is newest first, so a reference that is added has to be the
+     * first one or the artist will not find what they just added. Ordinarily
+     * the clock says that on its own. It stopped saying it the day a batch of
+     * models was written in with stamps a week ahead — which was itself done to
+     * put those models above a library of pictures whose stamps were ahead of
+     * the clock too — and everything imported after that landed silently
+     * underneath two hundred things.
+     *
+     * So it is a rule now rather than an assumption: what has just been added
+     * goes to the front, whatever dates the rest of the library is carrying.
+     */
+    private fun freshest(): Long {
+        val now = System.currentTimeMillis()
+        val newest = list().firstOrNull()?.addedMs ?: 0L
+        return if (newest >= now) newest + 1 else now
     }
 
     /** Newlines out, because the format is one line per idea. */

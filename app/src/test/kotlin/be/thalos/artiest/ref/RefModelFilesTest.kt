@@ -197,4 +197,26 @@ class RefModelFilesTest {
         val ids = files.list().map { it.id }
         assertEquals(listOf(model.id, picture.id), ids)
     }
+
+    /**
+     * What has just been added is first, whatever dates the rest of the library
+     * carries.
+     *
+     * The library on the tablet holds references stamped a week into the future
+     * — pictures harvested with their own dates, and a batch of models written
+     * in above them on purpose — and everything imported afterwards landed
+     * silently underneath two hundred things. A clock is not an ordering.
+     */
+    @Test
+    fun `a new reference goes to the front of a library dated in the future`() {
+        val files = files()
+        val ahead = System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000L
+        File(dir, "m9.glb").writeBytes(glb())
+        File(dir, "m9.txt").writeText("added $ahead\nkind model\nlabel from the future\n")
+        assertEquals("m9", files.list().first().id)
+
+        val fresh = assertNotNull(files.addModel(glb(), "just now", emptyList()))
+        assertTrue(fresh.addedMs > ahead)
+        assertEquals(fresh.id, files.list().first().id)
+    }
 }
