@@ -54,14 +54,18 @@ class PaneViewTest {
         assertTrue(pane.tilt >= -85f, "tilt ran to ${pane.tilt}")
     }
 
+    /**
+     * The model is not allowed past its poles and the light is, and that is the
+     * difference between a thing standing on a table and a lamp on a stand.
+     * `LightBallTest` is where the light's own arithmetic is pinned down.
+     */
     @Test
-    fun `the light stops short of straight above and below too`() {
+    fun `the light has no poles to stop at`() {
         val pane = PaneView()
         pane.lighting = true
-        pane.dragged(0f, 100_000f)
-        assertTrue(pane.lightElevation <= 80f)
-        pane.dragged(0f, -200_000f)
-        assertTrue(pane.lightElevation >= -80f)
+        repeat(40) { pane.dragged(0f, -90f) }
+        assertTrue(pane.lightElevation.isFinite())
+        assertTrue(pane.lightAzimuth.isFinite())
     }
 
     @Test

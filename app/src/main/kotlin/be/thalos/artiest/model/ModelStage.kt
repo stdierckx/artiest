@@ -459,7 +459,11 @@ class ModelStage(context: Context) {
      */
     fun relight(azimuth: Float, elevation: Float) {
         val lm = engine?.lightManager ?: return
-        val e = elevation.coerceIn(-80f, 80f)
+        // Not clamped. The lamp is on a ball and the ball has a top and a
+        // bottom, so a light directly overhead and a light directly underneath
+        // are both things the artist can ask for -- and underlighting is a
+        // study in its own right, not an accident to be guarded against.
+        val e = if (elevation.isFinite()) elevation else 0f
         point(lm, keyLight, azimuth, e)
         point(lm, fillLight, azimuth + 130f, e * 0.3f - 8f)
         point(lm, rimLight, azimuth + 200f, e * 0.5f + 18f)

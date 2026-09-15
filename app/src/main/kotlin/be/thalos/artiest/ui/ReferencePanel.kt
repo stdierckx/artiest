@@ -207,11 +207,26 @@ class PaneView {
         lightElevation = 34f
     }
 
-    /** A drag of [dx], [dy] pane pixels, into whichever of the two it is moving. */
+    /**
+     * A drag of [dx], [dy] pane pixels, into whichever of the two it is moving.
+     *
+     * The model and the light are turned by different arithmetic on purpose.
+     * The model is turned the way a model on a turntable turns — a drag across
+     * spins it about its own upright axis and a drag down tips it — because
+     * that is what the hand expects of an object standing on a table, and it
+     * keeps the model the right way up without anybody having to work at it.
+     *
+     * The light has no up. It is somewhere on a sphere around the model and it
+     * has to be able to get anywhere on that sphere, including over the top and
+     * round the back, so it is turned by an arcball instead: see [turnedLight],
+     * and see the tablet report that is written down there.
+     */
     fun dragged(dx: Float, dy: Float) {
         if (lighting) {
-            lightAzimuth -= dx * LIGHT_PER_PX
-            lightElevation = (lightElevation + dy * LIGHT_PER_PX).coerceIn(-80f, 80f)
+            val (azimuth, elevation) =
+                turnedLight(lightAzimuth, lightElevation, dx, dy, spin, tilt)
+            lightAzimuth = azimuth
+            lightElevation = elevation
         } else {
             spin -= dx * SPIN_PER_PX
             tilt = (tilt + dy * SPIN_PER_PX).coerceIn(-85f, 85f)
@@ -1044,12 +1059,10 @@ private const val MAX_ZOOM = 12f
  *
  * A third of a degree, so a drag across a three-hundred-pixel pane is a
  * hundred degrees: rather more than a quarter turn in one comfortable sweep,
- * which is what makes spinning a model feel like handling it. The light moves
- * slower than the model does, because it is aimed rather than handled and
- * overshooting a rim light is more annoying than overshooting an angle.
+ * which is what makes spinning a model feel like handling it. The light has its
+ * own rate, in `LightBall`, because it is turned by different arithmetic.
  */
 private const val SPIN_PER_PX = 0.34f
-private const val LIGHT_PER_PX = 0.22f
 
 /** Whole model in the pane, up to an eyelash. */
 private const val MIN_DOLLY = 0.4f

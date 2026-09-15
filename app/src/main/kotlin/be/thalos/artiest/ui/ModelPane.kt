@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.view.Choreographer
 import android.view.Surface
 import android.view.TextureView
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -21,9 +20,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.sp
@@ -32,9 +28,6 @@ import be.thalos.artiest.model.ModelStage
 import be.thalos.artiest.ref.RefFiles
 import com.google.android.filament.SwapChain
 import com.google.android.filament.android.UiHelper
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 /**
  * The reference pane, when what is in it is a model rather than a picture.
@@ -170,7 +163,7 @@ fun ModelPane(
                 },
         )
 
-        if (pane.lighting) LightMark(pane, Modifier.fillMaxSize())
+        if (pane.lighting) LightBall(pane, Modifier.fillMaxSize())
 
         if (glb == null || !stage.loaded) {
             Text(
@@ -182,116 +175,6 @@ fun ModelPane(
         }
     }
 }
-
-/**
- * Where the light is standing, drawn over the model while it is being moved.
- *
- * Dragging two angles you cannot see is dragging in the dark — reported from
- * the tablet as *"it is unclear how dragging influences the light position"*,
- * and it was: the only feedback was the shading itself, which is exactly the
- * thing a beginner is still learning to read.
- *
- * So the lamp is drawn. The dotted circle is the whole sphere the light can
- * stand on, seen flat: the middle is the light straight in line with the eye
- * and the rim is the light square to the side. A filled sun is a light on this
- * side of the model, a hollow one is a light behind it — which is the reading
- * that matters, because a hollow sun explains a face gone dark far better than
- * a shaded cheek does.
- *
- * All of it is arithmetic on the four angles the pane already holds. The
- * renderer is not asked and nothing is added to the scene, so a marker cannot
- * cost a frame or get out of step with the light it is drawing.
- */
-@Composable
-private fun LightMark(pane: PaneView, modifier: Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    val sun = scheme.primary
-    val hint = scheme.onSurfaceVariant.copy(alpha = 0.35f)
-    Canvas(modifier) {
-        val radius = minOf(size.width, size.height) * 0.40f
-        val centre = Offset(size.width / 2f, size.height / 2f)
-
-        // The sphere the lamp walks on, seen end-on. Dotted, because it is a
-        // guide and not a thing in the picture.
-        drawCircle(
-            color = hint,
-            radius = radius,
-            center = centre,
-            style = Stroke(
-                width = 1.5f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 10f)),
-            ),
-        )
-
-        val at = lightOnScreen(pane)
-        val here = centre + Offset(at.x * radius, -at.y * radius)
-        val front = at.z >= 0f
-        val glyph = 11f
-
-        for (i in 0 until 8) {
-            val angle = i * (Math.PI.toFloat() / 4f)
-            val from = Offset(cos(angle), sin(angle)) * (glyph * 1.45f)
-            val to = Offset(cos(angle), sin(angle)) * (glyph * 2.05f)
-            drawLine(
-                color = if (front) sun else hint,
-                start = here + from,
-                end = here + to,
-                strokeWidth = 2f,
-                cap = StrokeCap.Round,
-            )
-        }
-        if (front) {
-            drawCircle(sun, glyph, here)
-        } else {
-            drawCircle(hint, glyph, here, style = Stroke(width = 2.4f))
-        }
-    }
-}
-
-/**
- * The light direction in the camera's own frame: across, up, and towards.
- *
- * The camera looks at the middle of the model from [PaneView.spin] and
- * [PaneView.tilt], so its three axes fall out of those two angles, and the
- * light vector is projected onto them. `z` is the only one that is not a
- * position: it is positive when the lamp is on the same side of the model as
- * the eye.
- */
-private fun lightOnScreen(pane: PaneView): Offset3 {
-    val a = pane.lightAzimuth * DEG
-    val e = pane.lightElevation * DEG
-    val lx = cos(e) * sin(a)
-    val ly = sin(e)
-    val lz = cos(e) * cos(a)
-
-    val s = pane.spin * DEG
-    val t = pane.tilt * DEG
-    val ex = cos(t) * sin(s)
-    val ey = sin(t)
-    val ez = cos(t) * cos(s)
-
-    // Right is the eye direction crossed with world up, which for a camera that
-    // never rolls is all the basis needs. Tilt is clamped away from straight
-    // down, so this cannot be the zero vector.
-    val len = sqrt(ez * ez + ex * ex).coerceAtLeast(1e-4f)
-    val rx = ez / len
-    val rz = -ex / len
-
-    // Up is right crossed with forward, and forward is minus the eye direction.
-    val ux = rz * ey
-    val uy = rz * ex - rx * ez
-    val uz = -rx * ey
-
-    return Offset3(
-        x = lx * rx + lz * rz,
-        y = lx * ux + ly * uy + lz * uz,
-        z = lx * ex + ly * ey + lz * ez,
-    )
-}
-
-private data class Offset3(val x: Float, val y: Float, val z: Float)
-
-private const val DEG = (Math.PI / 180.0).toFloat()
 
 /** Which of the three ways of dressing the model the two switches mean. */
 private fun look(pane: PaneView): ModelStage.Look = when {

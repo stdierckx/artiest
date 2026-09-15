@@ -1106,22 +1106,69 @@ The spacing is a share of the model's own size, so a bust exported in
 millimetres and one exported in metres both get about twenty rings up their
 height.
 
+### How many lines
+
+> *"The wireframe function is great!! What would make it even better is, being
+> able to define how many wireframes you want to see. We said every 20, but i
+> want to adjust that."*
+
+Right, and the reason is worth stating: the number is not a property of the app,
+it is a property of what is being studied and how closely. A whole figure wants
+fewer lines than a head, and an ear wants more than either. Twenty is a good
+place to start and a bad place to be stuck.
+
+A slider appears under the pane while the contour is on, from four to a hundred
+and twenty. Four is where the grid stops describing a surface and starts being a
+shape of its own; a hundred and twenty is past where the shader gives up anyway,
+because once one pixel spans half a slice there is no line left to draw, only
+moire. It is a parameter on the material instance rather than a reload, so the
+grid gets denser under the finger.
+
 ### Where the light is
 
 > *"It would also be very useful to indicate where the light source is with an
 > icon/object because it is unclear how dragging influences the light position."*
 
 It was, and there was nothing to read but the shading itself — which is the one
-thing a beginner is still learning to read. So while the light is being moved
-the pane draws the lamp: a dotted circle for the whole sphere the light can
-stand on seen flat, and a sun on it. Middle is a light in line with the eye, rim
-is a light square to the side, **filled** is a light on this side of the model
-and **hollow** is a light behind it. A hollow sun explains a face gone dark far
-better than a shaded cheek does.
+thing a beginner is still learning to read. The first answer was a sun on a flat
+dotted circle. It was better, and it was still wrong, and the tablet said so:
 
-It is arithmetic on the four angles the pane already holds — where the camera is
-and where the light is — so nothing is added to the 3D scene and the marker
-cannot get out of step with the light it is drawing.
+> *"The light icon is already better! BUT the movement of the light is still
+> hard to understand and sometimes does not match the icon of the light. […] I
+> have the feeling i want to have 3 axis to move the light on..."*
+
+Two separate faults, and the second one is the interesting one.
+
+**It did not match because the drag and the marker were in different frames.**
+The drag added degrees to an azimuth, which turns the lamp about the *world's*
+up axis; the marker was drawn in the *camera's*. With the model turned half
+round, those disagree — dragging right moved the sun left. So the drag is now an
+arcball: the lamp is turned about the axis the finger is turning it about, which
+means the sun goes where the finger goes at every camera angle. On the far side
+of the ball it goes the other way, which is not a fault but what the far side of
+a trackball does under a thumb, and which the drawing now makes legible.
+
+There was a second bug inside the first, found by tracing rather than by eye.
+The obvious arcball axis is `light × drag`, the one whose rotation moves the
+lamp exactly along the drag. It reverses as the lamp passes the drag direction,
+so a lamp dragged straight up climbed to the top of the sphere and then bounced,
+for ever: the trace stuck at 80 degrees and flipped between azimuth 0 and 180
+for seventeen steps. An axis taken from the drag alone — `drag × forward` — has
+no such hole, because it is the same axis wherever the lamp is. The lamp now
+sails over the top, down the back and round again.
+
+**And a flat disc cannot say which side.** A lamp in front and a lamp behind at
+mirrored heights land on the same spot, and no drawing distinguishes them. So
+the ball is drawn as a ball: three great circles — the model's level, upright
+and front-to-back planes, which is the three axes the request was reaching for —
+with the near half of each solid and the far half faint, a dashed stand from the
+model to the lamp that foreshortens as it goes round, and a sun that is filled
+in front and hollow behind. A hollow sun explains a face gone dark far better
+than a shaded cheek does.
+
+All of it is arithmetic on the four angles the pane already holds, so nothing is
+added to the 3D scene, the marker cannot get out of step with the light it draws,
+and it cannot cost a rendered frame.
 
 ### Filament, and why a dependency rather than a reimplementation
 
