@@ -1,43 +1,45 @@
-// Grey stone, made in the shader rather than fetched from a picture.
+// Marble, made in the shader rather than fetched from a picture.
 //
 // Lr12. Half the scans in a free model library arrive with no material on them
 // at all. glTF says a primitive with no material is plain white, and white is
-// the one colour that cannot be drawn from: the pane's background is a pale
-// card, so a white bust on it has no edge, and a white surface lit by a white
-// key light has almost no shading left in it either -- the lightest plane and
-// the second lightest plane are both at the top of the range with nowhere to
-// separate. The artist is being asked to study form in the one value where
-// form does not show.
+// the one colour that cannot be drawn from: a white surface lit by a white key
+// light has almost no shading left in it -- the lightest plane and the second
+// lightest plane both sit at the top of the range with nowhere to separate. The
+// artist is being asked to study form in the one value where form does not
+// show.
 //
-// What a life room puts in front of a student instead is a plaster cast or a
-// stone bust, and the reason is the same reason it works here: a mid grey has
-// the whole range above and below it, so every plane lands somewhere different.
+// What a life room puts in front of a student instead is a marble or a plaster
+// cast, and this is a copy of one: the reference for it is a photograph of a
+// fourteenth-century alabaster Virgin, chosen by the artist and measured off
+// the tablet rather than remembered.
 //
-// ## Why it is computed and not a photograph of granite
+// ## Why it is computed and not a photograph of marble
 //
 // A texture would need two things this repo will not have. It would need the
-// picture itself -- a tiling stone image, of a size worth shipping, under a
+// picture itself -- a tiling marble image, of a size worth shipping, under a
 // licence that survives being in an Apache-2.0 app -- and it would need UV
 // coordinates on the model, which a scan that arrived with no material also
 // usually has none of. Neither problem exists if the stone is a function of
 // where the point is on the form: it needs no file, no licence and no UVs, it
 // never repeats, and it costs a few dozen arithmetic instructions a pixel.
 //
-// ## What it is made of
+// ## What marble is made of, in the order it is visible
 //
-// Three things, in the order they are visible from across a room:
+//  - it is nearly white, and warm: a lit plane in the reference measures
+//    (214, 204, 190) and a shadowed one (126, 114, 98), so the whole thing is
+//    ivory and not grey, and the range between light and shadow is enormous;
+//  - the veins are soft, wide and wandering -- *nerves*, in the artist's word
+//    -- and they are a shade or two of grey-brown, never black. They are
+//    warped, because a vein that marches in a straight band is a deckchair;
+//  - the specks are few, dark, sharp and clustered here and there. Uniform
+//    speckle over the whole surface is granite or concrete, which is what this
+//    material was before this pass and what it read as;
+//  - it is faintly glossy, but only faintly, and the sheen is broken where the
+//    specks are, which is most of what tells the eye it is stone and not resin.
 //
-//  - the cloud: broad soft unevenness, a shade or two, the mottling any cut
-//    stone has and the thing that stops a plane reading as flat paint;
-//  - the veins: thin darker seams, from a sine through the form bent by that
-//    same noise, which is the oldest trick for marble and still the one that
-//    looks like marble;
-//  - the grain: sand-sized speckle, in the colour and in the roughness both, so
-//    the highlight breaks up instead of sliding about like wet plastic.
-//
-// The grain fades out as the pixels get bigger than the grain is, for the
-// reason the contour lines do: once one pixel spans several speckles there is
-// no speckle left to draw, only a shimmer that crawls when the model turns.
+// The specks fade out as the pixels get bigger than they are, for the reason
+// the contour lines do: once one pixel spans several of them there is nothing
+// left to draw but a shimmer that crawls when the model turns.
 material {
     name : stone,
     shadingModel : lit,
@@ -48,10 +50,12 @@ material {
     // made the stone slide about under the artist's finger.
     variables : [ formPosition ],
     parameters : [
-        // The two ends of the stone's range. Everything drawn is between them.
+        // The stone itself, the colour of its veins, and the colour of the
+        // specks in it.
         { type : float3, name : pale },
-        { type : float3, name : dark },
-        // One unit is the model's own half-size, so the same stone lands on a
+        { type : float3, name : vein },
+        { type : float3, name : grit },
+        // One unit is the model's own half-size, so the same marble lands on a
         // bust exported in millimetres and one exported in metres.
         { type : float,  name : perUnit },
         { type : float,  name : roughness }
@@ -120,44 +124,75 @@ fragment {
                    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
     }
 
-    // Three octaves and not five. The fourth and fifth are below the size of a
-    // pixel on a pane this small, so they cost a third of the shader to draw
-    // nothing but shimmer.
+    // Two octaves and not five. Every octave is eight hashes a pixel, and the
+    // third one here is already below the size of a pixel on a pane this
+    // small: it costs a fifth of the shader to draw nothing but shimmer.
+    // Measured while turning a model, which is the only moment this shader is
+    // asked for sixty frames a second.
     float cloud(highp vec3 p) {
-        float sum = 0.0;
-        float amount = 0.5;
-        for (int i = 0; i < 3; i++) {
-            sum += amount * lump(p);
-            p *= 2.07;
-            amount *= 0.5;
-        }
-        return sum;
+        // Scaled back up to 0..1, so the thresholds that read it are about the
+        // middle of its range and not about two thirds of it.
+        return (0.5 * lump(p) + 0.25 * lump(p * 2.07)) * 1.3333;
+    }
+
+    // One family of veins: a wide slow band, bent hard by the noise before it
+    // is measured.
+    //
+    // The bending is the whole trick, and it is why this is not the sine it
+    // looks like. A sine on its own gives parallel stripes at a fixed angle,
+    // which reads as fabric. Displacing its argument by several radians of
+    // noise turns the same stripes into something that wanders, forks and
+    // occasionally doubles back, which is what a vein does. `edge` sets how
+    // much of each period survives as a vein: high, so most of the stone is
+    // clear and the veins are a minority of it.
+    float nerve(highp float phase, float bend, float edge) {
+        float band = sin(phase + bend);
+        return smoothstep(edge, 1.0, 0.5 + 0.5 * band);
     }
 
     void material(inout MaterialInputs material) {
         prepareMaterial(material);
 
-        vec3 p = variable_formPosition.xyz * materialParams.perUnit;
+        highp vec3 p = variable_formPosition.xyz * materialParams.perUnit;
 
-        // The broad mottling, and the seams bent by it.
-        float drift = cloud(p * 2.3);
-        float seam = sin((p.x * 0.7 + p.y * 1.9 + p.z * 0.5) * 4.4 + drift * 7.0);
-        // Raised to a power, so the pale stone is most of the surface and the
-        // dark seams are thin. A plain sine would be half dark, which is a
-        // zebra and not a marble.
-        seam = pow(0.5 + 0.5 * seam, 9.0);
+        // Two noise fields at the scale of the whole form: one bends the veins,
+        // the other decides where the specks gather.
+        float drift = cloud(p * 1.6);
+        float spread = cloud(p * 6.0);
 
-        // The speckle, and the fade that stops it crawling when it is smaller
-        // than a pixel.
-        highp vec3 sand = p * 60.0;
-        float step = max(fwidth(sand.x), fwidth(sand.y));
-        float grain = (lump(sand) - 0.5) * (1.0 - smoothstep(0.30, 0.85, step));
+        // Two families of veins crossing at a shallow angle, the second finer
+        // and fainter, so they read as a network rather than as a comb.
+        float wide = nerve((p.x * 1.2 + p.y * 2.1 - p.z * 0.8) * 3.4, (drift - 0.50) * 7.0, 0.80);
+        float fine = nerve((p.x * 3.1 - p.y * 1.4 + p.z * 2.6) * 5.6, (spread - 0.50) * 8.0, 0.88);
+        float veins = clamp(wide + 0.55 * fine, 0.0, 1.0);
 
-        float tone = clamp(0.30 + 0.18 * drift + 0.20 * seam + 0.46 * grain, 0.0, 1.0);
-        material.baseColor = vec4(mix(materialParams.pale, materialParams.dark, tone), 1.0);
-        // Rougher in the pits, so the key light's sheen is broken the way it is
-        // on stone and not smooth the way it is on a plastic toy.
-        material.roughness = clamp(materialParams.roughness + 0.22 * grain, 0.35, 1.0);
+        // The specks: a fine noise cut near its top so only the peaks survive,
+        // which is what makes them dots rather than a haze, and then thinned
+        // where `spread` says the stone is clean.
+        highp vec3 fines = p * 90.0;
+        float across = max(fwidth(fines.x), fwidth(fines.y));
+        float legible = 1.0 - smoothstep(0.30, 0.85, across);
+        float specks = smoothstep(0.80, 0.93, lump(fines))
+                     * mix(0.15, 1.0, smoothstep(0.34, 0.70, spread))
+                     * legible;
+
+        // A hint of unevenness in the body of the stone -- a couple of per cent,
+        // because marble is not mottled: it is nearly uniform, and reads as
+        // stone because of what little of it is not. It is the speck field
+        // read again rather than a third noise, which is two hashes instead of
+        // sixteen for a difference no eye could name.
+
+        float body = (lump(fines * 0.09) - 0.46) * 0.13 * legible;
+        vec3 colour = materialParams.pale * (1.0 + body);
+        colour = mix(colour, materialParams.vein, veins * 0.78);
+        colour = mix(colour, materialParams.grit, specks);
+
+        material.baseColor = vec4(colour, 1.0);
+        // Faintly glossy, and duller in the specks and along the veins -- a
+        // sheen that breaks is what separates stone from resin.
+        material.roughness = clamp(
+            materialParams.roughness + 0.34 * specks + 0.10 * veins - 0.35 * body,
+            0.18, 1.0);
         material.metallic = 0.0;
     }
 }

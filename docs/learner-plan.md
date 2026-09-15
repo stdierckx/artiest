@@ -1445,6 +1445,71 @@ which is right for a photograph and wrong for something that is going to be
 copied by eye: it returns the lit planes within a few values of each other. The
 S-curve pulls them apart again around mid grey, which is where the drawing is.
 
+
+### From grey stone to marble, against a photograph
+
+> *"Could we make a higher quality material than what it is now? Like more
+> marble like? --> see the reference picture i have open on the tablet now. It
+> is somewhat glossy but not really. Has some black specks here and there, has
+> some gray nerves running through. has high contrast. Shows the tiny details of
+> the forms really well."*
+
+The reference was a photograph of a fourteenth-century alabaster Virgin, open in
+the pane while the question was asked, so the material was not designed from
+memory — it was measured off that picture. A lit plane in it is (214, 204, 190)
+and a shadowed one (126, 114, 98): ivory, warm, and a long way from the neutral
+mid grey the stone had been. Its middle value is 182 against our 134. It is a
+far lighter, far warmer, far more contrasted object than what we had, and the
+grain over it is not a grain at all.
+
+So four things changed.
+
+**The colour.** Near-white and warm, with veins a couple of stops under it and
+never black, and specks that are nearly black and are the only thing in the
+material that is. Ours now measures (214, 208, 198) in its brightest twentieth
+against the reference's (214, 204, 190), with the middle at 176 against 182.
+
+**The specks became specks.** An even speckle over every square millimetre is
+granite or cast concrete, which is what the material read as. Marble is clean,
+with dark flecks *here and there*: a fine noise cut near its top so that only
+the peaks survive, thinned again by a slower field that decides where the stone
+is dirty and where it is not. Three per cent of the surface, not all of it.
+
+**The veins became veins.** A sine gives parallel stripes, which reads as
+fabric; displacing its argument by several radians of noise turns the same
+stripes into something that wanders and forks. Two families at a shallow angle,
+the second finer and fainter. The amount took three passes on the tablet — the
+first was so strong it read as dirt, the second so subtle it had vanished, and
+what is there now is visible on a smooth belly or a cranium and invisible to
+anyone not looking for it, which is what a vein in alabaster actually does.
+
+**The light gained crevices.** Screen-space ambient occlusion, which is the
+darkening where two surfaces come close and the reason the reference photograph
+shows a fold of drapery and a curl of hair so plainly. No directional light
+produces it. It is half resolution at medium quality, its radius is a share of
+the model's own size rather than a number in metres, and an A/B on the tablet
+shows exactly where it lands: in the eye sockets, under the zygomatic arches
+and inside the nasal opening, five per cent of the pixels by more than eight
+values.
+
+### What that cost, and the half of it that was given back
+
+Measured while turning a model, which is the only moment this shader is asked
+for sixty frames a second: 29 ms a frame, 20 ms of it on the GPU, 19% of frames
+janky. That is a reference pane spending more of the tablet than the drawing
+next to it.
+
+Nearly all of it was noise. Four fractal fields at three octaves each is eighty
+hashes a pixel, and two of those octaves were finer than a pixel on a pane this
+size — they cost a fifth of the shader to draw a shimmer. Two octaves, one field
+reused for two jobs, and the ambient occlusion at half resolution: **17 ms a
+frame, 10 ms of it on the GPU, 1% janky.** Half, for a picture that cannot be
+told apart from the other one.
+
+And the thing that must not regress, checked three times in a row in both stone
+and contour mode: **zero frames in five idle seconds.** A reference that is
+being looked at and not touched still costs nothing.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was

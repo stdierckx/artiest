@@ -174,6 +174,32 @@ class ModelStage(context: Context) {
                 v.isPostProcessingEnabled = true
                 v.dithering = View.Dithering.TEMPORAL
                 v.setShadowingEnabled(true)
+                // The crevices, and the reason the reference photograph reads
+                // the way it does. A key light and a shadow map give the big
+                // forms; what tells the eye about a fold of drapery, a curl of
+                // hair or the corner of an eye socket is the darkening where
+                // two surfaces come close, and no directional light can produce
+                // it. This is the cheapest thing in the frame that makes a
+                // model look carved rather than moulded -- and it costs nothing
+                // at all when nothing is moving, because nothing is drawn.
+                v.setAmbientOcclusionOptions(
+                    View.AmbientOcclusionOptions().apply {
+                        enabled = true
+                        intensity = AO_STRENGTH
+                        power = AO_FALLOFF
+                        // Half resolution and medium quality. It is a wash of
+                        // darkening in the crevices of a model a few hundred
+                        // pixels across, not an edge anyone will look at, and
+                        // full resolution costs four times as much for a
+                        // difference that does not survive the upsample.
+                        quality = View.QualityLevel.MEDIUM
+                        resolution = 0.5f
+                        // Set again for each model, in `measure`: a radius is a
+                        // distance, and these models are anything from a skull
+                        // normalised to one unit to a bust exported in metres.
+                        radius = AO_REACH
+                    },
+                )
             }
 
             loadOurMaterials(engine)
@@ -242,7 +268,7 @@ class ModelStage(context: Context) {
 
         fillLight = em.create()
         LightManager.Builder(LightManager.Type.DIRECTIONAL)
-            .color(0.82f, 0.88f, 1.0f)
+            .color(0.95f, 0.95f, 1.0f)
             .intensity(FILL_LUX)
             .direction(0f, -1f, -1f)
             .castShadows(false)
@@ -346,6 +372,16 @@ class ModelStage(context: Context) {
         if (!radius.isFinite() || radius <= 0f) radius = 1f
         reach = maxOf(half[0], half[1], half[2])
         if (!reach.isFinite() || reach <= 0f) reach = radius
+        // The occlusion radius is a distance in the model's own world, so it
+        // has to be a share of the model rather than a number: at a fixed
+        // radius a skull normalised to one unit and a bust exported in metres
+        // get occlusion at two completely different scales, and one of them is
+        // a grey wash and the other is nothing at all.
+        view?.let { v ->
+            val options = v.ambientOcclusionOptions
+            options.radius = reach * AO_REACH
+            v.setAmbientOcclusionOptions(options)
+        }
     }
 
     /**
@@ -401,7 +437,8 @@ class ModelStage(context: Context) {
         val instance = stoneInstance ?: run { applyClay(); return }
         val rm = engine?.renderableManager ?: return
         instance.setParameter("pale", PALE_R, PALE_G, PALE_B)
-        instance.setParameter("dark", DARK_R, DARK_G, DARK_B)
+        instance.setParameter("vein", VEIN_R, VEIN_G, VEIN_B)
+        instance.setParameter("grit", GRIT_R, GRIT_G, GRIT_B)
         instance.setParameter("roughness", STONE_ROUGHNESS)
         instance.setParameter("perUnit", 1f / reach.coerceAtLeast(1e-6f))
         for (entity in made.renderableEntities) {
@@ -760,9 +797,9 @@ class ModelStage(context: Context) {
          * the middle at 133. The same mesh, the same lights, three times less
          * of them, and the form is back.
          */
-        const val KEY_LUX = 60_000f
-        const val FILL_LUX = 4_800f
-        const val RIM_LUX = 4_000f
+        const val KEY_LUX = 62_000f
+        const val FILL_LUX = 9_000f
+        const val RIM_LUX = 6_000f
 
         /**
          * The wall, not a fourth lamp.
@@ -772,9 +809,9 @@ class ModelStage(context: Context) {
          * number and behaves as one of the bright ones. Three thousand here is
          * a white screen.
          */
-        const val AMBIENT_R = 0.11f
-        const val AMBIENT_G = 0.12f
-        const val AMBIENT_B = 0.15f
+        const val AMBIENT_R = 0.16f
+        const val AMBIENT_G = 0.16f
+        const val AMBIENT_B = 0.17f
 
         /** Unbleached plasticine. Warm enough not to read as a screenshot. */
         const val CLAY_R = 0.58f
@@ -782,21 +819,39 @@ class ModelStage(context: Context) {
         const val CLAY_B = 0.52f
 
         /**
-         * The two ends of the stone. A mid grey and a darker one, a shade
-         * cooler, because stone is: the range between them is what the cloud,
-         * the veins and the grain are drawn in, and it sits in the middle of
-         * the value scale on purpose so there is room above it for a lit plane
-         * and room below for a shadowed one.
+         * The marble, its veins, and the specks in it.
+         *
+         * Measured off the reference the artist put in the pane — a photograph
+         * of an alabaster Virgin — rather than chosen: a lit plane in it is
+         * (214, 204, 190) and a shadowed one (126, 114, 98), which is ivory,
+         * warm, and a long way from the neutral grey this used to be. The veins
+         * are a grey-brown two stops under it and never black; the specks are
+         * nearly black and are the only thing here that is.
          */
-        const val PALE_R = 0.58f
-        const val PALE_G = 0.58f
-        const val PALE_B = 0.57f
-        const val DARK_R = 0.16f
-        const val DARK_G = 0.16f
-        const val DARK_B = 0.18f
+        const val PALE_R = 0.80f
+        const val PALE_G = 0.77f
+        const val PALE_B = 0.72f
+        const val VEIN_R = 0.36f
+        const val VEIN_G = 0.34f
+        const val VEIN_B = 0.31f
+        const val GRIT_R = 0.13f
+        const val GRIT_G = 0.11f
+        const val GRIT_B = 0.10f
 
-        /** Matte, but not as matte as clay: stone has a faint sheen. */
-        const val STONE_ROUGHNESS = 0.80f
+        /**
+         * Faintly glossy — *"somewhat glossy but not really"*. Polished marble
+         * is nowhere near a mirror and nowhere near chalk; the sheen is broad
+         * and it is broken by the specks, which is [stone.mat]'s business.
+         */
+        const val STONE_ROUGHNESS = 0.42f
+
+        /**
+         * Screen-space occlusion: how strong, how fast it falls off, and how
+         * far it reaches as a share of the model's own half-size.
+         */
+        const val AO_STRENGTH = 1.6f
+        const val AO_FALLOFF = 0.8f
+        const val AO_REACH = 0.075f
 
         /**
          * A long lens, and for the reason a portrait is shot on one: at 35
