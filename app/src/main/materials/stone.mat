@@ -1,0 +1,150 @@
+// Grey stone, made in the shader rather than fetched from a picture.
+//
+// Lr12. Half the scans in a free model library arrive with no material on them
+// at all. glTF says a primitive with no material is plain white, and white is
+// the one colour that cannot be drawn from: the pane's background is a pale
+// card, so a white bust on it has no edge, and a white surface lit by a white
+// key light has almost no shading left in it either -- the lightest plane and
+// the second lightest plane are both at the top of the range with nowhere to
+// separate. The artist is being asked to study form in the one value where
+// form does not show.
+//
+// What a life room puts in front of a student instead is a plaster cast or a
+// stone bust, and the reason is the same reason it works here: a mid grey has
+// the whole range above and below it, so every plane lands somewhere different.
+//
+// ## Why it is computed and not a photograph of granite
+//
+// A texture would need two things this repo will not have. It would need the
+// picture itself -- a tiling stone image, of a size worth shipping, under a
+// licence that survives being in an Apache-2.0 app -- and it would need UV
+// coordinates on the model, which a scan that arrived with no material also
+// usually has none of. Neither problem exists if the stone is a function of
+// where the point is on the form: it needs no file, no licence and no UVs, it
+// never repeats, and it costs a few dozen arithmetic instructions a pixel.
+//
+// ## What it is made of
+//
+// Three things, in the order they are visible from across a room:
+//
+//  - the cloud: broad soft unevenness, a shade or two, the mottling any cut
+//    stone has and the thing that stops a plane reading as flat paint;
+//  - the veins: thin darker seams, from a sine through the form bent by that
+//    same noise, which is the oldest trick for marble and still the one that
+//    looks like marble;
+//  - the grain: sand-sized speckle, in the colour and in the roughness both, so
+//    the highlight breaks up instead of sliding about like wet plastic.
+//
+// The grain fades out as the pixels get bigger than the grain is, for the
+// reason the contour lines do: once one pixel spans several speckles there is
+// no speckle left to draw, only a shimmer that crawls when the model turns.
+material {
+    name : stone,
+    shadingModel : lit,
+    blending : opaque,
+    vertexDomain : object,
+    // Where the point is on the form. It has to be a varying for the same
+    // reason it is one in contour.mat: the fragment shader's own world position
+    // is camera-relative, and the stone would swim across the model every time
+    // the model was turned.
+    variables : [ formPosition ],
+    parameters : [
+        // The two ends of the stone's range. Everything drawn is between them.
+        { type : float3, name : pale },
+        { type : float3, name : dark },
+        // One unit is the model's own half-size, so the same stone lands on a
+        // bust exported in millimetres and one exported in metres.
+        { type : float,  name : perUnit },
+        { type : float,  name : roughness }
+    ]
+}
+
+vertex {
+    void materialVertex(inout MaterialVertexInputs material) {
+        material.formPosition = getWorldFromModelMatrix() * getPosition();
+    }
+}
+
+fragment {
+    // ## Every `highp` below is load-bearing
+    //
+    // matc compiles the mobile fragment shader with `precision mediump float`,
+    // and its optimiser demotes anything it is allowed to demote. Half
+    // precision has an eleven-bit mantissa, and a hash works by throwing away
+    // the top of a number and keeping the bottom -- so in mediump this one
+    // stops being a hash. Measured, not feared: the same arithmetic in
+    // float32 gives a mean of 0.50 and 6749 distinct values over the model,
+    // and in float16 a mean of 0.09 and 67. On the tablet that came out as a
+    // bust with no grain, no veins and no mottling, uniform to five values in
+    // two hundred and fifty-five, which looks exactly like a shader that was
+    // never applied. So `highp` is written on every line the numbers get
+    // large on, and the generated GLSL is worth re-reading if this is ever
+    // edited: `matc -p mobile -a opengl -t` prints it.
+
+    // A number in 0..1 from a point, repeatable and with no pattern to it.
+    // Hoskins' hash: three multiplies and a fract, and cheaper than the usual
+    // fract(sin(dot(...))) by a transcendental.
+    float speck(highp vec3 q) {
+        highp vec3 p = fract(q * 0.1031);
+        p += dot(p, p.zyx + 31.32);
+        return fract((p.x + p.y) * p.z);
+    }
+
+    // Value noise: the eight corners of the cell, smoothly mixed.
+    float lump(highp vec3 x) {
+        highp vec3 i = floor(x);
+        highp vec3 f = fract(x);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = speck(i);
+        float n100 = speck(i + vec3(1.0, 0.0, 0.0));
+        float n010 = speck(i + vec3(0.0, 1.0, 0.0));
+        float n110 = speck(i + vec3(1.0, 1.0, 0.0));
+        float n001 = speck(i + vec3(0.0, 0.0, 1.0));
+        float n101 = speck(i + vec3(1.0, 0.0, 1.0));
+        float n011 = speck(i + vec3(0.0, 1.0, 1.0));
+        float n111 = speck(i + vec3(1.0, 1.0, 1.0));
+        return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+                   mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+    }
+
+    // Three octaves and not five. The fourth and fifth are below the size of a
+    // pixel on a pane this small, so they cost a third of the shader to draw
+    // nothing but shimmer.
+    float cloud(highp vec3 p) {
+        float sum = 0.0;
+        float amount = 0.5;
+        for (int i = 0; i < 3; i++) {
+            sum += amount * lump(p);
+            p *= 2.07;
+            amount *= 0.5;
+        }
+        return sum;
+    }
+
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+
+        vec3 p = variable_formPosition.xyz * materialParams.perUnit;
+
+        // The broad mottling, and the seams bent by it.
+        float drift = cloud(p * 2.3);
+        float seam = sin((p.x * 0.7 + p.y * 1.9 + p.z * 0.5) * 4.4 + drift * 7.0);
+        // Raised to a power, so the pale stone is most of the surface and the
+        // dark seams are thin. A plain sine would be half dark, which is a
+        // zebra and not a marble.
+        seam = pow(0.5 + 0.5 * seam, 7.0);
+
+        // The speckle, and the fade that stops it crawling when it is smaller
+        // than a pixel.
+        highp vec3 sand = p * 60.0;
+        float step = max(fwidth(sand.x), fwidth(sand.y));
+        float grain = (lump(sand) - 0.5) * (1.0 - smoothstep(0.30, 0.85, step));
+
+        float tone = clamp(0.30 + 0.30 * drift + 0.55 * seam + 0.42 * grain, 0.0, 1.0);
+        material.baseColor = vec4(mix(materialParams.pale, materialParams.dark, tone), 1.0);
+        // Rougher in the pits, so the key light's sheen is broken the way it is
+        // on stone and not smooth the way it is on a plastic toy.
+        material.roughness = clamp(materialParams.roughness + 0.22 * grain, 0.35, 1.0);
+        material.metallic = 0.0;
+    }
+}

@@ -145,8 +145,19 @@ class PaneView {
      */
     var lighting by mutableStateOf(false)
 
-    /** Matte grey instead of whatever the model was scanned wearing. */
-    var clay by mutableStateOf(false)
+    /**
+     * Grey stone instead of whatever the model was scanned wearing.
+     *
+     * A plaster cast, in other words, and for the reason a life room owns a
+     * shelf of them: the scan's own colour is information about marble and dust
+     * and the light it was photographed in, and none of that is the form. Grey
+     * takes it away and leaves the planes.
+     *
+     * It starts **on** for a model that brought no surface of its own — see
+     * `wearsItsOwnSurface`. Those arrive white, and white is the one value form
+     * does not show in.
+     */
+    var stone by mutableStateOf(false)
 
     /**
      * Cross-contour lines over the form: about twenty rings up it and twenty
@@ -158,8 +169,8 @@ class PaneView {
      * These are slices, and they are the lines a hatch should follow: hatching
      * along them describes a volume, hatching across them describes a stain.
      *
-     * Drawn on clay, always, because that is the picture that teaches — which
-     * is why turning this on turns [clay] on with it.
+     * Drawn on plain grey, always, because that is the picture that teaches —
+     * which is why turning this on turns [stone] on with it.
      */
     var contour by mutableStateOf(false)
 
@@ -200,7 +211,7 @@ class PaneView {
         flipped = false
         grey = false
         lighting = false
-        clay = false
+        stone = false
         contour = false
         slices = DEFAULT_SLICES
         lightAzimuth = -35f
@@ -491,7 +502,7 @@ fun ReferenceBody(
         // Six buttons is what fits across a 320dp panel: 40dp each and 6dp
         // between them is 270, and a seventh would be 316 in a 300dp row. So a
         // picture and a model get different middles. Greyscale is the one that
-        // does not survive the split, and it is the right one to lose — clay
+        // does not survive the split, and it is the right one to lose — stone
         // and contour have already taken the colour out, and what it was for
         // was judging the values in a photograph.
         val showing = isModel || bitmap != null
@@ -507,20 +518,20 @@ fun ReferenceBody(
                     onClick = { pane.lighting = !pane.lighting },
                 )
                 PaneAction(
-                    ToolIcons.clay, "Clay", true, lit = pane.clay,
-                    // Clay off takes the lines with it: the lines are drawn on
-                    // the clay and there is nothing for them to be drawn on
+                    ToolIcons.stone, "Grey stone", true, lit = pane.stone,
+                    // Stone off takes the lines with it: the lines are drawn on
+                    // the grey and there is nothing for them to be drawn on
                     // once the scan's own surface is back.
                     onClick = {
-                        pane.clay = !pane.clay
-                        if (!pane.clay) pane.contour = false
+                        pane.stone = !pane.stone
+                        if (!pane.stone) pane.contour = false
                     },
                 )
                 PaneAction(
                     ToolIcons.contour, "Contour lines", true, lit = pane.contour,
                     onClick = {
                         pane.contour = !pane.contour
-                        if (pane.contour) pane.clay = true
+                        if (pane.contour) pane.stone = true
                     },
                 )
             } else {

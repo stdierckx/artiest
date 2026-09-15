@@ -1486,17 +1486,19 @@ object ToolIcons {
     }
 
     /**
-     * A shaded ball: a circle with its far side filled.
+     * A shaded ball with a few specks in its light side.
      *
-     * Clay mode. It is the first thing anybody is taught to draw and the exact
-     * thing the button is for — the same form with the colour and the texture
-     * taken away, so that what is left in the picture is the light on it.
+     * Stone mode. The shaded ball is the first thing anybody is taught to draw
+     * and the exact thing the button is for — the same form with the scan's own
+     * colour taken off it, so that what is left in the picture is the light on
+     * the planes. The specks are the rest of what the button does: the surface
+     * it puts on is grey stone and has a grain, not a flat fill.
      *
      * The terminator is a curve and not a straight edge, because a straight one
      * reads as a half-moon badge rather than as a sphere turning away.
      */
-    val clay: ImageVector by lazy {
-        icon("clay") {
+    val stone: ImageVector by lazy {
+        icon("stone") {
             fill {
                 moveTo(20.2f, 7.6f)
                 curveTo(21.4f, 11.6f, 19.6f, 16.2f, 15.8f, 18.6f)
@@ -1504,6 +1506,13 @@ object ToolIcons {
                 curveTo(10.2f, 19.8f, 14.4f, 18.0f, 16.6f, 14.4f)
                 curveTo(18.4f, 11.5f, 18.6f, 9.2f, 20.2f, 7.6f)
                 close()
+            }
+            // Three and not a scatter: at seventeen density units across, a
+            // scatter is a smudge and three dots are still three dots.
+            fill {
+                circle(8.6f, 8.2f, 0.85f)
+                circle(11.6f, 6.3f, 0.7f)
+                circle(6.9f, 12.4f, 0.7f)
             }
             stroke {
                 circle(12f, 12f, 9.3f)

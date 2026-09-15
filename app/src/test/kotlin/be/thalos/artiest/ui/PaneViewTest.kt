@@ -107,7 +107,7 @@ class PaneViewTest {
     }
 
     /**
-     * Fit deliberately leaves the switches alone: flipped, grey, clay and the
+     * Fit deliberately leaves the switches alone: flipped, grey, stone and the
      * contour lines are how the artist has asked to see the thing, not where
      * they have got to in it.
      */
@@ -116,13 +116,13 @@ class PaneViewTest {
         val pane = PaneView()
         pane.flipped = true
         pane.grey = true
-        pane.clay = true
+        pane.stone = true
         pane.contour = true
         pane.lighting = true
         pane.fit()
         assertTrue(pane.flipped)
         assertTrue(pane.grey)
-        assertTrue(pane.clay)
+        assertTrue(pane.stone)
         assertTrue(pane.contour)
         assertTrue(pane.lighting)
     }
@@ -150,7 +150,7 @@ class PaneViewTest {
         pane.scale = 4f
         pane.flipped = true
         pane.grey = true
-        pane.clay = true
+        pane.stone = true
         pane.contour = true
         pane.lighting = true
         pane.dragged(300f, 40f)
@@ -164,7 +164,7 @@ class PaneViewTest {
         assertEquals(34f, pane.lightElevation)
         assertFalse(pane.flipped)
         assertFalse(pane.grey)
-        assertFalse(pane.clay)
+        assertFalse(pane.stone)
         assertFalse(pane.contour)
         assertFalse(pane.lighting)
     }

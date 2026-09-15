@@ -99,6 +99,8 @@ class ModelStage(context: Context) {
     private var ambient: IndirectLight? = null
     private var contour: Material? = null
     private var contourInstance: MaterialInstance? = null
+    private var stone: Material? = null
+    private var stoneInstance: MaterialInstance? = null
     private var plainLook: ColorGrading? = null
     private var greyLook: ColorGrading? = null
 
@@ -174,7 +176,7 @@ class ModelStage(context: Context) {
                 v.setShadowingEnabled(true)
             }
 
-            loadContourMaterial(engine)
+            loadOurMaterials(engine)
             plainLook = ColorGrading.Builder().build(engine)
             greyLook = ColorGrading.Builder().saturation(0f).build(engine)
             view?.colorGrading = plainLook
@@ -192,22 +194,28 @@ class ModelStage(context: Context) {
     }
 
     /**
-     * The contour material, compiled at build time from `contour.mat`.
+     * The two materials of our own, compiled at build time from `.mat` sources.
      *
      * A failure here is not fatal and deliberately so: the model still opens and
-     * still turns, and the one thing that stops working is the contour button.
-     * A reference pane that refuses to show a bust because a shader did not load
-     * would be the worse failure by far.
+     * still turns, and the one thing that stops working is the button that wanted
+     * the material. A reference pane that refuses to show a bust because a shader
+     * did not load would be the worse failure by far — so each is loaded on its
+     * own, and [applyStone] and [applyContour] both have a way to carry on
+     * without theirs.
      */
-    private fun loadContourMaterial(engine: Engine) {
-        runCatching {
-            val bytes = assets.open(CONTOUR_ASSET).use { it.readBytes() }
-            val payload = ByteBuffer.allocateDirect(bytes.size).apply { put(bytes); rewind() }
-            val material = Material.Builder().payload(payload, bytes.size).build(engine)
-            contour = material
-            contourInstance = material.createInstance()
-        }.onFailure { Log.w(TAG, "no contour material", it) }
+    private fun loadOurMaterials(engine: Engine) {
+        contour = build(engine, CONTOUR_ASSET)
+        contourInstance = contour?.createInstance()
+        stone = build(engine, STONE_ASSET)
+        stoneInstance = stone?.createInstance()
     }
+
+    /** One compiled material out of the assets, or null and a line in the log. */
+    private fun build(engine: Engine, asset: String): Material? = runCatching {
+        val bytes = assets.open(asset).use { it.readBytes() }
+        val payload = ByteBuffer.allocateDirect(bytes.size).apply { put(bytes); rewind() }
+        Material.Builder().payload(payload, bytes.size).build(engine)
+    }.onFailure { Log.w(TAG, "no $asset", it) }.getOrNull()
 
     /**
      * Key, fill, rim, and the grey of the room.
@@ -300,7 +308,7 @@ class ModelStage(context: Context) {
             measure(made)
             when (look) {
                 Look.SCANNED -> Unit
-                Look.CLAY -> applyClay()
+                Look.STONE -> applyStone()
                 Look.CONTOUR -> {
                     applyContour()
                     density(slices)
@@ -369,6 +377,38 @@ class ModelStage(context: Context) {
                 runCatching { material.setParameter("metallicFactor", 0f) }
                 runCatching { material.setParameter("roughnessFactor", 0.88f) }
                 runCatching { material.setParameter("emissiveFactor", 0f, 0f, 0f) }
+            }
+        }
+    }
+
+    /**
+     * Dress the model in grey stone.
+     *
+     * Every primitive gets the same instance, for [applyContour]'s reason: one
+     * model is one block of stone, and a bust whose base and head were separate
+     * primitives with separate grain would have the veins step at the join.
+     *
+     * The scale is the model's own half-size, so the grain is the same size
+     * relative to the form whatever units the file was exported in — the same
+     * rule the contour spacing follows, and for the same reason.
+     *
+     * If the material did not compile in, this falls back to [applyClay]: flat
+     * grey with no grain in it, which is worse to draw from than stone and far
+     * better than white.
+     */
+    private fun applyStone() {
+        val made = asset ?: return
+        val instance = stoneInstance ?: run { applyClay(); return }
+        val rm = engine?.renderableManager ?: return
+        instance.setParameter("pale", PALE_R, PALE_G, PALE_B)
+        instance.setParameter("dark", DARK_R, DARK_G, DARK_B)
+        instance.setParameter("roughness", STONE_ROUGHNESS)
+        instance.setParameter("perUnit", 1f / reach.coerceAtLeast(1e-6f))
+        for (entity in made.renderableEntities) {
+            val renderable = rm.getInstance(entity)
+            if (renderable == 0) continue
+            for (i in 0 until rm.getPrimitiveCount(renderable)) {
+                runCatching { rm.setMaterialInstanceAt(renderable, i, instance) }
             }
         }
     }
@@ -641,6 +681,8 @@ class ModelStage(context: Context) {
                 ambient?.let { engine.destroyIndirectLight(it) }
                 contourInstance?.let { engine.destroyMaterialInstance(it) }
                 contour?.let { engine.destroyMaterial(it) }
+                stoneInstance?.let { engine.destroyMaterialInstance(it) }
+                stone?.let { engine.destroyMaterial(it) }
                 plainLook?.let { engine.destroyColorGrading(it) }
                 greyLook?.let { engine.destroyColorGrading(it) }
                 val em = EntityManager.get()
@@ -660,6 +702,8 @@ class ModelStage(context: Context) {
         resources = null
         contourInstance = null
         contour = null
+        stoneInstance = null
+        stone = null
         loader = null
         materials = null
         ambient = null
@@ -681,12 +725,13 @@ class ModelStage(context: Context) {
     fun engineOrNull(): Engine? = engine
 
     /** What the model is dressed in. See [open]. */
-    enum class Look { SCANNED, CLAY, CONTOUR }
+    enum class Look { SCANNED, STONE, CONTOUR }
 
     private companion object {
         const val TAG = "artiest-3d"
 
         const val CONTOUR_ASSET = "materials/contour.filamat"
+        const val STONE_ASSET = "materials/stone.filamat"
 
         /** Half the line width in pixels. Under one, so the line is hairline. */
         const val LINE_HALF_PX = 0.38f
@@ -703,22 +748,55 @@ class ModelStage(context: Context) {
 
         /**
          * Lux, against the exposure above. The key is an overcast window, the
-         * fill is a quarter of it and the rim a fifth — the ratios a studio
-         * uses, not numbers picked until the first model looked right.
+         * fill a sixth of it and the rim an eighth — the ratios a studio uses,
+         * not numbers picked until the first model looked right.
+         *
+         * They were all much higher, and that was the real reason a bare model
+         * was unreadable: at ninety thousand lux against this exposure the
+         * whole model sat in the shoulder of the tone curve, and a light plane
+         * and the plane next to it came out four values apart. Measured on the
+         * tablet, over the pixels of one skull: the model used to run from 98
+         * to 185 with half of it inside 161–185, and now runs 83 to 151 with
+         * the middle at 133. The same mesh, the same lights, three times less
+         * of them, and the form is back.
          */
-        const val KEY_LUX = 90_000f
-        const val FILL_LUX = 22_000f
-        const val RIM_LUX = 17_000f
+        const val KEY_LUX = 58_000f
+        const val FILL_LUX = 9_000f
+        const val RIM_LUX = 7_000f
 
-        /** Linear, and deliberately dim: this is the wall, not a fourth lamp. */
-        const val AMBIENT_R = 0.45f
-        const val AMBIENT_G = 0.47f
-        const val AMBIENT_B = 0.52f
+        /**
+         * The wall, not a fourth lamp.
+         *
+         * A share of Filament's own environment intensity and **not** lux — the
+         * two are three orders of magnitude apart, so this reads as a harmless
+         * number and behaves as one of the bright ones. Three thousand here is
+         * a white screen.
+         */
+        const val AMBIENT_R = 0.22f
+        const val AMBIENT_G = 0.23f
+        const val AMBIENT_B = 0.26f
 
         /** Unbleached plasticine. Warm enough not to read as a screenshot. */
         const val CLAY_R = 0.58f
         const val CLAY_G = 0.55f
         const val CLAY_B = 0.52f
+
+        /**
+         * The two ends of the stone. A mid grey and a darker one, a shade
+         * cooler, because stone is: the range between them is what the cloud,
+         * the veins and the grain are drawn in, and it sits in the middle of
+         * the value scale on purpose so there is room above it for a lit plane
+         * and room below for a shadowed one.
+         */
+        const val PALE_R = 0.46f
+        const val PALE_G = 0.46f
+        const val PALE_B = 0.45f
+        const val DARK_R = 0.22f
+        const val DARK_G = 0.22f
+        const val DARK_B = 0.24f
+
+        /** Matte, but not as matte as clay: stone has a faint sheen. */
+        const val STONE_ROUGHNESS = 0.80f
 
         /**
          * A long lens, and for the reason a portrait is shot on one: at 35

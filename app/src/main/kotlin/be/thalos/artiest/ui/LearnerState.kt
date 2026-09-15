@@ -82,7 +82,7 @@ class LearnerState(context: Context) {
      * `.glb`, and null when it is a picture or still being read.
      *
      * Held rather than streamed to the renderer, for one reason that is worth
-     * the megabytes: turning clay on and off reloads the model, and reloading
+     * the megabytes: turning the stone on and off reloads the model, and reloading
      * from a field is one frame where reloading from the disk is a read on
      * another thread and a pane that blinks. One model at a time, dropped the
      * moment a different reference is selected.

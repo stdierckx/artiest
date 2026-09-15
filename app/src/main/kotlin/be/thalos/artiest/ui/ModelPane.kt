@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import be.thalos.artiest.model.ModelStage
+import be.thalos.artiest.model.wearsItsOwnSurface
 import be.thalos.artiest.ref.RefFiles
 import com.google.android.filament.SwapChain
 import com.google.android.filament.android.UiHelper
@@ -53,7 +54,7 @@ import com.google.android.filament.android.UiHelper
  * ## It draws when something changes
  *
  * There is no loop. Every source of change — a different model, a drag, the
- * light, clay, grey, a resize, a new surface — ends in [Frames.ask], which
+ * light, stone, grey, a resize, a new surface — ends in [Frames.ask], which
  * posts a single Choreographer callback. A model that is being looked at and
  * not touched costs nothing, and that is deliberate: the canvas next to it
  * draws ink into a front buffer and does not need a neighbour spending the GPU
@@ -78,6 +79,7 @@ fun ModelPane(
     val scheme = MaterialTheme.colorScheme
     val backing = scheme.surfaceContainerHighest.toArgb()
     val frames = remember(stage) { Frames(stage) }
+
 
     DisposableEffect(frames) {
         onDispose { frames.detach() }
@@ -116,9 +118,30 @@ fun ModelPane(
             }
         }
 
+        // A model that brought no surface of its own is white, and white is
+        // unusable as a reference — see `stone.mat`. So it opens in stone, and
+        // the button is lit to say so, which is what makes it a default the
+        // artist can turn off rather than something the pane does behind their
+        // back.
+        //
+        // Keyed on the bytes and deliberately **not** on the model: the bytes
+        // arrive a moment after the model is chosen, so between the two this
+        // pane holds a new model's name and the old model's bytes. Keyed on the
+        // name, that half-second reads the wrong model's answer and writes it
+        // onto the new one — which is a textured scan arriving in stone because
+        // the one before it was bare. Keyed on the bytes, it runs once, when
+        // there is something true to say.
+        //
+        // It costs one extra load of the model, since the load below is keyed
+        // on what this writes, and that is one frame's work on a model this
+        // size, paid once, against a white bust that cannot be drawn from.
+        LaunchedEffect(glb) {
+            if (glb != null && !wearsItsOwnSurface(glb)) pane.stone = true
+        }
+
         // Loading is the one change that is not just a number, so it is its own
         // effect and it is keyed on the two things that mean "load again".
-        LaunchedEffect(modelId, glb, pane.clay, pane.contour) {
+        LaunchedEffect(modelId, glb, pane.stone, pane.contour) {
             if (glb == null) {
                 stage.close()
             } else {
@@ -179,7 +202,7 @@ fun ModelPane(
 /** Which of the three ways of dressing the model the two switches mean. */
 private fun look(pane: PaneView): ModelStage.Look = when {
     pane.contour -> ModelStage.Look.CONTOUR
-    pane.clay -> ModelStage.Look.CLAY
+    pane.stone -> ModelStage.Look.STONE
     else -> ModelStage.Look.SCANNED
 }
 

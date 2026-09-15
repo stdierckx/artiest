@@ -1322,6 +1322,89 @@ nobody had looked at yet.
 It now sorts first and caps after, so what goes over the cap is the oldest, and
 the cap is four hundred.
 
+### Grey stone, for the models that arrive white
+
+> *"Some models dont have a material. I would be great to be able to apply a
+> grey marble or grey stone (with some grain) texture to it. Otherwise, the
+> white on white does not read well for the user."*
+
+Half the library arrives bare. A photogrammetric scan brings its own colour; a
+mesh that was published as an `.stl` has no colour at all, and glTF says a
+primitive with no material is plain white. So does the flat near-white material
+`tools/stl-to-glb.py` gives them, which is the same thing with a name on it.
+
+White is the one value that form does not show in. The lightest plane and the
+second lightest plane both land at the top of the range with nowhere left to
+separate, so a bust that ought to teach the planes of a skull teaches an
+outline. What a life room puts in front of a student instead is a plaster cast
+or a stone bust, and for exactly this reason: a mid grey has the whole scale
+above it and below it.
+
+**The stone is computed, not photographed.** A texture would need a tiling
+picture of granite worth shipping, under a licence that survives being in an
+Apache-2.0 app, and it would need UV coordinates — which a scan that arrived
+with no material also usually has none of. A function of where the point is on
+the form needs no file, no licence and no UVs, never repeats, and costs a few
+dozen instructions a pixel. `app/src/main/materials/stone.mat` has three things
+in it, in the order they are visible from across a room: the broad mottling of
+cut stone, thin darker veins from a sine bent by that same noise, and a
+sand-sized grain in the colour and in the roughness both, so the highlight
+breaks up instead of sliding about like wet plastic. The grain fades out as the
+pixels grow larger than it is, for the reason the contour lines do.
+
+**It is on by default for a bare model, and the button says so.** The pane reads
+the glTF's own JSON before opening it and asks one question — does this carry an
+image? — and if it does not, the Stone button comes up lit. That is a default
+the artist can turn off, rather than something the pane does behind their back.
+Anything unreadable is answered *yes*, because not knowing is not a reason to
+paint over a scan that may well have a surface of its own.
+
+### Two traps under that one, both invisible
+
+The stone took three hours and about ten minutes of it was the shader. The rest
+was two faults that each look exactly like a feature that does not work.
+
+**The material never reached the tablet.** `assets.srcDir(compileMaterials)`
+adds the *directory* the task writes into, and on a machine where the task has
+run once, the directory is there and the APK is right. It does not put the task
+in the build graph. So `assembleRelease` after editing a `.mat` shipped
+yesterday's shader, silently, and a clean checkout would have shipped an APK
+whose 3D reference had no shaders in it at all — no stone and no contour lines,
+with nothing in any log. It is `androidComponents { onVariants { ... } }` and
+`addGeneratedSourceDirectory` now, which is the AGP 8 way and the one that makes
+every variant's asset merge depend on the task that fills it.
+
+**The noise was being computed in half precision.** matc compiles the mobile
+fragment shader with `precision mediump float`, and its optimiser demotes
+whatever it is allowed to demote. A hash works by throwing away the top of a
+number and keeping the bottom; in eleven bits of mantissa there is no bottom
+left, and it stops being a hash. The same arithmetic in float32 gives a mean of
+0.50 and 6749 distinct values over the model; in float16, 0.09 and 67. On the
+tablet that was a bust with no grain, no veins and no mottling — uniform to five
+values in two hundred and fifty-five, which looks precisely like a material that
+was never applied. Writing `highp` on every line the numbers get large on fixes
+it, and `matc -p mobile -a opengl -t` prints the generated GLSL if it ever needs
+checking again.
+
+### The exposure was three stops hot
+
+With the stone on, the model was still pale and still flat, and that turned out
+not to be the stone's fault. The key light had been raised to ninety thousand
+lux against an f/16, 1/125, ISO 100 exposure, which put the whole model in the
+shoulder of the tone curve: measured over the pixels of one skull, it ran from
+98 to 185 with half of it squeezed into 161–185. Everything was light, and
+nothing was lighter than anything else.
+
+The lights are a third of what they were and the ratios are a studio's rather
+than a flat wash — key, a sixth for the fill, an eighth for the rim. The same
+skull now runs 83 to 151 with its middle at 133. Every model gained by it, the
+photographic scans most of all: a bronze that was a pale silhouette is a bronze.
+
+One thing to know if these are ever touched again: the ambient is a share of
+Filament's own environment intensity and **not** lux, so it sits three orders of
+magnitude below the lights it is written next to. Three thousand there is a
+white screen.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was
