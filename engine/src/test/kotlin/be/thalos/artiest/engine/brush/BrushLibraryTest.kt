@@ -149,4 +149,36 @@ class BrushLibraryTest {
         assertEquals(99f, partial.sizeMax, "the user's slider survives")
         assertTrue(partial.aspect.inputCount > 0, "and the tilt comes back")
     }
+
+    @Test
+    fun `numbers are put back without the wiring being touched`() {
+        // The other direction, and what `BrushTweaks` does: the brush is
+        // already the pencil, and only what the user set is copied over.
+        val remembered = BrushPreset.PENCIL.create()
+        remembered.sizeMax = 30f
+        remembered.opacity = 0.4f
+        for (o in listOf(remembered.aspect, remembered.rotation, remembered.size)) o.clearInputs()
+
+        val held = BrushPreset.PENCIL.create()
+        val tilt = held.aspect.inputCount
+        assertTrue(tilt > 0, "the pencil has to be wired for this test to say anything")
+
+        copyScalarsOnto(remembered, held)
+        assertEquals(30f, held.sizeMax, "the remembered size")
+        assertEquals(0.4f, held.opacity, "and every other number")
+        assertEquals(tilt, held.aspect.inputCount, "and the tilt is untouched")
+    }
+
+    @Test
+    fun `a remembered brush cannot rub out the tip it is put onto`() {
+        // The reason `tip` is not in `copyScalarsOnto`: a text written before
+        // tips existed decodes with none, and copying it would take the tip off
+        // the brush the user just picked.
+        val tipless = BrushPreset.PEN.create()
+        tipless.tip = null
+        val held = BrushPreset.PEN.create()
+        held.tip = "chalk"
+        copyScalarsOnto(tipless, held)
+        assertEquals("chalk", held.tip)
+    }
 }

@@ -140,34 +140,51 @@ object ToolIcons {
      * is the rule the rest of this set already follows — [eraser] is a rubber's
      * wedge, not a hand holding one.
      *
-     * Upright rather than raked, for the same reason: the diagonal is the axis
-     * every other drawing tool in the set is on, so standing this one up is
-     * another difference the eye makes without looking.
+     * **Raked, and it was upright.** This file argued that standing the nib up
+     * was a second difference the eye could make without looking, because the
+     * diagonal is the axis every other drawing tool in the set is on. The
+     * tablet disagreed with exactly that sentence:
+     *
+     * > *"While the pen icon is better as before, all the other ones are at 45
+     * > degrees, and the pen is at 90 degrees... can you put it also at 45
+     * > degrees angle?"*
+     *
+     * Which is right, and it is right about a thing the argument had counted as
+     * a gain. A row of tools all on one axis with one of them square to it does
+     * not read as *that one is different*; it reads as *that one is wrong*, and
+     * an odd man out costs more than the difference it buys. The nib is what
+     * tells the pen from the pencil, and it goes on doing that at any angle —
+     * so the angle is free to be the one the set is already on.
+     *
+     * It is [pencil]'s angle exactly: point at the bottom left, held end at the
+     * top right, and the same 2.7-21.3 box the pencil fills. The shape is the
+     * upright one turned 45 degrees about the middle and scaled to fill the box
+     * again, so nothing about the nib itself changed.
      */
     val pen: ImageVector by lazy {
         icon("pen") {
             // The barrel, filled and small: it is here to say which end is
             // held, and any more of it takes room from the nib.
             fill {
-                moveTo(9.5f, 2.2f)
-                lineTo(14.5f, 2.2f)
-                lineTo(15.8f, 7.4f)
-                lineTo(8.2f, 7.4f)
+                moveTo(17.0f, 2.7f)
+                lineTo(21.3f, 7.0f)
+                lineTo(18.0f, 12.5f)
+                lineTo(11.5f, 6.0f)
                 close()
             }
             stroke {
                 // The nib: shoulders, two flanks that curve in, and a point.
-                moveTo(8.2f, 7.6f)
-                curveTo(7.4f, 12.4f, 9.4f, 17.6f, 12.0f, 21.6f)
-                curveTo(14.6f, 17.6f, 16.6f, 12.4f, 15.8f, 7.6f)
+                moveTo(11.4f, 6.2f)
+                curveTo(6.6f, 9.6f, 3.9f, 15.7f, 2.7f, 21.3f)
+                curveTo(8.3f, 20.1f, 14.4f, 17.4f, 17.8f, 12.6f)
                 close()
                 // The slit, which runs from the hole to the point.
-                moveTo(12.0f, 14.2f)
-                lineTo(12.0f, 21.6f)
+                moveTo(9.0f, 15.0f)
+                lineTo(2.7f, 21.3f)
             }
             // The breather hole. Filled, because the nib is an outline and a
             // filled dot inside an outline is what an eye reads as a hole.
-            fill { circle(12.0f, 12.2f, 1.6f) }
+            fill { circle(10.7f, 13.3f, 1.8f) }
         }
     }
 

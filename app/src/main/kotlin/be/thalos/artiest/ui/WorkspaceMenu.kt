@@ -86,6 +86,21 @@ import androidx.compose.ui.unit.sp
  * original there for the next time. Delete asks first, and asks with the name
  * in the question, because the one unrecoverable act in this menu should not be
  * one tap away from the one that is used most.
+ *
+ * ## Delete is on the row, and that is the correction
+ *
+ * It used to be one item at the bottom of the menu that deleted *the workspace
+ * you are in*, which meant throwing away a workspace you were not in took three
+ * steps: switch to it, open the menu again, delete, and then switch back to
+ * where you were. The tablet found what that feels like:
+ *
+ * > *"There is no way yet to delete a preset once made."*
+ *
+ * It was there, and being there is not the same as being findable. A list you
+ * can add named things to needs the taking-out next to the thing being taken
+ * out — so every row that can be deleted carries its own bin, and the bottom
+ * item is gone. Shipped rows carry none, which is also how the list now *says*
+ * which ones cannot be deleted rather than leaving you to find out.
  */
 @Composable
 internal fun WorkspaceMenu(
@@ -97,15 +112,23 @@ internal fun WorkspaceMenu(
     onSaveAs: (String) -> Unit,
     /** The same workspace under a different name. Never offered for a shipped one. */
     onRename: (String) -> Unit,
-    /** Throw this workspace away. Never offered for a shipped one. */
-    onDelete: () -> Unit,
+    /**
+     * Throw this workspace away, by id. Never offered for a shipped one.
+     *
+     * By id and not "the current one", because the bin is on the row now and
+     * the row is usually not the one you are in.
+     */
+    onDelete: (String) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
+    // Which row's bin was tapped, and therefore what the confirmation asks
+    // about. Null is "nothing is being deleted"; the entry is carried rather
+    // than the id, because the question has to have the name in it.
+    var deleting by remember { mutableStateOf<WorkspaceFiles.Entry?>(null) }
     val shipped = isShipped(current.id)
 
     Box(modifier) {
@@ -163,6 +186,29 @@ internal fun WorkspaceMenu(
                                 Icon(ToolIcons.check, null, Modifier.size(16.dp))
                             }
                         },
+                        trailingIcon = {
+                            // Its own clickable inside the row's, which is what
+                            // makes the bin a second target rather than a
+                            // decoration on the first. A shipped row has none
+                            // at all: an icon that is drawn and does nothing is
+                            // worse than an icon that is not drawn.
+                            if (!isShipped(entry.id)) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(15.dp))
+                                        .clickable { open = false; deleting = entry },
+                                ) {
+                                    Icon(
+                                        ToolIcons.trash,
+                                        "Delete ${entry.name}",
+                                        Modifier.size(15.dp),
+                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        },
                         onClick = { open = false; onSwitch(entry.id) },
                     )
                 }
@@ -181,17 +227,14 @@ internal fun WorkspaceMenu(
                         onClick = { open = false; renaming = true },
                     )
                 }
+                // No Delete down here any more. It is on the row; see the
+                // header. *Put back* stays, because it is about the workspace
+                // you are in and nothing else.
                 if (shipped) {
                     DropdownMenuItem(
                         text = { Text("Put ${current.name} back", fontSize = 13.sp) },
                         leadingIcon = { Icon(ToolIcons.tidy, null, Modifier.size(17.dp)) },
                         onClick = { open = false; onReset() },
-                    )
-                } else {
-                    DropdownMenuItem(
-                        text = { Text("Delete ${current.name}…", fontSize = 13.sp) },
-                        leadingIcon = { Icon(ToolIcons.close, null, Modifier.size(17.dp)) },
-                        onClick = { open = false; deleting = true },
                     )
                 }
             }
@@ -220,23 +263,29 @@ internal fun WorkspaceMenu(
         )
     }
 
-    if (deleting) {
+    deleting?.let { doomed ->
         AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text("Delete ${current.name}?", fontSize = 16.sp) },
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete ${doomed.name}?", fontSize = 16.sp) },
             text = {
                 Text(
-                    "The arrangement goes with it. Your drawing does not.",
+                    if (doomed.id == current.id) {
+                        "The arrangement goes with it, and you land back in " +
+                            "the one the app starts with. Your drawing does not."
+                    } else {
+                        "The arrangement goes with it. The one you are in, " +
+                            "and your drawing, are not touched."
+                    },
                     fontSize = 13.sp,
                 )
             },
             confirmButton = {
-                TextButton(onClick = { deleting = false; onDelete() }) {
+                TextButton(onClick = { deleting = null; onDelete(doomed.id) }) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleting = false }) { Text("Keep it") }
+                TextButton(onClick = { deleting = null }) { Text("Keep it") }
             },
         )
     }

@@ -104,6 +104,7 @@ import be.thalos.artiest.ui.BrushButton
 import be.thalos.artiest.ui.BrushShelfCard
 import be.thalos.artiest.ui.BrushesButton
 import be.thalos.artiest.ui.BrushStore
+import be.thalos.artiest.ui.BrushTweaks
 import be.thalos.artiest.ui.ColourButton
 import be.thalos.artiest.ui.ColourPanelCard
 import be.thalos.artiest.ui.DockHost
@@ -496,6 +497,12 @@ private fun CanvasScreen(
     val brushStore = remember(brushCtx) { BrushStore(brushCtx) }
 
     /**
+     * What each brush was last set to. See [BrushTweaks]; the short version is
+     * that an eraser you set to 30 is 30 the next time you pick it up.
+     */
+    val tweaks = remember(brushCtx) { BrushTweaks(brushCtx) }
+
+    /**
      * The shelf: the three shipped brushes and whatever is in `files/brushes`.
      *
      * Read once, on the thread that is composing, and that is deliberate rather
@@ -518,6 +525,11 @@ private fun CanvasScreen(
         )
     }
     var library by remember { mutableStateOf(brushFiles.library()) }
+
+    // Settings remembered for brushes that are no longer on the shelf, dropped
+    // once a launch. Keyed on the library so that deleting a brush also drops
+    // its tweak without `deleteBrush` having to be the only place that knows.
+    remember(library) { tweaks.prune(library.entries.map { it.id }.toSet()); library }
 
     /** W10, and now Wb1. Which brush is in the hand, restored from last time. */
     var brushId by remember { mutableStateOf(brushStore.loadId()) }
@@ -728,16 +740,14 @@ private fun CanvasScreen(
     var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
     val outlineTick = remember { mutableIntStateOf(0) }
 
-    // Lr1, the colour picker. Three pieces of state and they are deliberately
-    // three: whether the pen is picking, whether it stays picking after one
-    // pick, and which sheet it reads.
-    //
-    // `pickHeld` is what a long press on the button sets. Without it the picker
-    // would either be a mode to escape from or a one-shot that cannot do a run
-    // of twenty colours, and it is one boolean rather than a second button.
-    var pickingColour by remember { mutableStateOf(false) }
-    var pickHeld by remember { mutableStateOf(false) }
-    var pickLayerOnly by remember { mutableStateOf(false) }
+    // Lr1's three pieces of picker state -- whether the pen is picking,
+    // whether it stays picking, which sheet it reads -- were here and are now
+    // fields of `LearnerState`. They were left behind when the holder took
+    // them, along with the effect that pushed them into the view, and the two
+    // effects were writing the same two fields on the view from different
+    // sources. Nothing read these, so nothing broke; what it cost was a second
+    // `v.picking = false` on every arrival of the surface, racing the real one
+    // by composition order.
 
     // The ring under the pen. Its own counter and not `outlineTick`, which is
     // read by three other draw lambdas: a pick moves at pointer rate and there
@@ -1195,15 +1205,11 @@ private fun CanvasScreen(
         v.rubber = eraserBrush?.create()
     }
 
-    // Lr1. Both are plain fields on the view and neither is read while a
-    // gesture is open — the driver copies `picking` at pen-down and holds it.
-    LaunchedEffect(surface, pickingColour, pickLayerOnly) {
-        val v = surface ?: return@LaunchedEffect
-        v.picking = pickingColour
-        v.pickFromActiveOnly = pickLayerOnly
-    }
-
-    LaunchedEffect(surface, ink, sizeMax, smoothing, opacity, flow, grain) {
+    // Keyed on `brushId` as well as on the sliders, and that is not cosmetic:
+    // without it, picking a brush whose every slider happens to match the one
+    // being put down would not re-run this, and `brushStore` would go on
+    // naming the old brush as the one in the hand until the next drag.
+    LaunchedEffect(surface, ink, brushId, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
         v.ink.sizeMax = sizeMax
@@ -1226,6 +1232,12 @@ private fun CanvasScreen(
         // is the only moment the answer can have changed -- the alternative is
         // a panel that asks the question on every recomposition.
         brushModified = !brush.matches(v.ink)
+        // And remembered against this brush, so that it is still there after
+        // the pencil has been picked up and put down again. `adopt` does this
+        // too, for the tap that lands in the same frame as the drag; here is
+        // where it happens for every other drag, including the last one before
+        // the app is closed.
+        tweaks.remember(brush, v.ink)
     }
 
     // Polled twice a second rather than pushed. The counters this reads live on
@@ -1613,19 +1625,65 @@ private fun CanvasScreen(
      * Both halves, always. Without the second the `LaunchedEffect` that pushes
      * the sliders into the pen would push the *old* values straight back over
      * the brush that was just picked, and switching tools would half work.
+     *
+     * ## The third half, which is new
+     *
+     * The brush being put down has its settings **remembered** and the one
+     * being picked up has its settings **restored**, both through [BrushTweaks]
+     * — so an eraser you set to 30 is 30 the next time you reach for it, and
+     * not the 96 it was authored at. See that class for why the app used to do
+     * the other thing and why the other thing was wrong.
+     *
+     * The outgoing brush is remembered *here* rather than left to the
+     * `LaunchedEffect` that saves on every slider change, and that is not
+     * belt-and-braces. This runs synchronously inside the tap; the effect runs
+     * when the composition next settles. A tap that lands in the same frame as
+     * the last drag of a slider would find `v.ink` already overwritten by
+     * `applyTo` below, and the value the user had just set would be the one
+     * value never stored.
+     *
+     * [remembered] is false for exactly one caller: Revert, which is the user
+     * asking for the authored brush back and would otherwise be handed their
+     * own tweak again.
      */
-    val adopt: (BrushEntry) -> Unit = { entry ->
+    val adopt: (BrushEntry, Boolean) -> Unit = { entry, remembered ->
         surface?.let { v ->
+            tweaks.remember(brush, v.ink)
             entry.applyTo(v.ink)
+            if (remembered) tweaks.restore(entry, v.ink)
             brushId = entry.id
             sizeMax = v.ink.sizeMax
             smoothing = v.ink.stabilization
             opacity = v.ink.opacity
             flow = v.ink.flow
             grain = v.ink.grain.strength
-            brushModified = false
+            // Asked rather than assumed. It used to be assumed false, which was
+            // true when picking a row meant the authored brush and nothing
+            // else; a restored tweak *is* a brush that has been moved off its
+            // row, and the shelf's dot is the only thing that says so.
+            brushModified = !entry.matches(v.ink)
             generation++
         }
+    }
+
+    /**
+     * Pick [entry] up with whatever the user last set it to. The tool buttons,
+     * the shelf, and every other way a brush is chosen.
+     */
+    val pick: (BrushEntry) -> Unit = { entry -> adopt(entry, true) }
+
+    /**
+     * Put the brush in the hand back to how it was authored, and forget the
+     * tweak.
+     *
+     * Forgetting is the half that is easy to leave out and that would make the
+     * button read as broken: without it the row is authored again for as long
+     * as it is held and remembered again the moment it is put down, so Revert
+     * would appear to work and then undo itself.
+     */
+    val revertBrush: () -> Unit = {
+        tweaks.forget(brush.id)
+        adopt(brush, false)
     }
 
     // The other half of `arriving`: a workspace that has just been switched to
@@ -1639,7 +1697,7 @@ private fun CanvasScreen(
     LaunchedEffect(arriving, surface) {
         val want = arriving ?: return@LaunchedEffect
         if (surface == null) return@LaunchedEffect
-        want.brush?.let { adopt(library.entryFor(it)) }
+        want.brush?.let { pick(library.entryFor(it)) }
         want.stabilisation?.let { smoothing = it }
         arriving = null
     }
@@ -1734,7 +1792,7 @@ private fun CanvasScreen(
     val deleteBrush: (BrushEntry) -> Unit = { entry ->
         if (entry.removable && brushFiles.delete(entry.id)) {
             library = brushFiles.library()
-            if (brushId == entry.id) adopt(library.entryFor(null))
+            if (brushId == entry.id) pick(library.entryFor(null))
             generation++
         }
     }
@@ -1957,20 +2015,7 @@ private fun CanvasScreen(
             polling = polling,
             generation = generation,
             eraserBrush = eraserBrush,
-            onWetBrush = { preset ->
-                val v = surface
-                if (v != null) {
-                    val p = library.entryFor(preset.id)
-                    p.applyTo(v.ink)
-                    brushId = p.id
-                    sizeMax = v.ink.sizeMax
-                    smoothing = v.ink.stabilization
-                    opacity = v.ink.opacity
-                    flow = v.ink.flow
-                    grain = v.ink.grain.strength
-                    generation++
-                }
-            },
+            onWetBrush = { preset -> pick(library.entryFor(preset.id)) },
             onChanged = { generation++ },
         )
 
@@ -2016,10 +2061,13 @@ private fun CanvasScreen(
                         workspaces.save(workspace)
                         entries = workspaces.list()
                     },
-                    onDelete = {
-                        workspaces.delete(workspace.id)
+                    onDelete = { id ->
+                        workspaces.delete(id)
                         entries = workspaces.list()
-                        switchTo(WorkspaceStore.DEFAULT_ID)
+                        // Only move if the ground was taken from under us.
+                        // Deleting a workspace you are not in should leave the
+                        // one you are in exactly where it was.
+                        if (id == workspace.id) switchTo(WorkspaceStore.DEFAULT_ID)
                     },
                     onReset = {
                         workspaces.reset(workspace.id)
@@ -2174,6 +2222,7 @@ private fun CanvasScreen(
                     },
                     refPictures = learner.pictures,
                     refSelected = learner.selected,
+                    refPane = learner.pane,
                     refBitmap = learner.bitmap,
                     refThumbs = learner.thumbs,
                     onRefSelect = { learner.selected = it },
@@ -2239,33 +2288,26 @@ private fun CanvasScreen(
                     onPlaceBrush = placeBrushOnBar,
                     brushModified = brushModified,
                     onSaveBrush = saveBrushAs,
-                    onRevertBrush = { adopt(brush) },
+                    onRevertBrush = revertBrush,
                     onRenameBrush = renameBrush,
                     onDeleteBrush = deleteBrush,
                     onBrush = { p ->
-                        // The preset writes the whole brush, then the sliders
-                        // are pulled back from it. Without that second half the
-                        // LaunchedEffect above would push the *old* slider
-                        // values straight back over the preset it just set,
-                        // and switching tools would half work.
-                        surface?.let { v ->
-                            p.applyTo(v.ink)
-                            brushId = p.id
-                            // Picking a brush turns the marquee off, the mirror
-                            // of picking a shape turning it on. Without it the
-                            // pen button and the Select button are lit at the
-                            // same time and the pen still selects -- two
-                            // mutually exclusive states both showing as
-                            // current, which is worse than either being wrong.
-                            // Found on the tablet, not in a test.
-                            setSelecting(false)
-                            sizeMax = v.ink.sizeMax
-                            smoothing = v.ink.stabilization
-                            opacity = v.ink.opacity
-                            flow = v.ink.flow
-                            grain = v.ink.grain.strength
-                            generation++
-                        }
+                        // `pick` is the whole of putting a brush in the hand:
+                        // the outgoing one's settings remembered, the incoming
+                        // one's restored, and every slider pulled back from it.
+                        // This used to be its own copy of those six lines and
+                        // `onWetBrush` a third; they drifted the moment the
+                        // tweak store arrived, because only one of the three
+                        // would have been taught about it.
+                        pick(p)
+                        // Picking a brush turns the marquee off, the mirror of
+                        // picking a shape turning it on. Without it the pen
+                        // button and the Select button are lit at the same time
+                        // and the pen still selects -- two mutually exclusive
+                        // states both showing as current, which is worse than
+                        // either being wrong. Found on the tablet, not in a
+                        // test.
+                        setSelecting(false)
                     },
                     exporting = exporting,
                     importing = importing,
@@ -2440,6 +2482,8 @@ private fun ToolSlot(
     /** Lr2/Lr3. The reference library, and the one being looked at. */
     refPictures: List<be.thalos.artiest.ref.RefPicture>,
     refSelected: String?,
+    /** How the reference picture sits in its pane. See `PaneView`. */
+    refPane: be.thalos.artiest.ui.PaneView,
     refBitmap: android.graphics.Bitmap?,
     refThumbs: Map<String, android.graphics.Bitmap>,
     onRefSelect: (String) -> Unit,
@@ -2630,6 +2674,7 @@ private fun ToolSlot(
                 onPickLayerOnly = onPickLayerOnly,
                 refPictures = refPictures,
                 refSelected = refSelected,
+                refPane = refPane,
                 refBitmap = refBitmap,
                 refThumbs = refThumbs,
                 onRefSelect = onRefSelect,
@@ -3850,6 +3895,8 @@ private fun LearnSlot(
     /** Lr2/Lr3. The reference library, and the one being looked at. */
     refPictures: List<be.thalos.artiest.ref.RefPicture>,
     refSelected: String?,
+    /** How the reference picture sits in its pane. See `PaneView`. */
+    refPane: be.thalos.artiest.ui.PaneView,
     refBitmap: android.graphics.Bitmap?,
     refThumbs: Map<String, android.graphics.Bitmap>,
     onRefSelect: (String) -> Unit,
@@ -3911,6 +3958,7 @@ private fun LearnSlot(
             onAdd = onRefAdd,
             onRemove = onRefRemove,
             onInk = onInk,
+            pane = refPane,
             onFixate = { onFixate(ToolItem.REFERENCE_PANEL, it) },
         )
 
@@ -3923,6 +3971,7 @@ private fun LearnSlot(
             onAdd = onRefAdd,
             onRemove = onRefRemove,
             onInk = onInk,
+            pane = refPane,
         )
 
         // Lr7. The deck, and the one act that happens while you are drawing.

@@ -346,3 +346,65 @@ than a bar.
 placements by `ToolItem`, so the second brush button vanished on every read. The
 layout held both and the codec round trip came back with one. It keys on
 `CellPlacement.identity` now.
+
+## Wb2: a brush is a tool you own, not a preset you re-open
+
+From the tablet, after an hour of drawing:
+
+> *"The pencil and the pen and the eraser: If you set the settings different,
+> they should be remembered. Now if i take the eraser, it is set to 96. I change
+> it so 30, because 96 is way too big for what i am doing. I switch back to
+> pencil, and then back to eraser: 96 again :( All settings made on a tool
+> should be remembered. That is what the user expects anyway."*
+
+That behaviour was not an oversight. It is what `BrushEntry.applyTo` is
+documented to do — *be that brush* — and picking a row called it, so the
+authored numbers won every time. The argument for it was that a shelf row is a
+definition and a definition that drifts is not one.
+
+The argument is wrong, and the last sentence of the report is why. **Nobody
+re-sharpens a pencil to the factory point every time they put it down.** The
+authored numbers are for the first time you ever pick a brush up. After that the
+truth about how wide your eraser is, is whatever you last set it to.
+
+### What was built
+
+`BrushTweaks`, a per-brush store beside `BrushStore`. Putting a brush down
+remembers how it was set; picking one up puts that back. A brush that has not
+been moved stores nothing, so the file holds only what somebody actually
+changed.
+
+Three rules it inherited rather than invented:
+
+- **Only the numbers travel.** The entry is applied whole first and then
+  `copyScalarsOnto` moves the scalars over it, so the tip and the sensor wiring
+  are always the entry's. A stored text is the one place a *partial* brush comes
+  from, which is what `copyWiringOnto` was written for; a tweak must not be able
+  to make a pencil that has lost its tilt.
+- **A retune forgets.** The tuning number is stored alongside, exactly as
+  `BrushStore.storedTuning` does it. A remembered size from before
+  `BrushPreset.TUNING` moved would win over every re-solved number forever, on a
+  device where nobody could tell why. A saved brush has tuning 0 at both ends of
+  that comparison, so a retune never touches one.
+- **Revert forgets too.** Putting a row back to what it was authored as also
+  drops the tweak, or the button would appear to work and then undo itself the
+  moment the brush was put down again.
+
+### What it reversed
+
+This file used to say that picking a different row while modified **discards the
+edit**, and that the modified dot is what made that fair. The dot stays and the
+discarding is gone: the edit is kept, per brush, and the dot now means *this
+brush is not where the shelf says it is* for as long as that is true. **Save as
+new brush** is unchanged and is still the way to make a tuning into a thing with
+a name of its own.
+
+### The three copies of `adopt` that had drifted
+
+Putting a brush in the hand existed three times in `MainActivity`: `adopt`, the
+toolbar's `onBrush`, and the readout's `onWetBrush`, each with its own copy of
+*apply the entry, then pull the five sliders back from it*. They agreed by luck.
+Adding the tweak store to one of the three and not the others would have been a
+pen that remembers and a pencil that does not, so they are one function now —
+`pick` — and the toolbar keeps only the one line that is genuinely its own,
+turning the marquee off.

@@ -101,6 +101,16 @@ class LearnerState(context: Context) {
     var order = emptyList<String>()
     var startedAt = 0L
 
+    /**
+     * How the reference picture sits in its pane.
+     *
+     * Held here rather than inside the pane because the pane is a panel, and a
+     * panel leaves the composition every time the bars are rearranged. See
+     * [PaneView], which is where the tablet report that caused this is written
+     * down.
+     */
+    val pane = PaneView()
+
     /** Lr5. Two ways of looking; see `InkSurfaceView.mirrored`. */
     var flipView by mutableStateOf(false)
     var greyView by mutableStateOf(false)
@@ -253,7 +263,13 @@ fun rememberLearner(context: Context): LearnerState {
     val learner = remember(context) { LearnerState(context) }
     LaunchedEffect(learner) { learner.readLibrary() }
     LaunchedEffect(learner.pictures) { learner.readThumbs() }
-    LaunchedEffect(learner.selected) { learner.readSelected() }
+    // A different picture gets the pane back: whole, square, the right way
+    // round and in colour. The rule the pane's own `remember(selected)` used to
+    // encode, kept now that the state outlives the panel.
+    LaunchedEffect(learner.selected) {
+        learner.pane.reset()
+        learner.readSelected()
+    }
     LaunchedEffect(learner) { learner.readDeck() }
     LaunchedEffect(learner.cards) { learner.readCardThumbs() }
     LaunchedEffect(learner.openCardId) { learner.readOpenCard() }

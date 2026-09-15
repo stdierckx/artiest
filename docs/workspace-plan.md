@@ -301,6 +301,63 @@ as the feature list grows, rather than making the app heavier — which is the
 exact opposite of what happens to every other program on this list once it
 reaches sixty tools.
 
+## The second hour on the tablet
+
+Two reports about the same thing from opposite ends: a list that had outgrown
+the space it was shown in, and a list you could add to but not take from.
+
+### The categories go down the side
+
+> *"the toolbox with the available tools: there are so many categories now, that
+> they dont fit the screen horizontically. Elegant solution needed. It will only
+> grow from here."*
+
+The chooser's categories were a row of chips that scrolled sideways inside a
+292dp dropdown. There are eight of them — Edit, Draw, Selection, Canvas, Learn,
+File, Instruments, Brushes — and they measure about five hundred dp, so half
+were off the end with nothing saying so. Worse, a sideways scroll inside a
+dropdown is the one gesture nobody tries: the menu already scrolls the other
+way.
+
+Widening the menu was refused: it buys one or two chips and then loses again,
+which is the failure the report asked not to repeat. Wrapping to two rows was
+refused for the same shape of reason — it works at eight and eats the menu at
+sixteen, growing the category strip into the space the catalogue is listed in.
+
+What shipped is a **side rail**. It grows down, which is the direction there is
+room in, and it grows into a scroll people already know is there because the
+list beside it scrolls the same way. Ten categories fit with no scrolling at
+all. It also turns eight centred chips of eight different widths into one
+left-aligned column, which is a list you read in one movement rather than eight.
+
+### Delete is on the row
+
+> *"There is no way yet to delete a preset once made."*
+
+It was there. The menu had **Delete *name*…** at the bottom, and it deleted *the
+workspace you are in* — so throwing away one you were not in meant switching to
+it, opening the menu again, deleting, and switching back. Being there is not the
+same as being findable, and a three-step path to the one thing that takes
+something out of a growing list is not a path anybody finds.
+
+Every row that can be deleted now carries its own bin, and the bottom item is
+gone. A shipped row carries none, which is also how the list now *says* which
+ones cannot be deleted rather than leaving you to find out by opening a menu.
+Deleting the one you are in still lands you back in the default and says so in
+the confirmation; deleting any other leaves where you are untouched, and says
+that instead.
+
+### The five that were not shipped
+
+The same report named *"the L, the U, the Keypad"* as presets worth deleting.
+None of those ship. `docs/examples/` is the workspace file format written out
+four ways — Corner is an L, Thumb is a bracket, Keypad is a block, Minimal is
+three lists of names — and `tools/workspace-push.sh` had put them on the tablet
+during development, where they are indistinguishable from something the app
+came with. They were removed from the device. The examples stay in the tree,
+because `WorkspaceJsonTest` reads them and because a format nobody has written
+an example of is a format nobody can write.
+
 ## See also
 
 - `docs/master-plan.md` — where this sits in the order, and what it unblocks

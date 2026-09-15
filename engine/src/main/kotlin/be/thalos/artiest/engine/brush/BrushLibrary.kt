@@ -274,6 +274,54 @@ internal fun copyWiringOnto(from: Brush, to: Brush) {
 }
 
 /**
+ * Every number of [from] onto [to], leaving [to]'s sensor wiring and its tip
+ * alone.
+ *
+ * The third of this file's three copy functions, and the line between them is
+ * what each one is *allowed to be wrong about*:
+ *
+ * - [adoptBrush] is *"be that brush"*. Everything, wiring included.
+ * - [copyWiringOnto] is *"you are already mostly that brush, put back the
+ *   wiring that is missing"*. Numbers untouched.
+ * - this one is *"keep being the brush you are, but take these numbers"*.
+ *
+ * Both of the callers need exactly the third. The restore at startup reads a
+ * stored brush whose text may be an older build's and therefore partial — that
+ * is the whole reason [copyWiringOnto] exists — so it takes the numbers from
+ * the file and the wiring from the entry. `BrushTweaks` reads a remembered
+ * brush onto an entry that has just been applied whole, so the wiring is
+ * already right and re-copying it could only make it wrong.
+ *
+ * **`tip` is deliberately not here.** It is not a number and nothing in the UI
+ * can change it; the only thing that sets a tip is picking a brush, which goes
+ * through [adoptBrush]. Copying it would mean a stored text with no `tip` line
+ * — which is what every build before tips wrote — silently rubbing out the tip
+ * the entry had just put on.
+ *
+ * `erase` and `eraseSizeMax` *are* here, because both are things the user sets:
+ * the eraser is a brush now rather than a mode, and `eraseSizeMax` is the width
+ * the pen rubs out at when it is turned over.
+ */
+fun copyScalarsOnto(from: Brush, to: Brush) {
+    to.sizeMin = from.sizeMin
+    to.sizeMax = from.sizeMax
+    to.sizeCurve = from.sizeCurve
+    to.spacing = from.spacing
+    to.isotropicSpacing = from.isotropicSpacing
+    to.hardness = from.hardness
+    to.opacity = from.opacity
+    to.flow = from.flow
+    to.stabilization = from.stabilization
+    to.antiAlias = from.antiAlias
+    to.onsetMillis = from.onsetMillis
+    to.onsetPressure = from.onsetPressure
+    to.grain = from.grain
+    to.burnish = from.burnish
+    to.erase = from.erase
+    to.eraseSizeMax = from.eraseSizeMax
+}
+
+/**
  * Every scalar and every sensor wiring of [from], onto [to].
  *
  * The other half of [copyWiringOnto], and the two are deliberately separate:

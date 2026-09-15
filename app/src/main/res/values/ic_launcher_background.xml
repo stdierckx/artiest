@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Ink, not paper. The nib is the light shape and the ground is the dark one,
+      because a launcher screen is usually a photograph and a pale icon on a
+      dark tile is the pair that survives being put on top of one.
+    -->
+    <color name="ic_launcher_background">#20242C</color>
+</resources>

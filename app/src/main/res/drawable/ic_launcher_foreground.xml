@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The nib, as the launcher draws it.
+
+  The same nib as `ToolIcons.pen` and deliberately so: the thing you tap on the
+  home screen and the thing you tap in the app are one object, and a nib is what
+  sets a pen apart. It is scaled 2.75x out of that glyph's 24dp box into the
+  108dp adaptive canvas, which puts every part of it inside the 66dp safe zone —
+  outside that zone a launcher is allowed to crop, and a cropped point is a
+  cropped pen.
+
+  **Upright, where the toolbar glyph is raked.** The glyph is on the diagonal
+  because it sits in a row of other tools that are, and being the odd man out in
+  that row read as wrong. There is no such row here. A launcher icon is a mark
+  on its own in a grid of squares, and a mark on its own stands up.
+
+  Filled rather than outlined, which the 21dp glyph is not. At 48 physical
+  pixels an outline closes up into a blob; the silhouette is the only thing an
+  eye has at that size, so the nib is solid and the slit and the breather hole
+  are cut back out of it in the background colour.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Barrel stub and nib, one shape. -->
+    <path
+        android:fillColor="#F2E7D5"
+        android:pathData="M47.12,27.33L60.88,27.33L64.45,42.17C66.65,55.38 61.15,69.67 54,80.68C46.85,69.67 41.35,55.38 43.55,42.17Z" />
+
+    <!-- The slit, from the hole to the point. -->
+    <path
+        android:strokeColor="#20242C"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:pathData="M54,58.67L54,79.03" />
+
+    <!-- The breather hole. -->
+    <path
+        android:fillColor="#20242C"
+        android:pathData="M54,50.42m-4.4,0a4.4,4.4 0 1,0 8.8,0a4.4,4.4 0 1,0 -8.8,0" />
+</vector>

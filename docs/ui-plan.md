@@ -422,3 +422,30 @@ Checked 2026-09-09.
 - panel-layout, archived — <https://github.com/wayfair-archive/panel-layout>
 - Lucide licence (ISC) — <https://lucide.dev/license>
 - sketchbook-compose (Apache-2.0) — <https://github.com/GetStream/sketchbook-compose>
+
+## The app had no face
+
+> *"There is no shortcut on the tablet to start the program yet."*
+
+It was in the launcher the whole time — the manifest has had a `LAUNCHER` filter
+since the first commit — but the application had no `android:icon`, so Android
+drew its default grey placeholder. A grey placeholder among thirty real icons is
+not something you find; it is something you scroll past.
+
+What shipped is an adaptive icon: the nib, pale, on ink. The same nib as
+`ToolIcons.pen`, scaled 2.75x out of that glyph's 24dp box into the 108dp
+adaptive canvas so that all of it sits inside the 66dp safe zone — outside that
+zone a launcher is allowed to crop, and a cropped point is a cropped pen.
+
+Two decisions worth writing down:
+
+- **Filled, where the glyph is outlined.** At 48 physical pixels an outline
+  closes up into a blob. The silhouette is all an eye has at that size, so the
+  nib is solid and the slit and breather hole are cut back out of it.
+- **Upright, where the glyph is raked.** The toolbar glyph is on the diagonal
+  because it sits in a row of other tools that are. There is no such row here; a
+  launcher icon is a mark on its own in a grid of squares, and a mark on its own
+  stands up.
+
+`monochrome` is declared too, so themed-icon launchers get the nib rather than
+falling back to the placeholder again.

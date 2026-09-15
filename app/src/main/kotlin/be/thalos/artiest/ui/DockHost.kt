@@ -38,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -52,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1000,7 +1002,11 @@ internal fun ToolChooser(
         mutableStateOf(tabs.firstOrNull() ?: ChooserTab.Group(ToolGroup.DRAW))
     }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss, modifier = Modifier.width(292.dp)) {
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.width(CHOOSER_WIDTH),
+    ) {
         ToolSearch(
             query = query,
             onQuery = { query = it },
@@ -1033,51 +1039,87 @@ internal fun ToolChooser(
         }
         if (occupant != null || !bar.isEmpty) HorizontalDivider()
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        ) {
-            for (entry in tabs) {
-                Chip(entry.label, lit = entry == tab) { tab = entry }
+        // The categories go down the side, not across the top. See
+        // [CHOOSER_RAIL] for the tablet report that moved them and for why a
+        // scrolling strip of chips was the wrong answer to it.
+        Row(Modifier.heightIn(max = CHOOSER_HEIGHT)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier
+                    .width(CHOOSER_RAIL)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                for (entry in tabs) {
+                    RailTab(entry.label, lit = entry == tab) { tab = entry }
+                }
             }
-        }
-
-        Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            val group = (tab as? ChooserTab.Group)?.group
-            if (group == null) BrushChoiceList(layout, bar, cell, brushes, onLayout)
-            // `BRUSH` is skipped in the group tabs, and it is the only entry
-            // that ever is: it needs an argument to mean anything, and a
-            // `BRUSH` with none is a button that loads nothing. Its arguments
-            // are what the Brushes tab above lists.
-            for (item in ToolItem.entries.filter {
-                group != null && it.group == group && it in filter && it != ToolItem.BRUSH
-            }) {
-                val fits = layout.fits(bar.id, item, cell, ignoring = cell)
-                val already = item == occupant?.item
-                val elsewhere = !already && item in layout
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            // Named rather than ticked: an item already on some
-                            // other toolbar is not unavailable, it is about to
-                            // move, and saying so is the difference between a
-                            // menu and a guess.
-                            if (elsewhere) "${item.label}  ·  on another toolbar" else item.label,
-                            fontSize = 13.sp,
-                        )
-                    },
-                    leadingIcon = {
-                        ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) }
-                    },
-                    enabled = fits && !already,
-                    onClick = { onLayout(layout.place(bar.id, item, cell)) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            VerticalDivider(Modifier.padding(vertical = 4.dp))
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                val group = (tab as? ChooserTab.Group)?.group
+                if (group == null) BrushChoiceList(layout, bar, cell, brushes, onLayout)
+                // `BRUSH` is skipped in the group tabs, and it is the only entry
+                // that ever is: it needs an argument to mean anything, and a
+                // `BRUSH` with none is a button that loads nothing. Its arguments
+                // are what the Brushes tab above lists.
+                for (item in ToolItem.entries.filter {
+                    group != null && it.group == group && it in filter && it != ToolItem.BRUSH
+                }) {
+                    val fits = layout.fits(bar.id, item, cell, ignoring = cell)
+                    val already = item == occupant?.item
+                    val elsewhere = !already && item in layout
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                // Named rather than ticked: an item already on some
+                                // other toolbar is not unavailable, it is about to
+                                // move, and saying so is the difference between a
+                                // menu and a guess.
+                                if (elsewhere) "${item.label}  ·  on another toolbar" else item.label,
+                                fontSize = 13.sp,
+                            )
+                        },
+                        leadingIcon = {
+                            ToolIcons.of(item)?.let { Icon(it, null, Modifier.size(17.dp)) }
+                        },
+                        enabled = fits && !already,
+                        onClick = { onLayout(layout.place(bar.id, item, cell)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * One category, as a row of the chooser's side rail.
+ *
+ * Full width and left-aligned rather than a chip, and that is the whole reason
+ * the rail works where the strip did not: a column of left-aligned rows is a
+ * list you read down in one movement, where a column of centred chips of eight
+ * different widths is a ransom note.
+ *
+ * Two lines are allowed. *Instruments* is one word that does not fit the rail's
+ * width at this size and would otherwise end in an ellipsis, and a category you
+ * cannot read the name of is a category you do not open.
+ */
+@Composable
+private fun RailTab(label: String, lit: Boolean, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Text(
+        label,
+        fontSize = 12.sp,
+        lineHeight = 14.sp,
+        maxLines = 2,
+        color = if (lit) scheme.onPrimary else scheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(if (lit) scheme.primary else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+    )
 }
 
 /**
@@ -1263,6 +1305,47 @@ private fun ToolSearch(
 
 /** A menu is a menu, not a list of everything. Refine the word instead. */
 private const val MAX_HITS = 8
+
+/**
+ * How wide the "what can go in this cell" menu is.
+ *
+ * Wider than the 292dp it was, because the categories moved into it — see
+ * [CHOOSER_RAIL]. It is still a quarter of the short side of the tablet this is
+ * built for, and `DropdownMenu` will shove it back on screen at any size, so
+ * the number is a judgement about reading and not about fitting.
+ */
+private val CHOOSER_WIDTH = 408.dp
+
+/**
+ * The side rail's width, and the tablet report that put it there.
+ *
+ * > *"the toolbox with the available tools: there are so many categories now,
+ * > that they dont fit the screen horizontically. Elegant solution needed. It
+ * > will only grow from here."*
+ *
+ * The categories were a `Row` of chips that scrolled sideways. Eight of them —
+ * Edit, Draw, Selection, Canvas, Learn, File, Instruments, Brushes — measure
+ * about five hundred dp, so half of them were off the end of a 292dp menu with
+ * nothing to say so. A sideways scroll inside a dropdown is also the one
+ * gesture nobody tries: the menu already scrolls the other way, and a finger
+ * that pushes sideways on a vertical list expects nothing to happen.
+ *
+ * **Widening the menu was refused and so was wrapping.** Widening buys one or
+ * two more chips and then loses again, which is the failure the report
+ * explicitly asked not to repeat. Wrapping to two rows works at eight and eats
+ * the menu at sixteen — the category strip would grow into the space the
+ * catalogue is listed in, which is backwards.
+ *
+ * A rail grows *down*, which is the direction there is room in, and it grows
+ * into a scroll that people already know is there because the list beside it
+ * scrolls the same way. Ten categories fit without scrolling at all. It also
+ * turns eight centred chips of eight different widths into one left-aligned
+ * column, which is a list you read in one movement rather than eight.
+ */
+private val CHOOSER_RAIL = 104.dp
+
+/** How tall the chooser's two columns get before either of them scrolls. */
+private val CHOOSER_HEIGHT = 330.dp
 
 // ---------------------------------------------------------------------------
 // Drag bookkeeping

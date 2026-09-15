@@ -35,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,6 +62,73 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import be.thalos.artiest.ref.RefPicture
+
+/**
+ * How the picture sits in the pane: the zoom, where it has been dragged to, how
+ * far it has been turned, and the two view switches.
+ *
+ * ## Why this is not five `remember`s inside the pane
+ *
+ * It was, and the tablet found the hole in one move: **go into arrange mode and
+ * come back, and the zoom is gone.** Arranging rebuilds the bars, so the panel
+ * leaves the composition and comes back a different instance — and everything
+ * it remembered went with it. The same thing happens, less visibly, when the
+ * pane is fixated to an edge, when it is moved from one bar to another, and
+ * when its popup is closed and reopened.
+ *
+ * None of those are things the user did to the picture. A hand that has spent
+ * ten seconds framing a nose at four times life size and then straightens a
+ * toolbar has not asked for the nose back at arm's length.
+ *
+ * So the state is hoisted to `LearnerState`, which lives for as long as the
+ * screen does, and the pane is handed it. There is exactly one pane, so there
+ * is exactly one of these.
+ *
+ * ## What still resets, and when
+ *
+ * Picking a **different picture** resets all of it — see [reset], called from
+ * `rememberLearner`. A zoom that belonged to the last photograph is a zoom
+ * nobody asked for, and that rule is the reason the state was keyed on the
+ * selection in the first place. Hoisting keeps the rule and drops the accident.
+ */
+@Stable
+class PaneView {
+
+    /** Multiplied onto the fit, so 1 is the whole picture in the pane. */
+    var scale by mutableFloatStateOf(1f)
+
+    /** Where it has been dragged, in pane pixels, from the middle. */
+    var offset by mutableStateOf(Offset.Zero)
+
+    /** Degrees, clockwise. */
+    var turn by mutableFloatStateOf(0f)
+
+    var flipped by mutableStateOf(false)
+
+    var grey by mutableStateOf(false)
+
+    /**
+     * Back to the whole picture, square, in the middle.
+     *
+     * What the Fit button does — and it deliberately leaves [flipped] and
+     * [grey] alone, because those two are not a *view of* the picture, they are
+     * how the artist has asked to see it. Someone drawing from a mirrored
+     * reference wants it mirrored after they have framed a different part of
+     * it.
+     */
+    fun fit() {
+        scale = 1f
+        offset = Offset.Zero
+        turn = 0f
+    }
+
+    /** [fit], and the two switches off as well. What a new picture gets. */
+    fun reset() {
+        fit()
+        flipped = false
+        grey = false
+    }
+}
 
 /**
  * The reference pane: a picture to draw from, beside the drawing.
@@ -102,19 +171,22 @@ fun ReferenceBody(
     onRemove: (String) -> Unit,
     /** A colour the pen took off the picture. */
     onInk: (Int) -> Unit,
+    /** How the picture sits in the pane. Held outside; see [PaneView]. */
+    pane: PaneView,
     modifier: Modifier = Modifier,
     pictureHeight: Dp = PICTURE_HEIGHT,
     trailing: @Composable () -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
 
-    // How the picture sits in the pane. Reset when the picture changes, because
-    // a zoom that belonged to the last photograph is a zoom nobody asked for.
-    var scale by remember(selected) { mutableStateOf(1f) }
-    var offset by remember(selected) { mutableStateOf(Offset.Zero) }
-    var turn by remember(selected) { mutableStateOf(0f) }
-    var flipped by remember(selected) { mutableStateOf(false) }
-    var grey by remember(selected) { mutableStateOf(false) }
+    // Named locals over the holder's fields, so the gesture arithmetic below
+    // reads as it did when these were five `remember`s -- `scale` and not
+    // `pane.scale` in an expression that already has six terms in it.
+    var scale by pane::scale
+    var offset by pane::offset
+    var turn by pane::turn
+    var flipped by pane::flipped
+    var grey by pane::grey
 
     // The colour under the nib while a pick is in the hand, and where. Zero is
     // "no pick", for `PickRing`'s reason: this is read every frame of a drag
@@ -243,11 +315,7 @@ fun ReferenceBody(
             PaneAction(ToolIcons.add, "Add a picture", true, onClick = onAdd)
             PaneAction(
                 ToolIcons.fit, "Fit", bitmap != null,
-                onClick = {
-                    scale = 1f
-                    offset = Offset.Zero
-                    turn = 0f
-                },
+                onClick = { pane.fit() },
             )
             PaneAction(
                 ToolIcons.flipAcross, "Flip", bitmap != null, lit = flipped,
@@ -319,6 +387,7 @@ fun ReferenceButton(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
+    pane: PaneView,
     onFixate: (Cell) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -345,6 +414,7 @@ fun ReferenceButton(
                 onAdd = onAdd,
                 onRemove = onRemove,
                 onInk = onInk,
+                pane = pane,
                 onDismiss = { open = false },
                 onFixate = {
                     open = false
@@ -371,6 +441,7 @@ fun ReferencePanelPopup(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
+    pane: PaneView,
     onDismiss: () -> Unit,
     onFixate: () -> Unit,
 ) {
@@ -395,6 +466,7 @@ fun ReferencePanelPopup(
                 onAdd = onAdd,
                 onRemove = onRemove,
                 onInk = onInk,
+                pane = pane,
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -432,6 +504,7 @@ fun ReferencePanelCard(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     onInk: (Int) -> Unit,
+    pane: PaneView,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val forPicture = (maxHeight - CARD_FURNITURE).coerceAtLeast(MIN_PICTURE)
@@ -444,6 +517,7 @@ fun ReferencePanelCard(
             onAdd = onAdd,
             onRemove = onRemove,
             onInk = onInk,
+            pane = pane,
             modifier = Modifier.fillMaxSize(),
             pictureHeight = forPicture,
         )

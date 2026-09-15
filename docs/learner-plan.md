@@ -1042,6 +1042,27 @@ is the axis every other drawing tool in the set is on.
 It is the rule the set already followed and this one glyph had not: draw the
 part that identifies the tool, not the whole tool.
 
+## The pane forgot where it was
+
+> *"when going to layout arrange mode and back, the zoom of the reference window
+> is reset"*
+
+The pane held its own zoom, pan, rotation and two view switches as five
+`remember`s inside `ReferenceBody`. Arranging rebuilds the bars, so the panel
+leaves the composition and comes back a different instance, and everything it
+remembered went with it. The same thing happened, less visibly, when the pane
+was fixated to an edge, moved from one bar to another, or closed and reopened as
+a popup.
+
+None of those are things the user did to the picture. A hand that has spent ten
+seconds framing a nose at four times life size and then straightens a toolbar
+has not asked for the nose back at arm's length.
+
+The five are now a `PaneView` held by `LearnerState`, which lives as long as the
+screen does. The one rule that was worth keeping is kept: picking a **different
+picture** resets all of it, because a zoom that belonged to the last photograph
+is a zoom nobody asked for. Hoisting keeps the rule and drops the accident.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was
