@@ -1179,7 +1179,10 @@ private fun CanvasScreen(
     LaunchedEffect(surface, ink, brushId, sizeMax, smoothing, opacity, flow, grain) {
         val v = surface ?: return@LaunchedEffect
         v.inkColorArgb = ink
-        v.ink.sizeMax = sizeMax
+        // `resizeTo` and not `sizeMax =`: the slider drags the whole range, so
+        // that a brush authored to run 60..96 runs 24..38 rather than 60..38.
+        // See `Brush.resizeTo` for the tablet report and the measurement.
+        v.ink.resizeTo(sizeMax)
         // An eraser brush's rubber width *is* its size, so the one slider sets
         // both. `Brush.modeScale` divides the two, and for a brush that erases
         // natively that ratio has to stay 1 — otherwise dragging the size

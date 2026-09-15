@@ -571,6 +571,60 @@ reading nothing: an asset listing came back empty, the loop ran zero times, and
 every assertion about the shipped set was true of the empty set. Worth writing
 down because the failure mode is a green test rather than a red one.
 
+
+## The size slider dragged half a brush
+
+From the tablet:
+
+> *"The ghost indicator of the eraser does not match the size of the brush. The
+> indicator is a 100px diameter circle, even when the actual size of the eraser
+> 'brush' is just 20."*
+
+A brush has a size **range**, not a size: `sizeFor` is `sizeMin + (sizeMax -
+sizeMin) * f`, and the hard eraser is authored `size 60 .. 96` so that a light
+touch rubs out less than a firm one. The slider only ever wrote the 96.
+
+Drag it to 38 and the brush is `size 60 .. 38` — **a range running backwards**.
+The eraser got *wider* the more lightly it was held, and never went under 38
+however hard it was pressed. Measured on the DTH-A116 at that setting, off the
+instruments panel:
+
+```
+tilt  0.0 deg max last stroke   dab 59.1..59.1 doc px
+back  Hard eraser   38.0 doc px
+```
+
+The ring said 38 and the eraser was taking 59.
+
+### The ring was not the thing that was wrong
+
+That is the part worth writing down, because the report points at the ring and
+the ring is innocent. `cursorDiameterDocPx` reads `sizeMax`, `sizeMax` said 38,
+and the ring is documented as a **reach** indicator — *if I press, what does
+this cover*. The brush was the one making a mark nobody had asked for.
+
+`Brush.resizeTo(max)` scales the whole range, so the ratio the brush was
+authored with survives being resized: an eraser whose light end was five eighths
+of its heavy end still has a light end five eighths of its heavy end at any
+size. `back 38.0` and `dab 38.4..38.4` now, at a full press.
+
+### Why it is a function and not the setter
+
+Every other writer of the size range in the tree sets the two together —
+`adoptBrush`, `copyScalarsOnto`, `BrushCodec.decode`, each `BrushPreset`,
+`StrokeMove` — and a `sizeMax` setter that moved `sizeMin` as a side effect
+would either double-scale those or make them depend on the order two
+assignments happen to be written in. One caller wants this, so one caller asks
+for it.
+
+### And a tuning bump
+
+`BrushPreset.TUNING` goes to 5. Every brush saved or tweaked before this carries
+a bottom that was authored against a different top, and there is nothing in
+those numbers that says what the ratio was meant to be — so they cannot be
+repaired by arithmetic and are dropped instead, which is what that number is
+for. The tablet's stored eraser read `size 60 .. 38` and is back to `60 .. 96`.
+
 ## Sources
 
 - [Krita 4 Preset Bundle overview](https://docs.krita.org/en/reference_manual/krita_4_preset_bundle.html)

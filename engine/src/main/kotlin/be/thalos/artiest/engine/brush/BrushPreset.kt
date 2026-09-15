@@ -475,8 +475,15 @@ enum class BrushPreset(
          *    makes it a bump rather than an edit: a saved brush from before
          *    carries the 48 and would go on doing so, and the one user this
          *    matters to is the one who asked.
+         * 5. The size slider drags the whole range rather than only its top.
+         *    Every brush saved or tweaked before this carries a bottom that was
+         *    authored against a different top — the hard eraser on the tablet
+         *    read `size 60 .. 38`, a range running backwards — and those
+         *    numbers cannot be repaired by arithmetic, because there is nothing
+         *    in them that says what the ratio was meant to be. So they are
+         *    dropped, which is exactly what this number is for.
          */
-        const val TUNING: Int = 4
+        const val TUNING: Int = 5
     }
 
     protected fun reset(brush: Brush) {

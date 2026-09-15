@@ -363,4 +363,53 @@ class BrushTest {
         assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(-5f, 3f))
         assertEquals(Brush.MIN_SPACING_DOC, brush.spacingFor(-5f))
     }
+
+    @Test
+    fun `dragging the size slider carries the bottom of the range with it`() {
+        // The hard eraser's shape: a light end a fifth of its heavy end.
+        val brush = Brush()
+        brush.sizeMin = 60f
+        brush.sizeMax = 300f
+
+        brush.resizeTo(30f)
+        assertEquals(30f, brush.sizeMax, 1e-4f)
+        assertEquals(6f, brush.sizeMin, 1e-4f, "the ratio is what is kept")
+    }
+
+    @Test
+    fun `a resized range never runs backwards`() {
+        // What shipped before `resizeTo`: the slider wrote the top and left the
+        // bottom where the preset put it, so the eraser got *wider* the more
+        // lightly it was held. Measured on the tablet at 38: dabs of 59.1.
+        val brush = Brush()
+        brush.sizeMin = 60f
+        brush.sizeMax = 96f
+        brush.resizeTo(38f)
+        assertTrue(brush.sizeMin <= brush.sizeMax, "min ${brush.sizeMin} max ${brush.sizeMax}")
+        assertEquals(38f, brush.sizeFor(1f, 1000f), 0.5f, "a full press covers what the ring shows")
+    }
+
+    @Test
+    fun `resizing is reversible and does not drift`() {
+        val brush = Brush()
+        brush.sizeMin = 24f
+        brush.sizeMax = 84f
+        brush.resizeTo(12f)
+        brush.resizeTo(84f)
+        assertEquals(84f, brush.sizeMax, 1e-3f)
+        assertEquals(24f, brush.sizeMin, 1e-3f)
+    }
+
+    @Test
+    fun `resizing to nothing leaves the brush alone rather than collapsing it`() {
+        // A slider dragged to its floor must not turn the ratio into a
+        // division by zero the next time it is dragged back up.
+        val brush = Brush()
+        brush.sizeMin = 6f
+        brush.sizeMax = 30f
+        brush.resizeTo(0f)
+        assertEquals(6f, brush.sizeMin, 1e-4f)
+        brush.resizeTo(30f)
+        assertEquals(6f, brush.sizeMin, 1e-4f)
+    }
 }

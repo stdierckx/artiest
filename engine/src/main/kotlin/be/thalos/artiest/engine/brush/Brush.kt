@@ -62,6 +62,43 @@ class Brush {
         set(v) { size.min = v }
 
     /**
+     * Move the top of the size range to [max] and **carry the bottom with it**,
+     * keeping the ratio the brush was authored with.
+     *
+     * What the size slider drags, and it exists because dragging [sizeMax]
+     * alone is wrong in a way the tablet caught:
+     *
+     * > *"The ghost indicator of the eraser does not match the size of the
+     * > brush. The indicator is a 100px diameter circle, even when the actual
+     * > size of the eraser 'brush' is just 20."*
+     *
+     * The hard eraser is authored `size 60 .. 96`, and the slider only ever
+     * wrote the 96. Drag it to 38 and the brush is `size 60 .. 38` — a range
+     * running *backwards*, so the eraser got **wider** the more lightly it was
+     * held and never went under 38 however hard it was pressed. Measured on the
+     * device at that setting: the ring said 38 doc px and the dabs came out at
+     * 59.1.
+     *
+     * The ring was not the thing that was wrong. It reads [sizeMax] and
+     * [sizeMax] said 38; the brush was the one making a mark nobody had asked
+     * for. Scaling the whole range fixes both at once and keeps the shape of
+     * the brush: an eraser whose light end was a fifth of its heavy end still
+     * has a light end a fifth of its heavy end at any size.
+     *
+     * A named function and not the [sizeMax] setter, deliberately. Every other
+     * writer in the tree sets the two together — `adoptBrush`, `BrushCodec`,
+     * `BrushPreset`, `StrokeMove` — and a setter that moved [sizeMin] as a side
+     * effect would either double-scale those or depend on the order two
+     * assignments happen to be written in. This is the one caller that wants
+     * it, so this is the one caller that says so.
+     */
+    fun resizeTo(max: Float) {
+        val old = size.max
+        if (old > 0f && max > 0f) size.min = size.min * (max / old)
+        size.max = max
+    }
+
+    /**
      * Diameter at full pressure. 24 doc px, which is `:spike`'s
      * `1.5f + pressure * 22f` rounded to a round number at the top.
      */
