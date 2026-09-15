@@ -1,3 +1,6 @@
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -27,33 +30,82 @@ val matcHost: String = run {
     }
 }
 
-val materialsOut: Provider<Directory> = layout.buildDirectory.dir("generated/materials")
-
 /**
  * Compiles every `.mat` in `src/main/materials` into `assets/materials`.
  *
  * `-p mobile` and `-a opengl`, because that is the only backend this app ever
  * asks Filament for and the other shader families are dead weight in the APK.
+ *
+ * A real task class and not a `doLast` on an anonymous one, because only a
+ * typed task with a `DirectoryProperty` output can be handed to AGP's
+ * `addGeneratedSourceDirectory` — see the wiring below for why that matters.
  */
-val compileMaterials = tasks.register("compileMaterials") {
+abstract class CompileMaterials : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sources: ConfigurableFileCollection
+
+    @get:InputFiles
+    abstract val tool: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val into: DirectoryProperty
+
+    @get:Inject
+    abstract val exec: ExecOperations
+
+    @TaskAction
+    fun compile() {
+        val binary = tool.singleFile
+        binary.setExecutable(true)
+        val out = into.get().dir("materials").asFile
+        out.mkdirs()
+        for (source in sources.files) {
+            val made = File(out, source.name.removeSuffix(".mat") + ".filamat")
+            exec.exec {
+                commandLine(
+                    binary.absolutePath,
+                    "-p", "mobile",
+                    "-a", "opengl",
+                    "-o", made.absolutePath,
+                    source.absolutePath,
+                )
+            }.assertNormalExitValue()
+        }
+    }
+}
+
+val compileMaterials = tasks.register<CompileMaterials>("compileMaterials") {
     group = "build"
     description = "Compiles Filament .mat sources into .filamat."
-    val sources = fileTree("src/main/materials") { include("**/*.mat") }
-    val tool = matc
-    inputs.files(sources)
-    inputs.files(tool)
-    outputs.dir(materialsOut)
-    doLast {
-        val exe = tool.singleFile
-        exe.setExecutable(true)
-        val into = materialsOut.get().dir("materials").asFile
-        into.mkdirs()
-        for (source in sources) {
-            val out = File(into, source.name.removeSuffix(".mat") + ".filamat")
-            providers.exec {
-                commandLine(exe.absolutePath, "-p", "mobile", "-a", "opengl", "-o", out.absolutePath, source.absolutePath)
-            }.result.get().assertNormalExitValue()
-        }
+    sources.from(fileTree("src/main/materials") { include("**/*.mat") })
+    tool.from(matc)
+    // `into` is deliberately not set here: the wiring below is what points it
+    // at the directory AGP will merge, and a value set here would be quietly
+    // replaced by that one.
+}
+
+/**
+ * Put the compiled materials in the APK, and put the task in the graph.
+ *
+ * `assets.srcDir(theTask)` looks like it does this and does not: it adds the
+ * directory, so a build on a machine where the task has run once produces a
+ * working APK and a build on a clean checkout produces one whose 3D reference
+ * has no shaders in it and silently loses the stone and the contour lines. It
+ * is worse than that on an edit: a changed `.mat` and `assembleRelease` gives
+ * an APK with yesterday's shader in it, which is a debugging session spent
+ * looking at the wrong file.
+ *
+ * `addGeneratedSourceDirectory` is the AGP 8 way and is the one that both
+ * registers the directory and makes every variant's asset merge depend on the
+ * task that fills it.
+ */
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            compileMaterials,
+            CompileMaterials::into,
+        )
     }
 }
 
@@ -111,14 +163,6 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    // The task and not the directory. AGP resolves a source directory through
-    // `project.files(...)`, which carries a task's output dependency with it —
-    // and the plain path does not, which shows up as lint refusing to run
-    // against a directory nothing has told it is generated yet.
-    sourceSets.getByName("main") {
-        assets.srcDir(compileMaterials)
     }
 
     testOptions {
