@@ -80,6 +80,7 @@ import be.thalos.artiest.canvas.MarqueeShape
 import be.thalos.artiest.doc.FloatOp
 import be.thalos.artiest.doc.SelectMode
 import be.thalos.artiest.doc.SelectOp
+import be.thalos.artiest.ui.CanvasState
 import be.thalos.artiest.ui.Cell
 import be.thalos.artiest.ui.BrushChoices
 import be.thalos.artiest.ui.BrushCursor
@@ -465,12 +466,15 @@ private fun CanvasScreen(
      * the project.
      */
     val polling = remember { mutableStateOf(true) }
-    var export by remember { mutableStateOf<ExportResult?>(null) }
-    var exporting by remember { mutableStateOf(false) }
-    var importing by remember { mutableStateOf(false) }
+    // Ten more of the screen's `remember` sites in one object; see
+    // [ProjectState] and [CanvasState] for why that is a thing worth doing.
+    val files = remember { be.thalos.artiest.ui.ProjectState() }
+    var export by files::export
+    var exporting by files::exporting
+    var importing by files::importing
 
     /** The last import's outcome, as one line, or empty when there has been none. */
-    var importNote by remember { mutableStateOf("") }
+    var importNote by files::importNote
     var stats by remember { mutableStateOf(false) }
 
     // The brush settings live here as Compose state and are pushed into the
@@ -600,7 +604,20 @@ private fun CanvasScreen(
      * recomposes, so the cost is one draw-phase invalidation per sample. See
      * [BrushCursor].
      */
-    val cursorAt = remember { mutableStateOf(Offset.Unspecified) }
+    /**
+     * Fifteen pieces of screen state in one remembered object. See
+     * [CanvasState], and `docs/ui-plan.md` for the measurement that made it
+     * necessary: ART will not compile a method over 10 000 code units, and this
+     * one is made almost entirely of `remember` sites.
+     *
+     * The local delegates below are what keep that invisible. `var selecting by
+     * canvas::selecting` is a plain property delegate with no Composer group,
+     * so every name in this function and every call site downstream is
+     * unchanged.
+     */
+    val canvas = remember(document) { CanvasState(document.selection.snapshot) }
+
+    val cursorAt = canvas.cursorAt
 
     // The layer stack, as the UI sees it. `LayerStack.snapshot` is a volatile
     // field the render thread republishes -- a new immutable list per change --
@@ -622,30 +639,13 @@ private fun CanvasScreen(
      * True by default, because on an ink sheet picking strokes is what the tool
      * is for; the toggle is there so the other answer is reachable and visible.
      */
-    var pickStrokes by remember { mutableStateOf(true) }
-
-    /**
-     * How much of a stroke the eraser takes on an ink sheet. Ik8.
-     *
-     * **Whole by default**, because it is the mode a person guesses at: the
-     * eraser takes what it touches. To-the-junction is the one an inker learns
-     * and then reaches for constantly, and it is one tap away.
-     */
-    var eraseMode by remember { mutableStateOf(be.thalos.artiest.doc.EraseMode.WHOLE) }
-
-    /** The highlight, republished by the render thread. See `StrokePickInfo`. */
-    var pickInfo by remember { mutableStateOf(be.thalos.artiest.doc.StrokePickInfo.NONE) }
-
-    /**
-     * Bumped whenever a guide changes. Ik13.
-     *
-     * `GuideSet` is a plain mutable object, deliberately: it is read on the
-     * render thread at pen-down and a Compose snapshot would not survive that
-     * crossing. So the panel reads a `GuideInfo` rebuilt on this counter, and
-     * the overlay reads the set itself inside its draw lambda -- which is the
-     * `outlineTick` arrangement one line down, for the same reason.
-     */
-    val guideTick = remember { mutableIntStateOf(0) }
+    // All of these live on `canvas` now; the delegates keep their names. See
+    // [CanvasState] for what each one is and why the kinds are not
+    // interchangeable.
+    var pickStrokes by canvas::pickStrokes
+    var eraseMode by canvas::eraseMode
+    var pickInfo by canvas::pickInfo
+    val guideTick = canvas.guideTick
 
     /**
      * What the guides panel is looking at, rebuilt when they change.
@@ -668,18 +668,10 @@ private fun CanvasScreen(
     }
 
 
-    /** Ik9's live transform, or null when nothing is being dragged. */
-    var pickMatrix by remember { mutableStateOf<android.graphics.Matrix?>(null) }
+    var pickMatrix by canvas::pickMatrix
+    val pickTick = canvas.pickTick
 
-    /** Bumped so the overlay redraws the preview without recomposing. */
-    val pickTick = remember { mutableIntStateOf(0) }
-
-    /**
-     * Restarts the transform box's own matrix. Moved whenever the box has to
-     * forget what it was holding: a new selection, or a drag that has been
-     * absorbed into the strokes.
-     */
-    var pickToken by remember { mutableIntStateOf(0) }
+    var pickToken by canvas::pickToken
 
     /**
      * Whether the sheet the pen is on keeps its strokes.
@@ -725,20 +717,14 @@ private fun CanvasScreen(
     }
     var layersOpen by remember { mutableStateOf(false) }
 
-    // The stencil, and the marquee being dragged over it.
-    //
-    // Three pieces of state and not one, because they change at three
-    // different rates and only one of them recomposes anything. `selecting`
-    // and `marqueeShape` are pressed by hand; `selectionShape` changes when the
-    // render thread republishes; `outlineTick` moves at the rate of a pan or a
-    // pen sample and is read *inside a draw lambda*, so it invalidates the
-    // draw phase and nothing else. That is the same arrangement `cursorAt`
-    // uses, and it is what makes an animated outline affordable.
-    var selecting by remember { mutableStateOf(false) }
-    var marqueeShape by remember { mutableStateOf(MarqueeShape.RECTANGLE) }
-    var marqueeMode by remember { mutableStateOf(SelectMode.NEW) }
-    var selectionShape by remember { mutableStateOf(document.selection.snapshot) }
-    val outlineTick = remember { mutableIntStateOf(0) }
+    // The stencil, and the marquee being dragged over it. Four kinds of state
+    // that are not interchangeable; the argument is in [CanvasState], which now
+    // holds them.
+    var selecting by canvas::selecting
+    var marqueeShape by canvas::marqueeShape
+    var marqueeMode by canvas::marqueeMode
+    var selectionShape by canvas::selectionShape
+    val outlineTick = canvas.outlineTick
 
     // Lr1's three pieces of picker state -- whether the pen is picking,
     // whether it stays picking, which sheet it reads -- were here and are now
@@ -749,29 +735,12 @@ private fun CanvasScreen(
     // `v.picking = false` on every arrival of the surface, racing the real one
     // by composition order.
 
-    // The ring under the pen. Its own counter and not `outlineTick`, which is
-    // read by three other draw lambdas: a pick moves at pointer rate and there
-    // is no reason for it to re-cut the guides against the viewport.
-    val pickRingTick = remember { mutableIntStateOf(0) }
-
-    // The floating pixels, as the chrome sees them: the rectangle they were
-    // lifted from, and a token that changes when a different float is lifted so
-    // the transform box starts over rather than inheriting the last one's
-    // matrix.
-    var floatingBox by remember { mutableStateOf<android.graphics.Rect?>(null) }
-    var floatToken by remember { mutableIntStateOf(0) }
-
-    // Document-to-view, rebuilt only when the canvas actually moves. A `Matrix`
-    // is mutable native state and this one is written on the UI thread and read
-    // on the UI thread, in a draw lambda, so one instance is enough -- but it
-    // must not be the renderer's, which the render thread concatenates.
-    val outlineMatrix = remember { android.graphics.Matrix() }
-
-    // Ik13's two scratch paths and the rectangle they are cut to. One each for
-    // the life of the screen: these are refilled on every pan and zoom frame,
-    // and a `Path` per frame is a native allocation per frame.
-    val guidePath = remember { android.graphics.Path() }
-    val guideDim = remember { android.graphics.Path() }
+    val pickRingTick = canvas.pickRingTick
+    var floatingBox by canvas::floatingBox
+    var floatToken by canvas::floatToken
+    val outlineMatrix = canvas.outlineMatrix
+    val guidePath = canvas.guidePath
+    val guideDim = canvas.guideDim
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -946,11 +915,8 @@ private fun CanvasScreen(
     val saver = remember { ProjectSaver(projects.files) }
     var project by remember { mutableStateOf(projects.current(document.widthPx, document.heightPx)) }
 
-    /** The last thing the saver or the loader said that the user has to see. */
-    var projectNote by remember { mutableStateOf("") }
-
-    /** The last save, for the instruments. See `readout`. */
-    var lastSave by remember { mutableStateOf<SaveResult.Saved?>(null) }
+    var projectNote by files::note
+    var lastSave by files::lastSave
 
     /**
      * Write the drawing, now, and take what the saver says the project is.
@@ -976,9 +942,11 @@ private fun CanvasScreen(
         }
     }
 
-    /** Which drawings there are, and whether the gallery is over the paper. */
-    var projectEntries by remember { mutableStateOf(projects.list()) }
-    var gallery by remember { mutableStateOf(false) }
+    var projectEntries by files::entries
+    var gallery by files::gallery
+    // The first listing, once. It used to be `remember`'s initial value; the
+    // holder cannot read the store, so it is asked for here instead.
+    remember(projects) { projectEntries = projects.list(); projects }
 
     /**
      * Whether the drawing on screen is the whole of what is in the file.
@@ -990,7 +958,7 @@ private fun CanvasScreen(
      * encoded that emptiness over a drawing. The file was blank and there was
      * nothing to undo.
      */
-    var attached by remember { mutableStateOf(false) }
+    var attached by files::attached
 
     /**
      * Put [p] on the paper, and ask for the frame that shows it.
@@ -1073,8 +1041,7 @@ private fun CanvasScreen(
         }
     }
 
-    /** What the last export or import said. Shown in the gallery, where it happened. */
-    var oraNote by remember { mutableStateOf("") }
+    var oraNote by files::oraNote
 
     /**
      * Write a drawing out as an `.ora`.

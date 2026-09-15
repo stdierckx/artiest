@@ -449,3 +449,49 @@ Two decisions worth writing down:
 
 `monochrome` is declared too, so themed-icon launchers get the nib rather than
 falling back to the placeholder again.
+
+## The screen ART would not compile, finished
+
+`docs/learner-plan.md` left this owed: **`CanvasScreen` was 11 539 dex code
+units against ART's `kHugeMethodThreshold` of 10 000**, so it was never
+JIT-compiled and ran interpreted for the life of the process. It had been over
+the line before the learner work and the learner work had not put it there, but
+it was still the one measurable thing behind *"the app became unresponsive"*.
+
+The census said what the method was made of, and it was not drawing:
+
+| what | count |
+| --- | --- |
+| `remember` sites (`rememberedValue` / `updateRememberedValue`) | 130 |
+| `startReplaceGroup` / `endReplaceGroup` pairs | 130 |
+| `changedInstance` | 81 |
+| everything else, together | under a hundred |
+
+At roughly ninety code units a site, the way down is not to draw less — it is to
+have fewer *remembered things*. Two holders, `CanvasState` (fifteen sites: the
+selection, the stroke picker, the guides, the scratch `Path`s and `Matrix`) and
+`ProjectState` (ten: the save, export, import and gallery flags), each
+remembered once.
+
+**The screen still spells every one of them the way it did.** Inside
+`CanvasScreen` they are local property delegates — `var selecting by
+canvas::selecting` — which compile to a plain delegate with no Composer group at
+all. So the move cost about ten code units per name instead of ninety and
+changed no call site, in this file or any other. That is the whole technique,
+and it is the reason this was a contained change rather than a rewrite.
+
+| | code units |
+| --- | --- |
+| before | 11 655 |
+| after `CanvasState` | 10 339 |
+| after `ProjectState` | **8 094** |
+
+Nothing in the app is over the threshold now. `SelectionBody` at 7 685 and
+`ToolSlot` at 6 694 are the next two, and both are under it.
+
+Two things fell out on the way. Three pieces of picker state and a
+`LaunchedEffect` had been left behind in `CanvasScreen` when `LearnerState` took
+them, and the orphan was writing `v.picking = false` over the live one by
+composition order. And the slider effect was not keyed on which brush was in the
+hand, so picking a brush whose five slider values all matched the outgoing one
+left `brush.preset` naming the wrong brush until the next drag.
