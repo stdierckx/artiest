@@ -43,10 +43,9 @@ material {
     shadingModel : lit,
     blending : opaque,
     vertexDomain : object,
-    // Where the point is on the form. It has to be a varying for the same
-    // reason it is one in contour.mat: the fragment shader's own world position
-    // is camera-relative, and the stone would swim across the model every time
-    // the model was turned.
+    // Where the point is on the form. A varying, and in the one space that is
+    // nailed to the model -- see the vertex block, where getting this wrong
+    // made the stone slide about under the artist's finger.
     variables : [ formPosition ],
     parameters : [
         // The two ends of the stone's range. Everything drawn is between them.
@@ -61,7 +60,21 @@ material {
 
 vertex {
     void materialVertex(inout MaterialVertexInputs material) {
-        material.formPosition = getWorldFromModelMatrix() * getPosition();
+        // ## The `getUserWorldFromWorldMatrix` is the whole point of this line
+        //
+        // Filament renders with the camera at the origin: everything is moved
+        // so that the numbers stay small and precise however far from the world
+        // origin the scene is. That makes the shader's "world" space one that
+        // *moves with the camera*, and a pattern computed in it is nailed to
+        // the room rather than to the model -- so turning the model dragged the
+        // stone across its surface, which is exactly what a real stone never
+        // does and what the eye notices first.
+        //
+        // `getUserWorldFromWorldMatrix()` undoes that shift and gives the world
+        // the scene was actually built in. The model does not move in it, so
+        // neither does its grain.
+        material.formPosition =
+            getUserWorldFromWorldMatrix() * (getWorldFromModelMatrix() * getPosition());
     }
 }
 
@@ -132,7 +145,7 @@ fragment {
         // Raised to a power, so the pale stone is most of the surface and the
         // dark seams are thin. A plain sine would be half dark, which is a
         // zebra and not a marble.
-        seam = pow(0.5 + 0.5 * seam, 7.0);
+        seam = pow(0.5 + 0.5 * seam, 9.0);
 
         // The speckle, and the fade that stops it crawling when it is smaller
         // than a pixel.
@@ -140,7 +153,7 @@ fragment {
         float step = max(fwidth(sand.x), fwidth(sand.y));
         float grain = (lump(sand) - 0.5) * (1.0 - smoothstep(0.30, 0.85, step));
 
-        float tone = clamp(0.30 + 0.30 * drift + 0.55 * seam + 0.42 * grain, 0.0, 1.0);
+        float tone = clamp(0.30 + 0.18 * drift + 0.20 * seam + 0.46 * grain, 0.0, 1.0);
         material.baseColor = vec4(mix(materialParams.pale, materialParams.dark, tone), 1.0);
         // Rougher in the pits, so the key light's sheen is broken the way it is
         // on stone and not smooth the way it is on a plastic toy.

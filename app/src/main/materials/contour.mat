@@ -36,7 +36,14 @@ material {
 
 vertex {
     void materialVertex(inout MaterialVertexInputs material) {
-        material.formPosition = getWorldFromModelMatrix() * getPosition();
+        // The user world and not the shader's own: Filament renders with the
+        // camera at the origin, so its "world" space travels with the camera
+        // and a grid computed in it slides across the model as the model is
+        // turned. A sliding grid of parallel lines still looks like a grid,
+        // which is why this went unseen here and was obvious the moment the
+        // same space was used for something with a grain in it.
+        material.formPosition =
+            getUserWorldFromWorldMatrix() * (getWorldFromModelMatrix() * getPosition());
     }
 }
 

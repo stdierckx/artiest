@@ -177,8 +177,8 @@ class ModelStage(context: Context) {
             }
 
             loadOurMaterials(engine)
-            plainLook = ColorGrading.Builder().build(engine)
-            greyLook = ColorGrading.Builder().saturation(0f).build(engine)
+            plainLook = ColorGrading.Builder().contrast(CONTRAST).build(engine)
+            greyLook = ColorGrading.Builder().contrast(CONTRAST).saturation(0f).build(engine)
             view?.colorGrading = plainLook
 
             buildLights(engine)
@@ -760,9 +760,9 @@ class ModelStage(context: Context) {
          * the middle at 133. The same mesh, the same lights, three times less
          * of them, and the form is back.
          */
-        const val KEY_LUX = 58_000f
-        const val FILL_LUX = 9_000f
-        const val RIM_LUX = 7_000f
+        const val KEY_LUX = 60_000f
+        const val FILL_LUX = 4_800f
+        const val RIM_LUX = 4_000f
 
         /**
          * The wall, not a fourth lamp.
@@ -772,9 +772,9 @@ class ModelStage(context: Context) {
          * number and behaves as one of the bright ones. Three thousand here is
          * a white screen.
          */
-        const val AMBIENT_R = 0.22f
-        const val AMBIENT_G = 0.23f
-        const val AMBIENT_B = 0.26f
+        const val AMBIENT_R = 0.11f
+        const val AMBIENT_G = 0.12f
+        const val AMBIENT_B = 0.15f
 
         /** Unbleached plasticine. Warm enough not to read as a screenshot. */
         const val CLAY_R = 0.58f
@@ -788,12 +788,12 @@ class ModelStage(context: Context) {
          * the value scale on purpose so there is room above it for a lit plane
          * and room below for a shadowed one.
          */
-        const val PALE_R = 0.46f
-        const val PALE_G = 0.46f
-        const val PALE_B = 0.45f
-        const val DARK_R = 0.22f
-        const val DARK_G = 0.22f
-        const val DARK_B = 0.24f
+        const val PALE_R = 0.58f
+        const val PALE_G = 0.58f
+        const val PALE_B = 0.57f
+        const val DARK_R = 0.16f
+        const val DARK_G = 0.16f
+        const val DARK_B = 0.18f
 
         /** Matte, but not as matte as clay: stone has a faint sheen. */
         const val STONE_ROUGHNESS = 0.80f
@@ -806,6 +806,18 @@ class ModelStage(context: Context) {
         const val FOV_DEGREES = 35f
         const val NEAR = 0.05f
         const val FAR = 1000f
+
+        /**
+         * The S-curve on the way out, about mid grey.
+         *
+         * The tone mapper's job is to fit a lit scene into a screen and it does
+         * that by compressing both ends, which is the right trade for a
+         * photograph and the wrong one for something being copied by eye: the
+         * lit planes come back within a few values of each other. One and a
+         * quarter pulls them apart again around the middle, where the drawing
+         * is.
+         */
+        const val CONTRAST = 1.35f
 
         /** See [readBudget]. Two thirds of a second at sixty, and never reached. */
         const val READ_FRAMES = 40

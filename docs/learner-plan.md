@@ -1405,6 +1405,46 @@ Filament's own environment intensity and **not** lux, so it sits three orders of
 magnitude below the lights it is written next to. Three thousand there is a
 white screen.
 
+
+### The grain was nailed to the room, not to the model
+
+> *"When I spin the model, the grain moves. Isn't it possible to get a real
+> material on it? That is fixed, mapped to the model? Also the contrast could be
+> better."*
+
+It was a real material and it was fixed — to the wrong thing. Filament renders
+with the camera at the origin: the whole scene is shifted so the numbers stay
+small and precise however far from the world origin it sits. That makes the
+shader's "world" space one that travels with the camera, so a pattern computed
+in it belongs to the room rather than to the model, and orbiting the camera
+dragged the stone across the surface. `getUserWorldFromWorldMatrix()` undoes the
+shift and gives back the world the scene was built in, where the model does not
+move and neither does its grain.
+
+The contour lines had the same fault from the day they were written and nobody
+saw it, for a reason worth keeping: a grid of parallel lines slid sideways still
+looks like a grid of parallel lines. They are in the fixed space now too, so the
+lines stay on the features they are drawn over — which is the whole of what they
+are for, since a hatch that follows a line that is sliding is a hatch that
+follows nothing.
+
+### Contrast, and where it should come from
+
+The first answer to *"the contrast could be better"* was the wrong one: more
+contrast in the stone itself, which made the veins into blotches that fought the
+form instead of sitting on it. The value range wanted is between the light plane
+and the shadow plane, not between one patch of marble and the next — so the
+stone went back to being nearly even (a fine grain, a whisper of mottling, thin
+seams) and the range came from two other places.
+
+The lights carry most of it: a strong key against a fill at a thirteenth and a
+rim at a fifteenth, which is a cast lit for drawing rather than a product lit
+for a catalogue. The rest is one number in the colour grading, `contrast`, at
+1.35. A tone mapper fits a lit scene into a screen by compressing both ends,
+which is right for a photograph and wrong for something that is going to be
+copied by eye: it returns the lit planes within a few values of each other. The
+S-curve pulls them apart again around mid grey, which is where the drawing is.
+
 ## Sources
 
 Read for this document on 2026-09-14. No source code of any program below was
